@@ -11,8 +11,8 @@ and `npx wrangler deploy` as the deploy command (a full deploy, so the container
 
 | Resource | Binding | How to create |
 | --- | --- | --- |
-| D1 database `faceless` | `DB` | `npx wrangler d1 create faceless`, then put the printed `database_id` into `wrangler.jsonc` (it ships with a placeholder) |
-| R2 bucket `faceless-media` (private) | `MEDIA` | `npx wrangler r2 bucket create faceless-media` |
+| D1 database `faceless` | `DB` | Created (Western Europe); its `database_id` is in `wrangler.jsonc` and `0001_initial.sql` is applied. On another account: `npx wrangler d1 create faceless` and put the printed ID there |
+| R2 bucket `faceless-media` (private) | `MEDIA` | Created (location: Eastern North America). On another account: `npx wrangler r2 bucket create faceless-media --location weur` |
 | Workflows `faceless-content` (`ContentGeneration`) and `faceless-publish` (`Publication`) | `CONTENT`, `PUBLISH` | Created by `wrangler deploy` |
 | Container `MediaRenderer` (`renderer/Dockerfile`, up to 3 instances of `standard-2`) | `MEDIA_RENDERER` (Durable Object, migration `renderer-v1`) | Enable Containers on the account; `wrangler deploy` builds and pushes the image. The first rollout takes a few minutes |
 | Workers AI | `AI` | Nothing to create; scripts and picture descriptions run on `TEXT_MODEL` (default `openai/gpt-6-luna`) |
@@ -147,7 +147,7 @@ everything you upload, including permission for every person shown.
 
 ## 6. Go-live checklist
 
-1. Create the resources (section 1), set `database_id`, run `npm run db:remote`.
+1. Create the resources (section 1; the D1 database and the R2 bucket already exist), then `npm run db:remote` for any migration newer than `0001_initial.sql`.
 2. Set the variables and secrets (section 2): at least `SITE_URL`, `COMPANY_NAME`, `COMPANY_ADDRESS`, `CONTACT_EMAIL`,
    `ADMIN_EMAILS`, `TRIAL_HASH_SECRET`, `TOKEN_ENCRYPTION_KEY` and Turnstile; add the custom domain and the allowed
    sender address in `wrangler.jsonc`.

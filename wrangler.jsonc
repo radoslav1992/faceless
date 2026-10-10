@@ -23,8 +23,8 @@
     {
       "binding": "DB",
       "database_name": "faceless",
-      // Replace with the ID `wrangler d1 create faceless` prints (docs/DEPLOYMENT.md).
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      // The production database (Western Europe), created 2026-10-10 with 0001_initial.sql applied.
+      "database_id": "09be5383-f865-4b98-8739-3b368568cbcd",
       "migrations_dir": "migrations",
     },
   ],
