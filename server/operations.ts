@@ -9,7 +9,7 @@ import { PRODUCT } from "../shared/brand";
 
 // What the operator needs to know without reading logs: the hourly "Maintenance attention" summary (also e-mailed to
 // ADMIN_EMAILS), work set aside for a manual check, and the operations view for administrators. Ported from rech-bg;
-// the signals are Ghostreel's: runs, publishing, connected accounts, post stats, transcription, cleanup and Stripe.
+// the signals are Hookstreak Shorts's: runs, publishing, connected accounts, post stats, transcription, cleanup and Stripe.
 
 export type ReviewArea = "runs" | "cleanup";
 /**

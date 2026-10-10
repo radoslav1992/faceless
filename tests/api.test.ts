@@ -45,7 +45,7 @@ describe("API keys", () => {
   it("are shown once, stored only as a hash, listed by their prefix and deleted by their owner", async () => {
     const { env, sqlite, user } = setup();
     const secret = await newKey(env, user.cookie);
-    expect(secret).toMatch(/^gr_[0-9a-f]{48}$/);
+    expect(secret).toMatch(/^hss_[0-9a-f]{48}$/);
     const stored = sqlite.prepare("SELECT * FROM api_keys WHERE user_id=?").get(user.id) as any;
     expect(JSON.stringify(stored)).not.toContain(secret);
     expect(stored.prefix).toBe(secret.slice(0, 7));
@@ -63,7 +63,7 @@ describe("API keys", () => {
     const { env, sqlite, user } = setup();
     expect((await call(worker, env, "POST", "/api/keys", { name: " " }, user.cookie)).status).toBe(400);
     for (let i = 0; i < 10; i++)
-      sqlite.prepare("INSERT INTO api_keys(id,user_id,name,key_hash,prefix,created_at) VALUES (?,?,?,?,'gr_0000',1)").run(crypto.randomUUID(), user.id, `Key ${i}`, `hash-${i}`);
+      sqlite.prepare("INSERT INTO api_keys(id,user_id,name,key_hash,prefix,created_at) VALUES (?,?,?,?,'hss_000',1)").run(crypto.randomUUID(), user.id, `Key ${i}`, `hash-${i}`);
     const full = await call(worker, env, "POST", "/api/keys", { name: "One more" }, user.cookie);
     expect(full.status).toBe(400);
     expect(full.data.error).toMatch(/10 API keys/);
@@ -77,7 +77,7 @@ describe("the REST API", () => {
   it("refuses missing and wrong keys, and needs no browser Origin with a right one", async () => {
     const { env, user } = setup();
     expect((await bearer(env, "GET", "/api/v1/me", null)).status).toBe(401);
-    expect((await bearer(env, "GET", "/api/v1/me", `gr_${"0".repeat(48)}`)).status).toBe(401);
+    expect((await bearer(env, "GET", "/api/v1/me", `hss_${"0".repeat(48)}`)).status).toBe(401);
     expect((await bearer(env, "GET", "/api/v1/me", "sk_live_123")).status).toBe(401);
     const key = await newKey(env, user.cookie);
     const me = await bearer(env, "GET", "/api/v1/me", key);
@@ -150,7 +150,7 @@ describe("the MCP server", () => {
     const key = await newKey(env, user.cookie);
     const init = await bearer(env, "POST", "/mcp", key, rpc("initialize", { protocolVersion: MCP_PROTOCOL, capabilities: {}, clientInfo: { name: "test", version: "1" } }));
     expect(init.status).toBe(200);
-    expect(init.data.result).toMatchObject({ protocolVersion: MCP_PROTOCOL, capabilities: { tools: {} }, serverInfo: { name: "ghostreel" } });
+    expect(init.data.result).toMatchObject({ protocolVersion: MCP_PROTOCOL, capabilities: { tools: {} }, serverInfo: { name: "hookstreak-shorts" } });
     expect(init.headers.get("mcp-protocol-version")).toBe(MCP_PROTOCOL);
     // A notification gets no answer.
     expect((await bearer(env, "POST", "/mcp", key, rpc("notifications/initialized", undefined, null))).status).toBe(202);

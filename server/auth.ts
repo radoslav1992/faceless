@@ -9,7 +9,7 @@ import { allowance, touchTrial } from "./billing";
 import { PRODUCT } from "../shared/brand";
 
 export const auth = new Hono<App>();
-export const SESSION_COOKIE = "gr_session";
+export const SESSION_COOKIE = "hss_session";
 /** The terms' "last updated" date: change it with the terms, so each acceptance records its version. */
 export const TERMS_VERSION = "2026-10-10";
 const credentials = z.object({

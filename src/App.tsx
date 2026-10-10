@@ -61,8 +61,8 @@ function RouteChange() {
 // A deploy replaces hashed chunks: reload once to fetch the new ones instead of showing a blank page.
 window.addEventListener("vite:preloadError", (event) => {
   try {
-    if (Date.now() - Number(sessionStorage.getItem("gr-chunk-reload") || 0) < 60_000) return;
-    sessionStorage.setItem("gr-chunk-reload", String(Date.now()));
+    if (Date.now() - Number(sessionStorage.getItem("hss-chunk-reload") || 0) < 60_000) return;
+    sessionStorage.setItem("hss-chunk-reload", String(Date.now()));
   } catch { /* storage unavailable */ }
   event.preventDefault();
   window.location.reload();

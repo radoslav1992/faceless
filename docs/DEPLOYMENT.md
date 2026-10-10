@@ -1,6 +1,6 @@
 # Deployment
 
-Ghostreel deploys as one Cloudflare Worker (`faceless`, with its static assets) plus a container image for the
+Hookstreak Shorts deploys as one Cloudflare Worker (`faceless`, with its static assets) plus a container image for the
 renderer. `npm run deploy` builds the client and runs `wrangler deploy`, which also publishes the renderer image,
 creates the Workflows and sets the cron. With GitHub → Workers Builds use `npm ci && npm run build` as the build command
 and `npx wrangler deploy` as the deploy command (a full deploy, so the container image is published too).
@@ -33,8 +33,12 @@ npx wrangler d1 migrations list faceless --remote   # nothing left to apply
   caption fonts. It also installs OpenCV and downloads the YuNet face model at a fixed commit, checked against its
   SHA-256, so the build needs network access to `media.githubusercontent.com`. Each `standard-2` instance runs one
   render at a time.
-- **Domain**: once the domain is known, put `SITE_URL` and `CONTACT_EMAIL` in `vars` and add `routes` with the custom
-  domain in `wrangler.jsonc`; until then the Worker answers on `workers.dev`. The Worker sends every other host
+- **Domain**: `hookstreak.app` (and `www.hookstreak.app`, which redirects to it) are custom domains in `routes`, with
+  `SITE_URL=https://hookstreak.app` and `CONTACT_EMAIL=hello@hookstreak.com` in `vars`. Both domains used to belong to
+  the ad-app Worker (hookstreak.com): deploy ad-app without them first (a domain belongs to one Worker at a time), and if
+  they still show under ad-app's Domains & Routes, remove them there. Mail goes out from `hello@hookstreak.com`, the
+  sender already verified for hookstreak.com; to send from `hookstreak.app` instead, set up Email Sending for that zone
+  and change `CONTACT_EMAIL` and `allowed_sender_addresses` together. The Worker sends every other host
   (except `*.workers.dev` and localhost) to the same path on `SITE_URL` (308). `SITE_URL` must be the public `https`
   origin: the renderer downloads only from it, and OAuth redirect URIs and the providers' input links are built from
   it.
@@ -92,7 +96,7 @@ Overview shows which of these are configured.
    A subscription's plan is recognised by these IDs, or by a price's lookup key or `metadata.plan` set to `starter`,
    `daily`, `double` or `studio`. Checkout allows promotion codes.
 2. **Credit packs need no products.** They are one-time Checkout payments with inline `price_data`
-   (`creditPacks` in `shared/plans.ts`): 10 credits for $8, 40 for $28 and 150 for $90, named "N credits — Ghostreel".
+   (`creditPacks` in `shared/plans.ts`): 10 credits for $8, 40 for $28 and 150 for $90, named "N credits — Hookstreak Shorts".
 3. **Webhook.** Add an endpoint at `${SITE_URL}/api/billing/webhook` with these events and put its signing secret into
    `STRIPE_WEBHOOK_SECRET`:
    - `checkout.session.completed` and `checkout.session.async_payment_succeeded`

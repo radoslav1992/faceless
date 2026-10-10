@@ -284,9 +284,9 @@ withdrawals never touch it.
 
 ## API keys, REST API and MCP
 
-`server/api.ts`. A key is `gr_` plus 48 hex characters, shown once; only its SHA-256 and a 7-character prefix are
+`server/api.ts`. A key is `hss_` plus 48 hex characters, shown once; only its SHA-256 and a 7-character prefix are
 stored (`api_keys`). Up to 10 keys per person, a confirmed email is required, and `last_used_at` is written at most
-once a minute. Requests send `Authorization: Bearer gr_…` and act as the key's owner with the same credits, limits and
+once a minute. Requests send `Authorization: Bearer hss_…` and act as the key's owner with the same credits, limits and
 checks as the app; making a video through the API is limited to 30 an hour.
 
 - **REST** (`/api/v1`): `GET /me` (plan and credits), `GET /types` (video types, art styles, voices, languages),
