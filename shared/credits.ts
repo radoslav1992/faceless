@@ -1,0 +1,25 @@
+// What videos cost in credits. The server charges by these rules and the pricing page shows them, so the two cannot
+// drift. Rendering (subtitles, music, transitions, timing) never costs credits.
+
+/** A new video: one credit per started 30 seconds, its narration and every AI picture included. */
+export const SECONDS_PER_CREDIT = 30;
+/** Redoing pictures of a made video: one credit per started 5 new pictures. */
+export const PICTURES_PER_CREDIT = 5;
+/** Bringing a scene to life: one credit per 5 seconds of AI clip made from its picture. */
+export const CLIP_CREDITS = 1;
+export const CLIP_SECONDS = 5;
+/** English speech runs at about 15 characters a second; lengths are estimated from the script before it is spoken. */
+export const SPEECH_CHARS_PER_SECOND = 15;
+
+export const speechSeconds = (text: string) => Math.max(2, Math.ceil(text.trim().length / SPEECH_CHARS_PER_SECOND));
+/** A new video of `seconds` (narration included). */
+export const videoCredits = (seconds: number) => Math.max(1, Math.ceil(seconds / SECONDS_PER_CREDIT - 1e-9));
+/** New narration for a made video's changed words. */
+export const voiceCredits = (text: string) => videoCredits(speechSeconds(text));
+/** New pictures for a made video. */
+export const pictureCredits = (count: number) => (count > 0 ? Math.ceil(count / PICTURES_PER_CREDIT) : 0);
+/** AI clips of these lengths. */
+export const clipCredits = (lengths: number[]) => lengths.reduce((n, s) => n + CLIP_CREDITS * Math.ceil(s / CLIP_SECONDS), 0);
+
+/** "1 credit", "12 credits" */
+export const creditsLabel = (n: number) => `${n.toLocaleString("en-US")} credit${n === 1 ? "" : "s"}`;

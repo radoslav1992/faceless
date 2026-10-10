@@ -1,0 +1,62 @@
+.create { max-width: 1360px; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; margin-top: 8px; }
+.seg button { border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 9px 10px; font-weight: 600; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; justify-content: center; font-size: 14px; }
+.seg button[aria-pressed="true"] { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+.seg button { min-width: 0; }
+.small-seg { margin-top: 0; }
+.small-seg button { padding: 6px 8px; font-size: 13px; border-radius: 10px; }
+.small-seg button[aria-pressed="true"] { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+.truncate { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.creator { border: 2px solid transparent; background: none; padding: 0; border-radius: 12px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; }
+.creator img { aspect-ratio: 3 / 4; object-fit: cover; border-radius: 10px; width: 100%; }
+.creator[aria-pressed="true"] { border-color: var(--brand); }
+.preview-grid { display: grid; grid-template-columns: minmax(240px, 340px) 240px; gap: 28px; justify-content: center; align-items: start; }
+.preview-phone { width: 100%; }
+.inspector { background: var(--surface-2); border: 1px solid var(--line); border-radius: 16px; padding: 14px; gap: 12px; }
+.inspector hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
+/* Captions and subtitles under the preview: live samples of each style, chosen like the other tiles. */
+.editor-section { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 18px; display: flex; flex-direction: column; gap: 12px; }
+.editor-section .row.between { align-items: flex-start; gap: 14px; }
+.editor-section .section-title { font-size: 16px; margin: 0 0 2px; font-family: var(--font); font-weight: 700; }
+.editor-section .muted.small { display: flex; gap: 8px; align-items: center; margin: 0; }
+.style-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; }
+.style-tile { border: 1px solid var(--line); background: var(--surface); border-radius: 14px; padding: 6px 6px 9px; display: flex; flex-direction: column; gap: 3px; text-align: left; cursor: pointer; color: var(--text); min-width: 0; }
+.style-tile:hover { border-color: var(--line-2); }
+.style-tile[aria-checked="true"] { background: var(--brand-soft); border-color: var(--brand); color: var(--text); box-shadow: 0 0 0 1px var(--brand) inset; }
+.style-tile .loop-canvas { aspect-ratio: 480 / 300; border-radius: 9px; background: linear-gradient(160deg, #2a3142, #1a1d26); margin-bottom: 4px; }
+.style-name { font-weight: 700; font-size: 13px; padding: 0 3px; }
+.style-about { font-size: 11.5px; line-height: 1.3; color: var(--muted); padding: 0 3px; }
+.style-tile[aria-checked="true"] .style-about { color: var(--muted); }
+.loop-canvas { display: block; width: 100%; }
+.anim-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.anim-tile { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 4px 4px 5px; display: flex; flex-direction: column; gap: 3px; align-items: stretch; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--text); min-width: 0; }
+.anim-tile .loop-canvas { aspect-ratio: 200 / 120; border-radius: 7px; background: linear-gradient(160deg, #2a3142, #1a1d26); }
+.anim-tile[aria-checked="true"] { background: var(--brand-soft); border-color: var(--brand); color: var(--text); box-shadow: 0 0 0 1px var(--brand) inset; }
+@media (max-width: 1100px) { .preview-grid { grid-template-columns: 1fr; } }
+@media (max-width: 560px) {
+  .style-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .anim-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+/* Create: the style gallery and the brief. */
+.search-field { position: relative; display: block; max-width: 560px; }
+.search-field svg { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+.search-field .input { padding-left: 42px; border-radius: 999px; }
+.template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+.template-card { border: 1px solid var(--line); background: var(--surface); border-radius: 18px; padding: 8px 8px 12px; display: flex; flex-direction: column; gap: 4px; text-align: left; cursor: pointer; color: var(--text); transition: border-color 0.15s, transform 0.15s; }
+.template-card:hover, .template-card:focus-visible { border-color: var(--brand-line); transform: translateY(-2px); }
+.template-card .art { position: relative; display: block; border-radius: 12px; overflow: hidden; margin-bottom: 4px; }
+.template-card .art svg { display: block; width: 100%; aspect-ratio: 100 / 120; }
+.template-card .pop { position: absolute; top: 6px; left: 6px; font-size: 10px; padding: 1px 7px; }
+.template-card strong { font-size: 14px; padding: 0 4px; }
+.template-card small { font-size: 12px; color: var(--muted); padding: 0 4px; line-height: 1.3; }
+.brief-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr); gap: 20px; align-items: start; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 960px) { .brief-grid { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .form-row { grid-template-columns: 1fr; } }
+/* A video's page: the player beside its posts. */
+.video-top { display: grid; grid-template-columns: minmax(240px, 340px) minmax(0, 420px); gap: 24px; align-items: start; }
+.video-top .phone-frame video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.making-big { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; text-align: center;
+  background: radial-gradient(80% 60% at 50% 40%, rgba(70, 229, 122, 0.14), transparent), var(--surface-2); }
+.making-big .spinner { color: var(--brand); }
+@media (max-width: 760px) { .video-top { grid-template-columns: 1fr; } .video-top .phone-frame { max-width: 320px; margin: 0 auto; } }

@@ -1,0 +1,46 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "faceless",
+  "main": "server/index.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // Dashboard variables and secrets survive GitHub deploys.
+  "keep_vars": true,
+  // Public settings tied to the domain belong here once it is known (SITE_URL, CONTACT_EMAIL), plus "routes" with the
+  // custom domain; until then the Worker answers on workers.dev. Switches, secrets and anything private
+  // (ADMIN_EMAILS) stay in the dashboard. See docs/DEPLOYMENT.md.
+  "vars": {},
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true,
+  },
+  "ai": { "binding": "AI" },
+  // Cloudflare Email Sending: add "allowed_sender_addresses": ["hello@your-domain"] when the domain is verified.
+  "send_email": [{ "name": "EMAIL" }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "faceless",
+      // Replace with the ID `wrangler d1 create faceless` prints (docs/DEPLOYMENT.md).
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "faceless-media" }],
+  "containers": [
+    { "class_name": "MediaRenderer", "image": "./renderer/Dockerfile", "max_instances": 3, "instance_type": "standard-2" },
+  ],
+  "durable_objects": { "bindings": [{ "name": "MEDIA_RENDERER", "class_name": "MediaRenderer" }] },
+  "migrations": [{ "tag": "renderer-v1", "new_sqlite_classes": ["MediaRenderer"] }],
+  "workflows": [
+    { "name": "faceless-content", "binding": "CONTENT", "class_name": "ContentGeneration" },
+    { "name": "faceless-publish", "binding": "PUBLISH", "class_name": "Publication" },
+  ],
+  // Every minute: due videos are published and series get their next episodes. Heavier maintenance runs once an hour
+  // inside the same handler.
+  "triggers": { "crons": ["* * * * *"] },
+  "observability": { "enabled": true },
+  "limits": { "cpu_ms": 120000 },
+}
