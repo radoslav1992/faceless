@@ -3,7 +3,7 @@ import type { Env } from "./types";
 
 // Text generation (scripts, picture descriptions) through the Workers AI binding, in the Responses API shape, always
 // with a strict JSON schema. What people typed is sent as data, never as instructions.
-export const DEFAULT_TEXT_MODEL = "openai/gpt-5.6-luna";
+export const DEFAULT_TEXT_MODEL = "openai/gpt-6-luna";
 
 /** The model's JSON answer, or null when it failed, timed out or did not complete. */
 export async function aiJson(env: Env, instructions: string, input: unknown, schema: object, maxTokens: number, ms: number): Promise<unknown> {

@@ -8,7 +8,7 @@ import { failureCode, providerFetch, ProviderError } from "./http";
 // Speech for narrated videos, with per-character timings that become word-by-word captions;
 // and forced alignment (rech-bg's fallback for missing timings, server/studio-speech.ts): known words timed on a
 // recording, for a voice without timings and for an owner's voiceover whose exact script they gave.
-export const SPEECH_MODEL = "eleven_v3";
+export const SPEECH_MODEL = "eleven_v4";
 export const ALIGNMENT_URL = "https://api.elevenlabs.io/v1/forced-alignment";
 
 /** 16-bit mono PCM as a WAV file. */
@@ -44,7 +44,10 @@ export async function speak(e: Env, voiceId: string, text: string, language = "e
   const pcm = Uint8Array.from(atob(result.audioBase64), (c) => c.charCodeAt(0));
   if (!pcm.length || pcm.length % 2) throw new ProviderError("VOICE_FAILED");
   const alignment = timing === "original" ? result.alignment || result.normalizedAlignment : result.normalizedAlignment || result.alignment;
-  return { audio: wav(pcm, 24000), seconds: pcm.length / 48000, words: alignmentWords(alignment) };
+  const seconds = pcm.length / 48000;
+  // The model's timings can run a little past the audio (tens of milliseconds): words never end after the voice does.
+  const words = alignmentWords(alignment).map((w) => ({ ...w, start: Math.min(w.start, seconds), end: Math.min(w.end, seconds) }));
+  return { audio: wav(pcm, 24000), seconds, words };
 }
 
 // The forced-alignment answer (ElevenLabs ForcedAlignmentResponseModel): characters and words, each {text, start, end}.

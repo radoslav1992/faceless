@@ -131,7 +131,7 @@ D1 batch, so the credits are reserved by the triggers before any work starts. It
    picture (`fal-ai/kling-video/v2.5-turbo/pro/image-to-video`, which reads the picture through a capability link).
    Each is stored in R2 as an asset of the video (marked `{"ai":true}`) and written back into the spec.
 3. **Voice + alignment** (after the pictures, so a refused picture stops the run before the voice is paid): ElevenLabs
-   `eleven_v3` with timestamps of the text as written, saved as a WAV. When the timings do not have one word per word
+   `eleven_v4` with timestamps of the text as written, saved as a WAV. When the timings do not have one word per word
    of the script, forced alignment of the WAV with the script times it; if that fails, the voice's own timings are
    matched to the script by their letters. A voice without any timings still makes a video: its scenes are spread over
    it and it has no subtitles.

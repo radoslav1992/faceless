@@ -15,7 +15,7 @@ and `npx wrangler deploy` as the deploy command (a full deploy, so the container
 | R2 bucket `faceless-media` (private) | `MEDIA` | `npx wrangler r2 bucket create faceless-media` |
 | Workflows `faceless-content` (`ContentGeneration`) and `faceless-publish` (`Publication`) | `CONTENT`, `PUBLISH` | Created by `wrangler deploy` |
 | Container `MediaRenderer` (`renderer/Dockerfile`, up to 3 instances of `standard-2`) | `MEDIA_RENDERER` (Durable Object, migration `renderer-v1`) | Enable Containers on the account; `wrangler deploy` builds and pushes the image. The first rollout takes a few minutes |
-| Workers AI | `AI` | Nothing to create; scripts and picture descriptions run on `TEXT_MODEL` (default `openai/gpt-5.6-luna`) |
+| Workers AI | `AI` | Nothing to create; scripts and picture descriptions run on `TEXT_MODEL` (default `openai/gpt-6-luna`) |
 | Email Sending | `EMAIL` | Onboard the domain in Cloudflare Email, then add `"allowed_sender_addresses": ["hello@your-domain"]` to the `send_email` entry in `wrangler.jsonc` |
 | Cron `* * * * *` | – | Set by `wrangler deploy` (`triggers` in `wrangler.jsonc`) |
 | Turnstile widget | – | Create one for the domain; set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` |
@@ -62,10 +62,10 @@ the Worker reads (`Env` in `server/types.ts`); `.dev.vars.example` lists them fo
 | `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_DAILY`, `STRIPE_PRICE_DOUBLE`, `STRIPE_PRICE_STUDIO` | text | Monthly price IDs (section 3) |
 | `STRIPE_PRICE_STARTER_YEARLY`, `STRIPE_PRICE_DAILY_YEARLY`, `STRIPE_PRICE_DOUBLE_YEARLY`, `STRIPE_PRICE_STUDIO_YEARLY` | text | Yearly price IDs (section 3) |
 | `STRIPE_AUTOMATIC_TAX` | text | `true` when Stripe Tax is set up: tax, tax ID collection and a required billing address at checkout |
-| `TEXT_MODEL` | text | Optional Workers AI model for scripts and picture descriptions (default `openai/gpt-5.6-luna`) |
+| `TEXT_MODEL` | text | Optional Workers AI model for scripts and picture descriptions (default `openai/gpt-6-luna`) |
 | `FAL_KEY` | secret | AI pictures (`fal-ai/nano-banana-2`) and clips (`fal-ai/kling-video/v2.5-turbo/pro/image-to-video`) |
 | `FAL_IMAGE_MODEL` | text | Optional: `fal-ai/flux/schnell` for cheaper scene pictures; anything else uses the default |
-| `ELEVENLABS_API_KEY` | secret | Narration (`eleven_v3` with timestamps), forced alignment, and Scribe v2 transcription of uploads (Scribe and forced alignment read files through links on `SITE_URL`) |
+| `ELEVENLABS_API_KEY` | secret | Narration (`eleven_v4` with timestamps), forced alignment, and Scribe v2 transcription of uploads (Scribe and forced alignment read files through links on `SITE_URL`) |
 | `ELEVENLABS_VOICES` | text | Optional JSON `{"george":"<voice id>", …}` replacing the ElevenLabs voice behind any of the 12 public voices (`server/voices.ts`) |
 | `TOKEN_ENCRYPTION_KEY` | secret | `openssl rand -base64 32`. Seals OAuth tokens (AES-256-GCM) and signs API download links. Never change it once accounts are connected |
 | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` | secret | TikTok app (section 4) |

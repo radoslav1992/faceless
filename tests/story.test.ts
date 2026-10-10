@@ -3,7 +3,7 @@ import worker from "../server/index";
 import { ContentGeneration } from "../server/content-workflow";
 import { planRender, type PlanContext } from "../server/render-plan";
 import { acceptScenePlan, acceptStory, conceptToSpec, storyShape } from "../server/story";
-import { alignedWords, ALIGNMENT_URL, forcedAlignment } from "../server/providers/elevenlabs";
+import { alignedWords, ALIGNMENT_URL, forcedAlignment, speak, SPEECH_MODEL } from "../server/providers/elevenlabs";
 import { falRequest } from "../server/providers/fal";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 import { estimatedSeconds, narrationCurrent, pendingMedia, specCredits, specSchema, type StorySpec } from "../shared/formats";
@@ -329,6 +329,25 @@ describe("the key word subtitles", () => {
   });
 });
 
+describe("the AI voice", () => {
+  it("speaks with Eleven v4 and never times a word past the end of the audio", async () => {
+    const seen: any[] = [];
+    vi.stubGlobal("fetch", async (input: any, init: any = {}) => {
+      seen.push({ url: String(input?.url ?? input), body: JSON.parse(String(init.body ?? "{}")) });
+      // One second of audio; the timings of "there." run 80 ms past it.
+      const characters = [..."Hi there."], starts = characters.map((_, i) => i * 0.12), ends = characters.map((_, i) => Math.min(1.08, (i + 1) * 0.12));
+      return Response.json({ audio_base64: Buffer.from(new Uint8Array(48000)).toString("base64"), alignment: { characters, character_start_times_seconds: starts, character_end_times_seconds: ends } });
+    });
+    const r = await speak({ ELEVENLABS_API_KEY: "el" } as any, "george", "Hi there.", "en", "original");
+    expect(SPEECH_MODEL).toBe("eleven_v4");
+    expect(seen[0].url).toContain("/with-timestamps");
+    expect(seen[0].body).toMatchObject({ text: "Hi there.", model_id: "eleven_v4", language_code: "en" });
+    expect(r.seconds).toBe(1);
+    expect(r.words.map((w) => w.text)).toEqual(["Hi", "there."]);
+    expect(r.words.at(-1)!.end).toBe(1);
+  });
+});
+
 describe("forced alignment", () => {
   it("keeps the words of the answer in order, within the recording", () => {
     const answer = { loss: 0.1, characters: [], words: [
@@ -651,7 +670,9 @@ describe("planning and writing through the API", () => {
   it("describes pictures for scenes that have their words, and drafts a video from a template for Create", async () => {
     const { env, user } = await setup();
     const seen: any[] = [];
-    env.AI.run = async (_model: string, input: any) => {
+    const models: string[] = [];
+    env.AI.run = async (model: string, input: any) => {
+      models.push(model);
       seen.push(input);
       if (input.instructions.includes("You plan the pictures"))
         return answer({ subject: "an octopus", scenes: said.map((s, n) => ({ id: `s${n + 1}`, picture: `Picture ${n + 1} of the octopus`, keys: [s[0].split(" ")[1]] })) });
@@ -672,6 +693,7 @@ describe("planning and writing through the API", () => {
     expect(spec.scenes).toHaveLength(5);
     expect(seen[1].instructions).toMatch(/about 20 seconds of speech, about 300 characters in all, split into exactly 4 scenes/);
     expect(JSON.parse(seen[1].input).ownerRequest).toBe("octopus facts");
+    expect(new Set(models)).toEqual(new Set(["openai/gpt-6-luna"]));
     // Drafting is free: nothing was charged or made.
     expect(env.CONTENT.created).toHaveLength(0);
     // Text to video splits the owner's script and only describes its pictures; without a script there is nothing to draft.

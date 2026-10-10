@@ -78,7 +78,7 @@ trend data.
 - **Rendering**: a pool of three FFmpeg/libass containers (`renderer/`, Python 3.12), reached through the
   `MediaRenderer` Durable Object.
 - **AI**: Workers AI for scripts and picture descriptions; fal for pictures (`fal-ai/nano-banana-2`) and clips
-  (Kling image-to-video); ElevenLabs for voices (`eleven_v3`), forced alignment and Scribe transcription.
+  (Kling image-to-video); ElevenLabs for voices (`eleven_v4`), forced alignment and Scribe transcription.
 - **Payments and mail**: Stripe (subscriptions, credit packs, Customer Portal); Cloudflare Email Sending.
 
 Contracts the client and the Worker share live in `shared/` (plans and credits, series settings and schedules,
