@@ -1,6 +1,6 @@
 # Operations runbook
 
-How to keep Ghostreel running after launch: what alerts you, where to look, what the failure codes mean, what to do
+How to keep Hookstreak Shorts running after launch: what alerts you, where to look, what the failure codes mean, what to do
 when a provider fails, and how to handle withdrawals and free months. Setting up from scratch is in
 [DEPLOYMENT.md](DEPLOYMENT.md); what is kept for how long is in [PRIVACY.md](PRIVACY.md).
 
@@ -8,7 +8,7 @@ when a provider fails, and how to handle withdrawals and free months. Setting up
 
 | Signal | Where | What it means |
 | --- | --- | --- |
-| E-mail "Ghostreel: maintenance needs a look" | inboxes in `ADMIN_EMAILS` | The hourly maintenance found something overdue or failing (section 3) |
+| E-mail "Hookstreak Shorts: maintenance needs a look" | inboxes in `ADMIN_EMAILS` | The hourly maintenance found something overdue or failing (section 3) |
 | Admin → **Operations** | the app (`/app/admin?tab=operations`) | Failures of the last 24 hours by area and code, work still open, accounts to reconnect, cleanup, Stripe, manual checks, the last maintenance run. Same data: `GET /api/admin/operations` |
 | Admin → **Overview** | the app | Users, paying customers (free months counted apart), videos, active series, runs and publications of the last 24 hours, and which features are configured |
 | `GET /api/health` | an external uptime monitor | `200 {"ok":true}` when the Worker runs and D1 answers, `503 {"ok":false}` otherwise. Uncached |
@@ -116,7 +116,7 @@ it), `reconnect`, `not_found` (the post was removed), `failed`.
 
 ## 5. Manual checks (provider work that may still bill)
 
-fal keeps working (and billing) after Ghostreel gives up on a run. The run is failed and its credits are refunded; the
+fal keeps working (and billing) after Hookstreak Shorts gives up on a run. The run is failed and its credits are refunded; the
 hourly stage `reviews` then sets the provider work aside in `manual_reviews`, shown under **Operations → Set aside for
 a manual check** with fal's request ID:
 

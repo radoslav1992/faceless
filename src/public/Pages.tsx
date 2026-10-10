@@ -229,7 +229,7 @@ export function Business() {
 
 export function Mcp() {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
-  const config = JSON.stringify({ mcpServers: { [PRODUCT.name.toLowerCase()]: { type: "http", url: `${origin}/mcp`, headers: { Authorization: "Bearer gr_your_api_key" } } } }, null, 2);
+  const config = JSON.stringify({ mcpServers: { [PRODUCT.slug]: { type: "http", url: `${origin}/mcp`, headers: { Authorization: "Bearer hss_your_api_key" } } } }, null, 2);
   return (
     <div className="pub-wrap">
       <div className="pub-head center"><span className="kicker">MCP Connection</span><h1 className="title" style={{ marginTop: 12 }}>Make videos from your AI assistant</h1>
@@ -237,7 +237,7 @@ export function Mcp() {
       <div className="grid two" style={{ alignItems: "start" }}>
         <div className="glass stack">
           <h2 style={{ fontSize: 22 }}>1. Create an API key</h2>
-          <p className="muted">In the app, open Settings → API keys and create a key. It starts with <code>gr_</code> and is shown once.</p>
+          <p className="muted">In the app, open Settings → API keys and create a key. It starts with <code>hss_</code> and is shown once.</p>
           <h2 style={{ fontSize: 22, marginTop: 10 }}>2. Add the server</h2>
           <p className="muted">Add a remote (Streamable HTTP) MCP server with this address and your key as a bearer token:</p>
           <pre className="code">{config}</pre>
@@ -259,11 +259,11 @@ export function Mcp() {
       <section className="pub-section tight" id="api">
         <div className="pub-section-head"><span className="kicker">API access</span><h2 className="title">Prefer plain HTTP?</h2><p className="sub">The same key works with the REST API.</p></div>
         <pre className="code">{`curl -X POST ${origin}/api/v1/videos \\
-  -H "Authorization: Bearer gr_your_api_key" \\
+  -H "Authorization: Bearer hss_your_api_key" \\
   -H "Content-Type: application/json" \\
   -d '{"type":"facts","prompt":"Animals that never sleep","seconds":45,"style":"doodle"}'
 
-curl ${origin}/api/v1/videos/VIDEO_ID -H "Authorization: Bearer gr_your_api_key"
+curl ${origin}/api/v1/videos/VIDEO_ID -H "Authorization: Bearer hss_your_api_key"
 # → { "video": { "status": "ready", "download": "https://…" } }`}</pre>
         <div className="feature-list" style={{ marginTop: 18 }}>
           <div className="feature"><KeyRound size={20} className="accent-text" aria-hidden="true" /><h3>GET /api/v1/me</h3><p>Plan and credits left.</p></div>

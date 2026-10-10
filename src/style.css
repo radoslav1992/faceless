@@ -15,16 +15,16 @@
   --text: #f1f5f2;
   --muted: #9aa49d;
   --soft: #6b756e;
-  /* Brand: a bright green. As a fill it carries dark text (--on-brand); on the dark canvas it reads as text too. */
-  --brand: #46e57a;
-  --brand-hover: #63f191;
-  --brand-ink: #5ff08b;
-  --brand-soft: rgba(70, 229, 122, 0.1);
-  --brand-line: rgba(70, 229, 122, 0.35);
-  --on-brand: #04170b;
-  --focus: #63f191;
+  /* Brand: Hookstreak's electric lime. As a fill it carries ink text (--on-brand); on the dark canvas it reads as text too. */
+  --brand: #b8f53a;
+  --brand-hover: #c9f866;
+  --brand-ink: #c9f866;
+  --brand-soft: rgba(184, 245, 58, 0.1);
+  --brand-line: rgba(184, 245, 58, 0.35);
+  --on-brand: #0c0d10;
+  --focus: #c9f866;
   --violet: #a08bff;
-  --green: #46e57a;
+  --green: #b8f53a;
   --red: #ff6b6f;
   --yellow: #f6c453;
   /* Legacy names the editor's styles use. */
@@ -69,7 +69,7 @@ p { margin: 0; }
 .btn:hover { background: var(--surface-3); border-color: #48514b; }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-.btn.primary, .btn.accent { background: var(--brand); color: var(--on-brand); border-color: var(--brand); box-shadow: 0 8px 24px rgba(70, 229, 122, 0.18); }
+.btn.primary, .btn.accent { background: var(--brand); color: var(--on-brand); border-color: var(--brand); box-shadow: 0 8px 24px rgba(184, 245, 58, 0.18); }
 .btn.primary:hover, .btn.accent:hover { background: var(--brand-hover); border-color: var(--brand-hover); }
 .btn.ghost { background: transparent; border-color: transparent; }
 .btn.ghost:hover { background: rgba(255, 255, 255, 0.06); }
@@ -97,7 +97,7 @@ p { margin: 0; }
 .field > .hint { display: block; font-weight: 400; font-size: 13px; color: var(--muted); }
 .input, .select, .textarea { width: 100%; border: 1px solid var(--line-2); background: var(--bg-2); color: var(--text); border-radius: 14px; padding: 12px 14px; font-size: 15px; outline: none; transition: border 0.15s, box-shadow 0.15s; }
 .input::placeholder, .textarea::placeholder { color: var(--soft); }
-.input:focus, .select:focus, .textarea:focus { border-color: var(--brand); box-shadow: 0 0 0 4px rgba(70, 229, 122, 0.12); }
+.input:focus, .select:focus, .textarea:focus { border-color: var(--brand); box-shadow: 0 0 0 4px rgba(184, 245, 58, 0.12); }
 .select option { background: var(--surface); }
 .textarea { resize: vertical; min-height: 90px; line-height: 1.45; }
 .input.big { padding: 16px 20px; font-size: 17px; border-radius: 18px; }
@@ -118,7 +118,7 @@ input[type="range"] { accent-color: var(--brand); width: 100%; }
 /* Cards and surfaces */
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); }
 .card.flat { box-shadow: none; }
-.card.glow { border-color: var(--brand-line); background: linear-gradient(180deg, rgba(70, 229, 122, 0.07), rgba(70, 229, 122, 0) 60%), var(--surface); }
+.card.glow { border-color: var(--brand-line); background: linear-gradient(180deg, rgba(184, 245, 58, 0.07), rgba(184, 245, 58, 0) 60%), var(--surface); }
 .card h2 { font-size: 20px; }
 .card h3 { font-size: 16px; font-family: var(--font); letter-spacing: 0; font-weight: 700; }
 .grid { display: grid; gap: 16px; }
@@ -159,7 +159,7 @@ input[type="range"] { accent-color: var(--brand); width: 100%; }
 
 /* Auth and other full-page dark stages. */
 .stage { min-height: 100vh; background: var(--bg); color: var(--text); position: relative; overflow-x: hidden; }
-.stage::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 520px; background: radial-gradient(60% 80% at 50% -10%, rgba(70, 229, 122, 0.22), rgba(70, 229, 122, 0) 70%); pointer-events: none; }
+.stage::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 520px; background: radial-gradient(60% 80% at 50% -10%, rgba(184, 245, 58, 0.22), rgba(184, 245, 58, 0) 70%); pointer-events: none; }
 .stage > * { position: relative; z-index: 1; }
 .stage h1 { font-size: clamp(32px, 5vw, 52px); }
 .stage .lead { color: var(--muted); font-size: 18px; }
@@ -173,4 +173,6 @@ input[type="range"] { accent-color: var(--brand); width: 100%; }
 
 /* Logo */
 .logo { display: inline-flex; align-items: center; gap: 10px; font-family: var(--display); font-weight: 800; font-size: 21px; text-decoration: none; letter-spacing: -0.03em; color: var(--text); }
+.logo-text { white-space: nowrap; }
+.logo-sub { color: var(--brand-ink); }
 .logo-mark { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; background: var(--brand); color: var(--on-brand); flex: none; }

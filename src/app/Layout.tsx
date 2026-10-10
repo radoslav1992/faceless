@@ -9,7 +9,7 @@ import "./app.css";
 /** The dashboard: sidebar, the credits bar and the current page. */
 export function AppLayout() {
   const { user, refresh } = useAuth();
-  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem("gr-nav") === "collapsed"; } catch { return false; } });
+  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem("hss-nav") === "collapsed"; } catch { return false; } });
   const [open, setOpen] = useState(false);
   const { pathname } = useLocation();
   const navigate = useNavigate();
@@ -27,7 +27,7 @@ export function AppLayout() {
   const left = Math.max(0, user.limit - user.used);
   const toggle = () => {
     setCollapsed(!collapsed);
-    try { localStorage.setItem("gr-nav", collapsed ? "open" : "collapsed"); } catch { /* private mode */ }
+    try { localStorage.setItem("hss-nav", collapsed ? "open" : "collapsed"); } catch { /* private mode */ }
   };
   const item = (to: string, Icon: typeof House, label: string, extra: { className?: string; end?: boolean } = {}) => (
     <NavLink to={to} end={extra.end} className={({ isActive }) => `nav-item${isActive ? " active" : ""}${extra.className ? " " + extra.className : ""}`} title={collapsed ? label : undefined}>

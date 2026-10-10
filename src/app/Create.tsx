@@ -18,7 +18,7 @@ import "./create.css";
 // Create: pick a faceless style, say what the video is about, get a free draft (the script and what every picture
 // shows), shape it in the editor, then make it — the only step that spends credits.
 
-const DEMO_DRAFT = "ghostreel:demo-draft";
+const DEMO_DRAFT = "hss-demo-draft";
 const lengths = [30, 45, 60, 90];
 
 function Gallery({ onPick }: { onPick: (id: TemplateId) => void }) {

@@ -146,7 +146,7 @@ export function signedIn(sqlite: DatabaseSync, email = `user-${hex(4)}@example.c
   sqlite.prepare("INSERT INTO users(id,email,name,password_hash,verified,created_at) VALUES (?,?,?,?,1,?)").run(id, email, "Test User", "x", now);
   sqlite.prepare("INSERT INTO sessions(token_hash,user_id,expires_at) VALUES (?,?,?)")
     .run(createHash("sha256").update(token).digest("hex"), id, now + 86400);
-  return { id, email, cookie: `gr_session=${token}` };
+  return { id, email, cookie: `hss_session=${token}` };
 }
 /** Gives a user an active paid subscription of `plan` (period from now for 30 days). */
 export function subscribe(sqlite: DatabaseSync, userId: string, plan: "starter" | "daily" | "double" | "studio", { days = 30, startedAgo = 60 } = {}) {

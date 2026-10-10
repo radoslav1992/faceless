@@ -183,7 +183,7 @@ describe("checkout with the request for immediate start", () => {
     expect(env.EMAIL.sent).toHaveLength(1);
     const mail = env.EMAIL.sent[0];
     expect(mail.to).toBe("client@example.com");
-    expect(mail.subject).toBe("Your Daily plan — Ghostreel");
+    expect(mail.subject).toBe("Your Daily plan — Hookstreak Shorts");
     expect(mail.text).toContain(IMMEDIATE_START_TEXT);
     expect(mail.text).toContain("$35 a month");
     expect(mail.text).toContain("renews every month");
@@ -492,7 +492,7 @@ describe("operations summary", () => {
     await maintenance(env, HOURLY);
     expect(env.EMAIL.sent.map((m: any) => m.to).sort()).toEqual(["admin@example.com", "ops@example.com"]);
     const mail = env.EMAIL.sent[0];
-    expect(mail.subject).toBe("Ghostreel: maintenance needs a look");
+    expect(mail.subject).toBe("Hookstreak Shorts: maintenance needs a look");
     expect(mail.text).toContain("AI or render runs still open after 3 hours (maintenance should have ended and refunded them): 1");
     expect(mail.text).toContain("fal (AI pictures and clips): 3 failed runs in the last hour (GENERATION_FAILED 2, GENERATION_TIMEOUT 1)");
     // One voice failure is below the burst; refused prompts never count.

@@ -11,7 +11,7 @@ import { PRODUCT } from "../../shared/brand";
 // questions. Every word and picture on it is ours; it shows drawn samples, never invented results, users or reviews.
 
 /** A draft started on the home page, picked up by Create after sign-up. */
-export const DEMO_DRAFT = "ghostreel:demo-draft";
+export const DEMO_DRAFT = "hss-demo-draft";
 const backdrops = [
   { id: "bd-aurora", name: "Aurora" },
   { id: "bd-city", name: "Neon city" },
@@ -21,7 +21,7 @@ const backdrops = [
 const colors = [
   { id: "#ffffff", name: "White" },
   { id: "#ffe14d", name: "Yellow" },
-  { id: "#46e57a", name: "Green" },
+  { id: "#b8f53a", name: "Lime" },
   { id: "#7fd8ff", name: "Blue" },
 ];
 

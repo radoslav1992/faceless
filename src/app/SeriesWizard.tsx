@@ -156,7 +156,7 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
 
 const stepNames = ["Style", "Content", "Posting", "Review"];
 /** The wizard's answers while the browser is away connecting a channel. */
-const DRAFT = "gr-series-draft";
+const DRAFT = "hss-series-draft";
 type Draft = { template: TemplateId; step: number; settings: SeriesSettings; name: string };
 function savedDraft(returning: boolean): Draft | null {
   if (!returning) return null;

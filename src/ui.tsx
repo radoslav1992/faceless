@@ -8,9 +8,9 @@ import { PRODUCT } from "../shared/brand";
 /** The mark: a ghost whose face is a play button. Same drawing as public/favicon.svg. */
 export function LogoMark({ size = 22 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="8 8 48 48" aria-hidden="true">
-      <path d="M32 11c-10.5 0-18 8-18 18.5V51l6-4.5 6 4.5 6-4.5 6 4.5 6-4.5 6 4.5V29.5C50 19 42.5 11 32 11Z" fill="currentColor" />
-      <path d="M28 23.5v13l11-6.5z" fill="var(--brand)" />
+    // Hookstreak's mark: a hook whose point turns into an upward streak. Same drawing as public/favicon.svg.
+    <svg width={size} height={size} viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M16 13v26a12 12 0 0 0 24 0V27" /><path d="M32 33l8-9 8 9" />
     </svg>
   );
 }
@@ -18,7 +18,7 @@ export function Logo({ to = "/" }: { to?: string }) {
   return (
     <Link to={to} className="logo" aria-label={`${PRODUCT.name} home`}>
       <span className="logo-mark" aria-hidden="true"><LogoMark /></span>
-      {PRODUCT.name}
+      <span className="logo-text">{PRODUCT.family} <span className="logo-sub">{PRODUCT.product}</span></span>
     </Link>
   );
 }

@@ -1,6 +1,6 @@
-# Ghostreel
+# Hookstreak Shorts
 
-Faceless videos that post themselves. Pick a niche, a voice and an art style once: Ghostreel writes, narrates,
+Faceless videos that post themselves. Pick a niche, a voice and an art style once: Hookstreak Shorts writes, narrates,
 illustrates and subtitles a new short vertical video for every slot in your schedule and posts it to TikTok, YouTube
 Shorts and Instagram Reels.
 

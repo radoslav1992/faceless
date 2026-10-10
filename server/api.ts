@@ -22,7 +22,7 @@ import { PRODUCT } from "../shared/brand";
 // owner with the same credits, limits and checks as the app; nothing here bypasses billing.
 
 export const apiKeys = new Hono<App>();
-const KEY_PREFIX = "gr_";
+const KEY_PREFIX = "hss_";
 const MAX_KEYS = 10;
 
 apiKeys.get("/", async (c) => {
@@ -50,11 +50,11 @@ apiKeys.delete("/:id", async (c) => {
   return c.json({ ok: true });
 });
 
-/** The key's owner, from `Authorization: Bearer gr_…`; 401 otherwise. */
+/** The key's owner, from `Authorization: Bearer hss_…`; 401 otherwise. */
 async function keyUser(c: Context<App>): Promise<DbUser> {
   const header = c.req.header("Authorization") || "";
-  const secret = /^Bearer\s+(gr_[0-9a-f]{48})$/i.exec(header.trim())?.[1];
-  if (!secret) throw new HTTPException(401, { message: "Send your API key as: Authorization: Bearer gr_…" });
+  const secret = /^Bearer\s+(hss_[0-9a-f]{48})$/i.exec(header.trim())?.[1];
+  if (!secret) throw new HTTPException(401, { message: "Send your API key as: Authorization: Bearer hss_…" });
   const row = await c.env.DB.prepare("SELECT k.id AS key_id,k.last_used_at,u.* FROM api_keys k JOIN users u ON u.id=k.user_id WHERE k.key_hash=?")
     .bind(await sha(secret)).first<DbUser & { key_id: string; last_used_at: number | null }>();
   if (!row) throw new HTTPException(401, { message: "This API key isn't valid. Create a new one in Settings." });
@@ -244,7 +244,7 @@ async function handle(env: Env, user: DbUser, m: Rpc) {
       return result(m.id, {
         protocolVersion: typeof m.params?.protocolVersion === "string" ? m.params.protocolVersion : MCP_PROTOCOL,
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: PRODUCT.name.toLowerCase(), version: "1.0.0" },
+        serverInfo: { name: PRODUCT.slug, version: "1.0.0" },
         instructions: `Make faceless short videos with ${PRODUCT.name}: call list_video_types, then create_video, then get_video until it is ready.`,
       });
     case "ping": return result(m.id, {});

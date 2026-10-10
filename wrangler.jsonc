@@ -6,10 +6,19 @@
   "compatibility_flags": ["nodejs_compat"],
   // Dashboard variables and secrets survive GitHub deploys.
   "keep_vars": true,
-  // Public settings tied to the domain belong here once it is known (SITE_URL, CONTACT_EMAIL), plus "routes" with the
-  // custom domain; until then the Worker answers on workers.dev. Switches, secrets and anything private
-  // (ADMIN_EMAILS) stay in the dashboard. See docs/DEPLOYMENT.md.
-  "vars": {},
+  // Public settings tied to the domain, set on every deploy (a dashboard value for these names is replaced).
+  // Switches, secrets and anything private (ADMIN_EMAILS) stay in the dashboard. See docs/DEPLOYMENT.md.
+  "vars": {
+    "SITE_URL": "https://hookstreak.app",
+    // Mail goes out from Hookstreak's verified sender on hookstreak.com until hookstreak.app has Email Sending set up.
+    "CONTACT_EMAIL": "hello@hookstreak.com",
+  },
+  // hookstreak.app is the public address; www redirects there (canonicalUrl in server/config.ts). Both were custom
+  // domains of the ad-app Worker (hookstreak.com): deploy ad-app without them first, a domain belongs to one Worker.
+  "routes": [
+    { "pattern": "hookstreak.app", "custom_domain": true },
+    { "pattern": "www.hookstreak.app", "custom_domain": true },
+  ],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
@@ -17,8 +26,7 @@
     "run_worker_first": true,
   },
   "ai": { "binding": "AI" },
-  // Cloudflare Email Sending: add "allowed_sender_addresses": ["hello@your-domain"] when the domain is verified.
-  "send_email": [{ "name": "EMAIL" }],
+  "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["hello@hookstreak.com"] }],
   "d1_databases": [
     {
       "binding": "DB",
