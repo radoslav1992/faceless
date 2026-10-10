@@ -1,0 +1,52 @@
+# Copy to .dev.vars for LOCAL DEVELOPMENT ONLY. Never commit .dev.vars.
+APP_ENV=development
+SITE_URL=http://localhost:8787
+REGISTRATION_ENABLED=true
+BILLING_ENABLED=false
+# Operator details shown on the legal pages.
+COMPANY_NAME=
+COMPANY_ADDRESS=
+CONTACT_EMAIL=
+ADMIN_EMAILS=
+EMAIL_FROM=
+TURNSTILE_SITE_KEY=
+TURNSTILE_SECRET_KEY=
+# Secret for hashing trial identifiers (any long random string).
+TRIAL_HASH_SECRET=
+
+# Stripe (USD prices, monthly and yearly, see docs/DEPLOYMENT.md).
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+STRIPE_PRICE_STARTER=
+STRIPE_PRICE_DAILY=
+STRIPE_PRICE_DOUBLE=
+STRIPE_PRICE_STUDIO=
+STRIPE_PRICE_STARTER_YEARLY=
+STRIPE_PRICE_DAILY_YEARLY=
+STRIPE_PRICE_DOUBLE_YEARLY=
+STRIPE_PRICE_STUDIO_YEARLY=
+# Optional: true when Stripe Tax is set up (tax, tax IDs and a billing address at checkout).
+STRIPE_AUTOMATIC_TAX=
+
+# AI providers. Text (scripts, picture descriptions) runs on the Workers AI binding.
+TEXT_MODEL=
+FAL_KEY=
+# Optional picture model (default openai/gpt-image-2.5/flare/text-to-image): its .../sunburst/text-to-image variant,
+# fal-ai/nano-banana-2, or fal-ai/flux/schnell for the cheapest pictures.
+FAL_IMAGE_MODEL=
+# Optional GPT Image 2.5 quality: low, medium, high (default), xhigh or max.
+FAL_IMAGE_QUALITY=
+ELEVENLABS_API_KEY=
+# Optional JSON replacing the ElevenLabs voice behind a public voice, e.g. {"george":"<voice id>"} (server/voices.ts).
+ELEVENLABS_VOICES=
+# Turns on rendering (needs the renderer container) and AI generation, and the series autopilot.
+MEDIA_ENABLED=false
+
+# Social publishing. 32 random bytes, base64: encrypts OAuth tokens at rest (and signs API download links).
+TOKEN_ENCRYPTION_KEY=
+TIKTOK_CLIENT_KEY=
+TIKTOK_CLIENT_SECRET=
+INSTAGRAM_APP_ID=
+INSTAGRAM_APP_SECRET=
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
