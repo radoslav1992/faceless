@@ -127,7 +127,8 @@ D1 batch, so the credits are reserved by the triggers before any work starts. It
 
 1. **Load**: the run becomes `running`, gets a capability token and a render job ID.
 2. **AI pictures and clips** (fal, `server/providers/fal.ts`): every picture the spec still needs
-   (`fal-ai/nano-banana-2`, 9:16, or `fal-ai/flux/schnell` with `FAL_IMAGE_MODEL`), then every clip made from its
+   (GPT Image 2.5 Flare at 864 × 1536, `FAL_IMAGE_QUALITY` high by default; `FAL_IMAGE_MODEL` can choose its Sunburst
+   variant, `fal-ai/nano-banana-2` or `fal-ai/flux/schnell`), then every clip made from its
    picture (`fal-ai/kling-video/v2.5-turbo/pro/image-to-video`, which reads the picture through a capability link).
    Each is stored in R2 as an asset of the video (marked `{"ai":true}`) and written back into the spec.
 3. **Voice + alignment** (after the pictures, so a refused picture stops the run before the voice is paid): ElevenLabs

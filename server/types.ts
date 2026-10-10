@@ -40,8 +40,10 @@ export interface Env {
   /** Workers AI text model for episode scripts and picture descriptions. */
   TEXT_MODEL?: string;
   FAL_KEY?: string;
-  /** fal model for scene pictures ("fal-ai/nano-banana-2" by default, or "fal-ai/flux/schnell" for cheaper pictures). */
+  /** fal model for scene pictures: GPT Image 2.5 Flare by default, or its Sunburst variant, "fal-ai/nano-banana-2" or "fal-ai/flux/schnell". */
   FAL_IMAGE_MODEL?: string;
+  /** GPT Image 2.5's quality: low, medium, high (default), xhigh or max. */
+  FAL_IMAGE_QUALITY?: string;
   ELEVENLABS_API_KEY?: string;
   /** Optional JSON {"aria":"<provider voice id>", …} overriding server/voices.ts. */
   ELEVENLABS_VOICES?: string;

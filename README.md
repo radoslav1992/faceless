@@ -77,7 +77,7 @@ trend data.
   posts one video) and a cron every minute (`server/maintenance.ts`).
 - **Rendering**: a pool of three FFmpeg/libass containers (`renderer/`, Python 3.12), reached through the
   `MediaRenderer` Durable Object.
-- **AI**: Workers AI for scripts and picture descriptions; fal for pictures (`fal-ai/nano-banana-2`) and clips
+- **AI**: Workers AI for scripts and picture descriptions; fal for pictures (GPT Image 2.5 Flare) and clips
   (Kling image-to-video); ElevenLabs for voices (`eleven_v4`), forced alignment and Scribe transcription.
 - **Payments and mail**: Stripe (subscriptions, credit packs, Customer Portal); Cloudflare Email Sending.
 

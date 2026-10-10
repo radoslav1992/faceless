@@ -4,7 +4,7 @@ import { ContentGeneration } from "../server/content-workflow";
 import { planRender, type PlanContext } from "../server/render-plan";
 import { acceptScenePlan, acceptStory, conceptToSpec, storyShape } from "../server/story";
 import { alignedWords, ALIGNMENT_URL, forcedAlignment, speak, SPEECH_MODEL } from "../server/providers/elevenlabs";
-import { falRequest } from "../server/providers/fal";
+import { falRequest, submitFal } from "../server/providers/fal";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 import { estimatedSeconds, narrationCurrent, pendingMedia, specCredits, specSchema, type StorySpec } from "../shared/formats";
 import {
@@ -233,8 +233,38 @@ describe("the format", () => {
     });
     // Without a picture: the text-to-video model, 5 s, as before.
     expect(falRequest("clip", "A wave.")).toMatchObject({ model: "fal-ai/kling-video/v2.5-turbo/pro/text-to-video", body: { duration: "5", aspect_ratio: "9:16" } });
-    expect(falRequest("image", "A wave.")).toMatchObject({ model: "fal-ai/nano-banana-2", body: { aspect_ratio: "9:16" } });
+    // Pictures: GPT Image 2.5 Flare at high quality by default, exactly 9:16 in multiples of 16.
+    expect(falRequest("image", "A wave.")).toEqual({
+      model: "openai/gpt-image-2.5/flare/text-to-image",
+      body: { prompt: "A wave. No text, captions, logos or watermarks in the picture.", num_images: 1, image_size: { width: 864, height: 1536 }, quality: "high", output_format: "jpeg" },
+    });
+    expect(864 / 1536).toBe(9 / 16);
+    expect(falRequest("image", "A wave.", { model: "openai/gpt-image-2.5/sunburst/text-to-image", quality: "medium" })).toMatchObject({ model: "openai/gpt-image-2.5/sunburst/text-to-image", body: { quality: "medium" } });
+    // The others an operator can choose, each in its own request shape; anything unknown is the default.
+    expect(falRequest("image", "A wave.", { model: "fal-ai/nano-banana-2" })).toMatchObject({ model: "fal-ai/nano-banana-2", body: { aspect_ratio: "9:16", resolution: "1K" } });
+    expect(falRequest("image", "A wave.", { model: "fal-ai/flux/schnell" })).toMatchObject({ model: "fal-ai/flux/schnell", body: { image_size: { width: 1088, height: 1920 } } });
+    expect(falRequest("image", "A wave.", { model: "someone/else" }).model).toBe("openai/gpt-image-2.5/flare/text-to-image");
     for (const s of storyStyleIds) expect(storyStyles[s].prompt.length).toBeGreaterThan(60);
+  });
+});
+
+describe("the picture model an operator chooses", () => {
+  it("reads FAL_IMAGE_MODEL and FAL_IMAGE_QUALITY, ignoring a quality GPT Image doesn't know", async () => {
+    const sent: { url: string; body: any }[] = [];
+    vi.stubGlobal("fetch", async (input: any, init: any = {}) => {
+      sent.push({ url: String(input?.url ?? input), body: JSON.parse(init.body) });
+      return Response.json({ request_id: "r1", status_url: "https://queue.fal.run/x/requests/r1/status", response_url: "https://queue.fal.run/x/requests/r1" });
+    });
+    await submitFal({ FAL_KEY: "k" } as any, "image", "A fox.");
+    await submitFal({ FAL_KEY: "k", FAL_IMAGE_QUALITY: " Medium " } as any, "image", "A fox.");
+    await submitFal({ FAL_KEY: "k", FAL_IMAGE_QUALITY: "ultra" } as any, "image", "A fox.");
+    await submitFal({ FAL_KEY: "k", FAL_IMAGE_MODEL: "fal-ai/nano-banana-2", FAL_IMAGE_QUALITY: "medium" } as any, "image", "A fox.");
+    expect(sent.map((r) => [r.url, r.body.quality ?? null])).toEqual([
+      ["https://queue.fal.run/openai/gpt-image-2.5/flare/text-to-image", "high"],
+      ["https://queue.fal.run/openai/gpt-image-2.5/flare/text-to-image", "medium"],
+      ["https://queue.fal.run/openai/gpt-image-2.5/flare/text-to-image", "high"],
+      ["https://queue.fal.run/fal-ai/nano-banana-2", null],
+    ]);
   });
 });
 
@@ -525,7 +555,7 @@ describe("narrated videos in the content run", () => {
     await run();
     const submits = () => calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/"));
     expect(submits().map((c) => c.url.split("/").slice(3).join("/"))).toEqual([
-      "fal-ai/nano-banana-2", "fal-ai/nano-banana-2", "fal-ai/nano-banana-2", "fal-ai/nano-banana-2", "fal-ai/kling-video/v2.5-turbo/pro/image-to-video",
+      ...Array(4).fill("openai/gpt-image-2.5/flare/text-to-image"), "fal-ai/kling-video/v2.5-turbo/pro/image-to-video",
     ]);
     let post = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
     expect(post.renderStatus).toBe("ready");

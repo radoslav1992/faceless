@@ -31,8 +31,11 @@ STRIPE_AUTOMATIC_TAX=
 # AI providers. Text (scripts, picture descriptions) runs on the Workers AI binding.
 TEXT_MODEL=
 FAL_KEY=
-# Optional: fal-ai/flux/schnell for cheaper scene pictures (default fal-ai/nano-banana-2).
+# Optional picture model (default openai/gpt-image-2.5/flare/text-to-image): its .../sunburst/text-to-image variant,
+# fal-ai/nano-banana-2, or fal-ai/flux/schnell for the cheapest pictures.
 FAL_IMAGE_MODEL=
+# Optional GPT Image 2.5 quality: low, medium, high (default), xhigh or max.
+FAL_IMAGE_QUALITY=
 ELEVENLABS_API_KEY=
 # Optional JSON replacing the ElevenLabs voice behind a public voice, e.g. {"george":"<voice id>"} (server/voices.ts).
 ELEVENLABS_VOICES=
