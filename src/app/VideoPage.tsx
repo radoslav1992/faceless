@@ -5,14 +5,16 @@ import { del, errorText, fileUrl, newKey, post, put, useApi, useAuth, usePoll, w
 import { useToast } from "../ui";
 import { ConfirmDialog } from "./pickers";
 import { VideoEditor } from "./EditVideo";
+import { HighlightEditor } from "./clip-editor";
 import { PlatformBadge, PublicationLine, StatusChip, making, phaseText } from "./video-ui";
-import { specCredits, visualPart, type StorySpec } from "../../shared/formats";
+import { specCredits, visualPart, type HighlightSpec, type Spec, type StorySpec } from "../../shared/formats";
 import { creditsLabel } from "../../shared/credits";
 import { platforms } from "../../shared/social";
 import "./create.css";
 
 // One video: watch it, approve or reject it (series episodes in review), post it now or later, download it, and edit
-// it — an edit that changes the picture or sound makes it again (only new AI work costs credits).
+// it — an edit that changes the picture or sound makes it again (only new AI work costs credits; a clip of a long
+// video only when it moves to other footage).
 
 /** "2026-10-12T18:00" in the viewer's zone, for datetime-local inputs. */
 const local = (at: number) => { const d = new Date(at * 1000); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
@@ -94,16 +96,19 @@ export function VideoPage() {
   const navigate = useNavigate();
   const { data, error, reload, setData } = useApi<{ video: Video }>(`/videos/${id}`);
   const video = data?.video;
-  const [spec, setSpec] = useState<StorySpec | null>(null);
+  const [spec, setSpec] = useState<Spec | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [key, setKey] = useState(newKey);
   usePoll(() => { void reload(); }, 5000, !!video && making(video));
   // The editor starts from the stored spec, and again whenever a run changed it (a new revision).
-  useEffect(() => { if (video?.spec) setSpec(video.spec as StorySpec); }, [video?.revision, video?.renderStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (video?.spec) setSpec(video.spec); }, [video?.revision, video?.renderStatus]); // eslint-disable-line react-hooks/exhaustive-deps
   const changed = !!spec && !!video?.spec && JSON.stringify(spec) !== JSON.stringify(video.spec);
-  const rerender = !!spec && !!video?.spec && visualPart(spec) !== visualPart(video.spec as StorySpec);
-  const cost = useMemo(() => (spec && rerender ? specCredits(spec, false) : 0), [spec, rerender]);
+  const rerender = !!spec && !!video?.spec && visualPart(spec) !== visualPart(video.spec);
+  const cost = useMemo(() => (spec && video?.spec && rerender
+    ? spec.format === "highlight" && !video.videoAssetId ? specCredits(spec, true) : specCredits(spec, false, undefined, video.spec)
+    : 0), [spec, rerender, video?.spec, video?.videoAssetId]);
+  const clip = spec?.format === "highlight";
   if (error) return <div className="page"><p className="notice bad">{error}</p></div>;
   if (!video || !spec) return <div className="loading-page" role="status">Loading…</div>;
   const save = async () => {
@@ -138,7 +143,9 @@ export function VideoPage() {
     <div className="page create">
       <div className="page-head">
         <div>
-          <Link className="link" to={video.seriesId ? `/app/series/${video.seriesId}` : "/app/videos"}><ArrowLeft size={15} aria-hidden="true" /> {video.seriesName || "Videos"}</Link>
+          {video.spec?.format === "highlight"
+            ? <Link className="link" to={`/app/clips/${video.spec.source.assetId}`}><ArrowLeft size={15} aria-hidden="true" /> Clips</Link>
+            : <Link className="link" to={video.seriesId ? `/app/series/${video.seriesId}` : "/app/videos"}><ArrowLeft size={15} aria-hidden="true" /> {video.seriesName || "Videos"}</Link>}
           <h1 style={{ marginTop: 8 }}>{video.title || video.hook || "Untitled video"}</h1>
           <p className="row wrap" style={{ gap: 8 }}><StatusChip video={video} />{video.slotAt && <span className="small muted">for the slot of {when(video.slotAt)}</span>}</p>
         </div>
@@ -168,15 +175,17 @@ export function VideoPage() {
 
       <section className="stack" style={{ marginTop: 32 }}>
         <div className="row between wrap">
-          <div><h2 style={{ fontSize: 22 }}>Edit</h2><p className="muted small">{making(video) ? "You can edit once it's made." : "Change the words, pictures, voice, title, subtitles or music."}</p></div>
+          <div><h2 style={{ fontSize: 22 }}>Edit</h2><p className="muted small">{making(video) ? "You can edit once it's made." : clip ? "Trim the moment, change the layout, captions, title or music." : "Change the words, pictures, voice, title, subtitles or music."}</p></div>
           <div className="toolbar">
-            {changed && <button type="button" className="btn ghost" onClick={() => setSpec(video.spec as StorySpec)}>Undo changes</button>}
+            {changed && <button type="button" className="btn ghost" onClick={() => setSpec(video.spec!)}>Undo changes</button>}
             <button type="button" className="btn primary" disabled={!changed || saving || making(video)} onClick={save}>
               {saving ? <span className="spinner" aria-hidden="true" /> : null}{rerender ? `Save and make again${cost ? ` · ${creditsLabel(cost)}` : " · free"}` : "Save"}
             </button>
           </div>
         </div>
-        {!making(video) && <VideoEditor spec={spec} onChange={setSpec} initial={false} renderedSeconds={video.duration || undefined} creditsLeft={user ? Math.max(0, user.limit - user.used) : null} />}
+        {!making(video) && (spec.format === "highlight"
+          ? <HighlightEditor spec={spec} onChange={(next: HighlightSpec) => setSpec(next)} />
+          : <VideoEditor spec={spec} onChange={(next: StorySpec) => setSpec(next)} initial={false} renderedSeconds={video.duration || undefined} creditsLeft={user ? Math.max(0, user.limit - user.used) : null} />)}
       </section>
       {confirm && (
         <ConfirmDialog title="Delete this video?" onClose={() => setConfirm(false)} onConfirm={async () => { await del(`/videos/${video.id}`); navigate("/app/videos"); }}>

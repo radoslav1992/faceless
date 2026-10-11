@@ -219,6 +219,7 @@ export function Business() {
         <div className="pub-wrap feature-list">
           <div className="feature"><Users size={22} className="accent-text" aria-hidden="true" /><h3>Many channels</h3><p>Run dozens of series side by side and post to as many TikTok, YouTube and Instagram accounts as you need.</p></div>
           <div className="feature"><Eye size={22} className="accent-text" aria-hidden="true" /><h3>Review before posting</h3><p>Turn on review for any series: episodes wait for approval, with an e-mail when each is ready.</p></div>
+          <div className="feature"><Clapperboard size={22} className="accent-text" aria-hidden="true" /><h3>Clips from your shows</h3><p>Turn podcasts, webinars and streams of up to two hours into scored, captioned vertical clips that follow the speaker.</p></div>
           <div className="feature"><Bot size={22} className="accent-text" aria-hidden="true" /><h3>API and MCP</h3><p>Make videos from your own tools, scripts or AI assistant with an API key. <Link className="text-link" to="/mcp">How it works</Link></p></div>
           <div className="feature"><Building2 size={22} className="accent-text" aria-hidden="true" /><h3>Invoices and tax</h3><p>Pay by card with proper invoices; business tax IDs are collected at checkout where tax applies.</p></div>
         </div>
@@ -251,6 +252,8 @@ export function Mcp() {
             <li><code>create_video</code> — writes and makes a video (uses credits)</li>
             <li><code>get_video</code> — status and a download link when ready</li>
             <li><code>list_videos</code>, <code>list_series</code>, <code>set_series_status</code></li>
+            <li><code>list_long_videos</code>, <code>find_clips</code>, <code>get_long_video</code> — your uploaded videos and the moments found in them</li>
+            <li><code>make_clip</code> — makes a vertical clip of a moment (uses credits)</li>
             <li><code>get_account</code> — plan and credits left</li>
           </ul>
           <p className="muted small">The assistant acts as you, with your credits and limits. Delete the key in Settings to cut it off at once.</p>
@@ -270,6 +273,9 @@ curl ${origin}/api/v1/videos/VIDEO_ID -H "Authorization: Bearer hss_your_api_key
           <div className="feature"><Layers size={20} className="accent-text" aria-hidden="true" /><h3>GET /api/v1/types</h3><p>Video types, art styles, voices, languages.</p></div>
           <div className="feature"><Plus size={20} className="accent-text" aria-hidden="true" /><h3>POST /api/v1/videos</h3><p>Write and make a video.</p></div>
           <div className="feature"><Clapperboard size={20} className="accent-text" aria-hidden="true" /><h3>GET /api/v1/videos/:id</h3><p>Status and download link.</p></div>
+          <div className="feature"><Layers size={20} className="accent-text" aria-hidden="true" /><h3>GET /api/v1/sources</h3><p>Your uploaded videos and the moments found in them.</p></div>
+          <div className="feature"><Plus size={20} className="accent-text" aria-hidden="true" /><h3>POST /api/v1/sources/:id/find</h3><p>Find clips in one of them.</p></div>
+          <div className="feature"><Plus size={20} className="accent-text" aria-hidden="true" /><h3>POST /api/v1/clips</h3><p>Make a clip of a moment.</p></div>
         </div>
       </section>
     </div>

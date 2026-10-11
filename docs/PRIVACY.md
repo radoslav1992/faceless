@@ -14,7 +14,7 @@ hours rather than in one expensive run.
 
 | Data | Kept | How it goes |
 | --- | --- | --- |
-| Profile (name, email, password hash), series (template, prompt, voice, language, art style, music, length, schedule, accounts, review and e-mail choices), videos (spec: script, scenes, captions, word timings), uploads (with the words found in their speech), AI pictures, clips, voices and renders, connected accounts, publications and their stats, API keys (SHA-256 of the key, name, prefix, created and last used) | While the account exists | With the account, or when the user deletes the item (videos, series, uploads, API keys; disconnecting an account) |
+| Profile (name, email, password hash), series (template, prompt, voice, language, art style, music, length, schedule, accounts, review and e-mail choices), videos (spec: script, scenes, captions, word timings), uploads (with the words found in their speech, and for videos clips are cut from the moments found in them and where their people appear), AI pictures, clips, voices and renders, connected accounts, publications and their stats, API keys (SHA-256 of the key, name, prefix, created and last used) | While the account exists | With the account, or when the user deletes the item (videos, series, uploads, API keys; disconnecting an account) |
 | Sessions | 30 days | Removed hourly once expired |
 | Email confirmation / password reset links (hash of the token only) | 24 hours / 1 hour | Removed hourly once expired |
 | OAuth sign-in states for social networks | 10 minutes | Removed hourly once expired |
@@ -30,7 +30,8 @@ hours rather than in one expensive run.
 | Work set aside for a manual check (run ID, provider request ID, reason) | 90 days | Removed by maintenance |
 
 The scene descriptions and script sent to the AI providers are part of the video itself (its spec): they stay as
-long as the video does.
+long as the video does. A long video's transcript is sent to the text model (Cloudflare Workers AI) when the owner
+finds clips in it; the moments found are kept with the video until it is deleted.
 
 ## Kept after the account is deleted
 

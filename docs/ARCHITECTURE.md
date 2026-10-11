@@ -44,7 +44,7 @@ handler runs `maintenance()` every minute.
 
 ## Data model
 
-One migration, `migrations/0001_initial.sql`; D1 always enforces foreign keys.
+`migrations/0001_initial.sql` and `0002_clips.sql` (runs of kind `speech`); D1 always enforces foreign keys.
 
 | Area | Tables |
 | --- | --- |
@@ -58,7 +58,8 @@ One migration, `migrations/0001_initial.sql`; D1 always enforces foreign keys.
 
 Triggers keep the rules in the database, so no code path can skip them:
 
-- **Credits**: `run_credit_reserve` refuses a run whose credits do not fit its usage window (`QUOTA_EXCEEDED`),
+- **Credits**: `run_credit_reserve` refuses a run (a video's, or a long video's paid transcription) whose credits do
+  not fit its usage window (`QUOTA_EXCEEDED`),
   `run_credit_charge` adds them to `used` in the same transaction, and `run_refund` gives them back exactly once when
   a queued or running run becomes `failed`. `run_active_limit` allows 20 active runs per person (`RUNS_BUSY`).
 - **Storage**: `media_storage_limit` (the plan's bytes in `media_limits`) and `media_file_limit` (5,000 files) answer
@@ -69,13 +70,15 @@ Triggers keep the rules in the database, so no code path can skip them:
   `evidence_account_deleted` marks terms acceptances and checkout consents of a deleted account.
 
 Unique indexes that carry rules: `videos_series_slot` (one video per series slot), `one_active_run_per_video`,
-`runs(user_id, idempotency_key)` (a retried request or step finds its earlier run), `publication_once` (a video is
+`runs(user_id, idempotency_key)` (a retried request or step finds its earlier run), `one_active_speech_per_asset` (one
+paid transcription of a video at a time), `publication_once` (a video is
 scheduled, publishing or published at most once per account) and `social_accounts(user_id, platform, external_id)`.
 
 ## A video
 
-A video's editable description is its **spec** (`shared/formats.ts`, validated with zod on every write): the video
-type (`kind`: `story`, `pov`, `mashup`, `script`, `backdrop`), the narration (an AI voice by ID, or one of the owner's
+A video's editable description is its **spec** (`shared/formats.ts`, validated with zod on every write), of one of two
+formats: `story` (below) or `highlight`, a clip of one of the owner's long videos (see [Clips](#clips-from-long-videos)).
+A story's spec holds the video type (`kind`: `story`, `pov`, `mashup`, `script`, `backdrop`), the narration (an AI voice by ID, or one of the owner's
 audio/video uploads with an optional exact script), the language, 1–40 scenes (their words, a picture description, key
 words, the picture's source and the transition in), one art style (`shared/story.ts`, 15 prompt suffixes), one
 recurring subject, captions (on/off, one of 21 styles), an optional on-screen headline (`shared/headline.ts`), an
@@ -114,10 +117,11 @@ the answer; fewer than two usable scenes means failure.
   alignment (made once per file and script, kept in `media_assets.meta.alignment`, within the daily free speech
   allowance of 20 files or 30 minutes).
 
-Uploads go to R2 as multipart uploads of 8 MiB parts (images up to 20 MB, videos 500 MB, tracks 50 MB). Images are
-checked from their header; videos and tracks by the renderer (`inspect`: kind, picture size, length up to 10 minutes,
-sound) and, when they may hold speech, transcribed once by ElevenLabs Scribe v2 for free within the same daily
-allowance. A failed transcription only means no subtitles.
+Uploads go to R2 as multipart uploads of 8 MiB parts (images up to 20 MB, tracks 50 MB, videos up to the plan's
+`videoMb`: 500 MB on the free trial, 2,000 MB on paid plans). Images are checked from their header; videos and tracks
+by the renderer (`inspect`: kind, picture size, length up to the plan's `videoMinutes` at upload time — 10 minutes,
+or 2 hours for videos on paid plans — and sound) and, when they may hold speech and last up to 10 minutes, transcribed
+once by ElevenLabs Scribe v2 for free within the same daily allowance. A failed transcription only means no subtitles.
 
 ## The content workflow
 
@@ -170,7 +174,47 @@ name. The cover is taken once the first words (and the headline) are on screen. 
 the next free one (`429` means busy), and the workflow records the slot that accepted it. Inputs are downloaded only
 from `SITE_URL`'s origin on the capability paths; finished files wait 30 minutes for the Worker. Files with an AI
 voice, picture or clip are marked as AI-made (MP4 tags and an XMP packet with the IPTC digital source type), and the
-saved render carries `{"ai":true}`. The Worker uses the `compose` and `inspect` operations.
+saved render carries `{"ai":true}`. The Worker uses the `compose`, `inspect` and `track` operations; a clip's split
+layout is a `compose` segment with `panes` (windows of the picture cropped in whole even pixels, scaled to fill the
+frame's width and their height, stacked).
+
+## Clips from long videos
+
+The app's Clips (code: "highlights", so they never mix with a scene's AI clip): `shared/highlights.ts`,
+`server/highlights.ts`, the `highlight` spec in `shared/formats.ts`, the editor in `src/app/clip-editor.tsx` and
+`src/app/ClipPreview.tsx`.
+
+- **Sources** are the owner's video uploads (`GET /api/highlights/sources`). Each keeps what was found in it in
+  `media_assets.meta`: the transcript (up to 30,000 words), the last moments found (`moments`), a search waiting for
+  its speech (`wanted`) and the last search's failure (`momentsError`). Lists never carry the transcript; a clip's
+  editor loads the words around its moment (`GET /api/media/:id?from=&to=`).
+- **Finding clips** (`POST /api/highlights/sources/:id/find`: how many, short/medium/long, an optional focus). With
+  the speech known, the text model reads the transcript numbered by sentence, in parts of 24,000 characters (up to 8,
+  in parallel), as data; it picks non-overlapping sentence ranges of the asked length and rates each 1–10 for hook,
+  payoff, clarity and energy. `acceptMoments` checks them (sentence edges with a little air, the accepted lengths, no
+  overlap) and `clipScore` weighs the parts into a score of 10–99, shown as an estimate, never a promise of views. The
+  best scored are kept. Twenty successful searches per person and day; a failed one gives its search back. A video
+  whose speech is not known yet is transcribed first: free up to 10 minutes (the daily allowance), else as a run of
+  kind `speech` for `speechCredits` (1 per started 30 minutes, the price the person was shown; refunded if it fails).
+  The search waits in `meta.wanted` and runs in the workflow right after the transcription (`momentsAfterSpeech`).
+- **A clip** is a video of format `highlight` (created with `POST /api/videos`): its source and moment (5 s to
+  3 minutes), instant cuts (`shared/cuts.ts`: pauses over 0.6 s shortened, fillers removed, on the 1/30 s grid),
+  a layout, captions (style and position), an optional hook title (`headline`), music, the post text, and the
+  writer's note on the moment (`moment`: score and reason, never rendered). It costs 1 credit per started minute of its
+  moment; an edit is free unless it keeps less than half of the moment it replaces (`specCredits` with the stored spec);
+  a clip whose first run failed (refunded) costs a new one when it is made again.
+- **Layouts**: `follow` (a 9:16 crop following the main face, `shared/track.ts`), `split` with two windows stacked
+  (`speakers`: placed on the two people found unless the owner moved them; `screen`: a camera window over the screen),
+  `crop` (one window) and `fit` (the whole picture over a blur). A window is a centre and a zoom; `paneWindow` turns it
+  into the exact rectangle of the pane's shape inside the picture, the same in the preview and the render plan.
+- **The run**: when the layout needs it (`follow`, or `split` placed automatically) and the moment was not measured
+  yet, the renderer's `track` operation finds the faces in the moment (YuNet, 4 samples a second) and returns the crop
+  path and the two people seen most (`faces`), kept as the server-owned `tracked` with the moment's key; a failure only
+  leaves the picture centred. Then `planHighlight` makes one video segment: the moment trimmed, its kept parts, and
+  either the `follow` path, `fit: "contain"` or `panes`; the clip's own sound; captions from the transcript's words cut
+  like the picture; the hook title; music under it all. Nothing in a clip is AI-made, so it is never marked as such.
+- **Posting**: clips post like any video; the Clips page can schedule a batch one a day (or twice a day, weekly) on
+  chosen channels.
 
 ## Series autopilot
 
@@ -292,10 +336,14 @@ checks as the app; making a video through the API is limited to 30 an hour.
 - **REST** (`/api/v1`): `GET /me` (plan and credits), `GET /types` (video types, art styles, voices, languages),
   `GET /videos`, `POST /videos` (writes and makes a video), `GET /videos/:id`, `GET /series`,
   `POST /series/:id/pause|resume`.
+- **Clips** (REST): `GET /sources`, `GET /sources/:id` (moments with their index), `POST /sources/:id/find` (with
+  `credits` to agree to transcribing a long video) and `POST /clips` (a moment by index, or `start`/`end`; layout,
+  caption style, captions, hook title, pause removal).
 - **MCP** (`/mcp`, Streamable HTTP, JSON-RPC 2.0, protocol `2025-06-18`): `POST` with one message or a batch of up to
   20; notifications get 202; `GET` and `DELETE` answer 405 (no server stream, no session). Tools: `list_video_types`,
-  `create_video`, `get_video`, `list_videos`, `list_series`, `set_series_status`, `get_account`. A tool's failure is
-  returned as its result with `isError`, in plain words. 300 requests an hour per person.
+  `create_video`, `get_video`, `list_videos`, `list_series`, `set_series_status`, `list_long_videos`, `find_clips`,
+  `get_long_video`, `make_clip`, `get_account`. A tool's failure is returned as its result with `isError`, in plain
+  words. 300 requests an hour per person.
 - **Signed download links**: a ready video's `download` is
   `/api/v1/files/:video?exp=&sig=`, an HMAC-SHA256 (keyed with `TOKEN_ENCRYPTION_KEY`) of the video, its render and the
   expiry, valid for one hour, served as an attachment without a session.

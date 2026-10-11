@@ -89,7 +89,7 @@ export const layoutSchema = z.discriminatedUnion("kind", [
 export type Layout = z.infer<typeof layoutSchema>;
 /** The layouts as the editor offers them. */
 export const layoutChoices = {
-  follow: { name: "Speaker focus", about: "A vertical crop that follows whoever is talking" },
+  follow: { name: "Speaker focus", about: "A vertical crop that keeps the main face in frame" },
   speakers: { name: "Two speakers", about: "Two people stacked, one above the other" },
   screen: { name: "Screen + camera", about: "Your camera on top, the screen or game below" },
   crop: { name: "Fixed crop", about: "You pick the part of the picture; it stays put" },

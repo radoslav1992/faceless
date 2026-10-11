@@ -155,7 +155,10 @@ describe("the MCP server", () => {
     // A notification gets no answer.
     expect((await bearer(env, "POST", "/mcp", key, rpc("notifications/initialized", undefined, null))).status).toBe(202);
     const tools = (await bearer(env, "POST", "/mcp", key, rpc("tools/list"))).data.result.tools;
-    expect(tools.map((t: any) => t.name)).toEqual(["list_video_types", "create_video", "get_video", "list_videos", "list_series", "set_series_status", "get_account"]);
+    expect(tools.map((t: any) => t.name)).toEqual([
+      "list_video_types", "create_video", "get_video", "list_videos", "list_series", "set_series_status",
+      "list_long_videos", "find_clips", "get_long_video", "make_clip", "get_account",
+    ]);
     for (const t of tools) expect(t.inputSchema.type).toBe("object");
     const account = (await bearer(env, "POST", "/mcp", key, rpc("tools/call", { name: "get_account", arguments: {} }))).data.result;
     expect(account).toMatchObject({ isError: false, structuredContent: { plan: "daily", credits: { left: 60 } } });
@@ -166,6 +169,38 @@ describe("the MCP server", () => {
     const batch = await bearer(env, "POST", "/mcp", key, [rpc("ping", undefined, 7), rpc("tools/call", { name: "get_video", arguments: { id: made.structuredContent.id } }, 8)]);
     expect(batch.data.map((a: any) => a.id)).toEqual([7, 8]);
     expect(batch.data[1].result.structuredContent.id).toBe(made.structuredContent.id);
+  });
+
+  it("finds clips in the owner's long videos and makes them, with the app's prices", async () => {
+    const { env, sqlite, user } = setup();
+    const key = await newKey(env, user.cookie);
+    await call(worker, env, "GET", "/api/auth/me", undefined, user.cookie);
+    const tool = async (name: string, args: unknown) => (await bearer(env, "POST", "/mcp", key, rpc("tools/call", { name, arguments: args }))).data.result;
+    // A 20-minute podcast whose speech was found, and an hour-long stream not transcribed yet.
+    const words = Array.from({ length: 400 }, (_, i) => ({ text: i % 8 === 7 ? `end${i}.` : `word${i}`, start: i * 0.4 + Math.floor(i / 8) * 0.5, end: i * 0.4 + Math.floor(i / 8) * 0.5 + 0.3 }));
+    const podcast = crypto.randomUUID(), stream = crypto.randomUUID();
+    for (const [id, duration, meta] of [[podcast, 1200, { hasAudio: true, speech: { status: "found", at: 1 }, transcript: { language: "en", words } }], [stream, 3600, { hasAudio: true }]] as const)
+      sqlite.prepare("INSERT INTO media_assets(id,user_id,kind,name,object_key,mime,bytes,duration,width,height,status,meta,created_at,updated_at) VALUES (?,?,'upload','Show.mp4',?,'video/mp4',10,?,1920,1080,'ready',?,1,1)")
+        .run(id, user.id, `media/${user.id}/${id}.mp4`, duration, JSON.stringify(meta));
+    const listed = await tool("list_long_videos", {});
+    expect(listed.structuredContent.videos.map((v: any) => [v.id, v.speech, v.transcribeCredits])).toEqual(expect.arrayContaining([[podcast, "found", 0], [stream, null, 2]]));
+    env.AI.run = async () => ({ status: "completed", output_text: JSON.stringify({ clips: [{ title: "The big idea", why: "It lands.", caption: "Watch.", hashtags: ["ideas"], first: 2, last: 10, hook: 9, payoff: 8, clarity: 8, energy: 7 }] }) });
+    const found = await tool("find_clips", { source: podcast, count: 3 });
+    expect(found.structuredContent).toMatchObject({ id: podcast, searching: false, moments: [{ index: 0, title: "The big idea", score: 82 }] });
+    // A long video is transcribed first, at the price it was shown; without it nothing is charged.
+    expect((await tool("find_clips", { source: stream })).content[0].text).toBe("Transcribing this video costs 2 credits. Check the price and try again.");
+    expect(await tool("find_clips", { source: stream, credits: 2 })).toMatchObject({ isError: false, structuredContent: { searching: true, credits: 2 } });
+    const clip = await tool("make_clip", { source: podcast, moment: 0, layout: "speakers", style: "karaoke" });
+    expect(clip.structuredContent).toMatchObject({ title: "The big idea", status: "queued", credits: 1 });
+    const spec = JSON.parse((sqlite.prepare("SELECT spec FROM videos WHERE id=?").get(clip.structuredContent.id) as any).spec);
+    expect(spec).toMatchObject({ format: "highlight", layout: { kind: "split", preset: "speakers" }, captions: { style: "karaoke", position: "middle" }, moment: { score: 82 } });
+    expect((await tool("make_clip", { source: podcast, moment: 4 })).content[0].text).toBe("Moment not found. Find clips in the video first.");
+    // The REST API: a moment by its seconds.
+    const rest = await bearer(env, "POST", "/api/v1/clips", key, { source: podcast, start: 30, end: 75, title: "Custom" });
+    expect([rest.status, rest.data.video.credits, rest.data.video.title]).toEqual([201, 1, "Custom"]);
+    expect((await bearer(env, "GET", `/api/v1/sources/${podcast}`, key)).data.source.clips).toBe(2);
+    expect((await bearer(env, "GET", `/api/v1/sources/${crypto.randomUUID()}`, key)).status).toBe(404);
+    expect((await tool("get_account", {})).structuredContent.credits.left).toBe(60 - 2 - 2);
   });
 
   it("reports failures as results or JSON-RPC errors, never internals, and needs a key", async () => {

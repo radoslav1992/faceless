@@ -20,7 +20,9 @@ and `npx wrangler deploy` as the deploy command (a full deploy, so the container
 | Cron `* * * * *` | – | Set by `wrangler deploy` (`triggers` in `wrangler.jsonc`) |
 | Turnstile widget | – | Create one for the domain; set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` |
 
-Apply the schema once, and again whenever a file lands in `migrations/`:
+Apply the schema once, and again whenever a file lands in `migrations/` — before the code that needs it is deployed
+(`0002_clips.sql` lets a long video be transcribed for credits, a run of kind `speech`, and indexes clips by their
+video; the code already running keeps working on it):
 
 ```sh
 npm run db:remote     # wrangler d1 migrations apply faceless --remote
@@ -173,6 +175,8 @@ everything you upload, including permission for every person shown.
     7. Withdraw a plan from Admin → Billing (the refund shows in Stripe) and give yourself a free month.
     8. Create an API key, call `GET /api/v1/me`, make a video through `/api/v1/videos` or the MCP server, and download
        it from the signed link.
+    9. On a paid plan, upload a podcast over 10 minutes on the Clips page, find clips in it (check the credits charged
+       for its transcription), make one clip with "Speaker focus" and one with "Two speakers", and post one.
 
 ## Known limits
 
@@ -183,6 +187,11 @@ everything you upload, including permission for every person shown.
   private accounts.
 - **Credit estimates**: a new video is charged by its script's estimated length (about 15 characters a second) before
   it is spoken; an owner's recording by its real length.
+- **Clips of long videos**: each clip's tracking and render download the whole source video into a container (up to
+  2 GB); a batch of clips of a two-hour stream moves that file once per clip. Faces are found with OpenCV's YuNet, so
+  "Speaker focus" and "Two speakers" follow faces, not voices (a speaker who is not facing the camera may be missed).
+  Videos are uploaded from the browser only: there is no import from a link or from a YouTube channel (downloading
+  from YouTube is against its terms).
 - **Legal pages**: the terms and privacy policy are a starting point; have them reviewed for your business and
   markets, in particular the withdrawal section (14 days, refund less the used share of the period's credits) and the
   retention periods ([PRIVACY.md](PRIVACY.md)).

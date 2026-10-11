@@ -30,6 +30,8 @@ const SeriesList = named(() => import("./app/Series"), "SeriesList");
 const SeriesWizard = named(() => import("./app/SeriesWizard"), "SeriesWizard");
 const SeriesPage = named(() => import("./app/Series"), "SeriesPage");
 const Schedule = named(() => import("./app/Schedule"), "SchedulePage");
+const Clips = named(() => import("./app/Clips"), "ClipsPage");
+const ClipSource = named(() => import("./app/Clips"), "SourcePage");
 const Channels = named(() => import("./app/Channels"), "ChannelsPage");
 const Billing = named(() => import("./app/Billing"), "BillingPage");
 const Settings = named(() => import("./app/Settings"), "SettingsPage");
@@ -142,6 +144,8 @@ export function App() {
             <Route path="series" element={<SeriesList />} />
             <Route path="series/new" element={<SeriesWizard />} />
             <Route path="series/:id" element={<SeriesPage />} />
+            <Route path="clips" element={<Clips />} />
+            <Route path="clips/:id" element={<ClipSource />} />
             <Route path="schedule" element={<Schedule />} />
             <Route path="channels" element={<Channels />} />
             <Route path="billing" element={<Billing />} />

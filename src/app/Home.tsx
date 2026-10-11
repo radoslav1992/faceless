@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { ArrowRight, PenSquare, Repeat, Sparkles } from "lucide-react";
+import { ArrowRight, PenSquare, Repeat, Scissors, Sparkles } from "lucide-react";
 import { useApi, useAuth, usePoll, number, when, type Series, type Video } from "../lib";
 import { VideoCard, making } from "./video-ui";
 import { StyleArt } from "../art";
@@ -22,8 +22,9 @@ export function Home() {
   return (
     <div className="page">
       <div className="page-head">
-        <div><h1>Hi, {first}</h1><p>{active.length ? `${active.length} series on autopilot.` : "Make a video, or put a channel on autopilot."}</p></div>
+        <div><h1>Hi, {first}</h1><p>{active.length ? `${active.length} series on autopilot.` : "Make a video, clip a long one, or put a channel on autopilot."}</p></div>
         <div className="toolbar">
+          <Link className="btn" to="/app/clips"><Scissors size={18} aria-hidden="true" /> Clip a video</Link>
           <Link className="btn" to="/app/series/new"><Repeat size={18} aria-hidden="true" /> New series</Link>
           <Link className="btn primary" to="/app/create"><PenSquare size={18} aria-hidden="true" /> Create video</Link>
         </div>
@@ -32,7 +33,7 @@ export function Home() {
       {!list.length && !videos.loading && !(series.data?.series.length) && (
         <div className="card glow stack" style={{ gap: 16, marginBottom: 22 }}>
           <div className="row" style={{ gap: 14 }}><Sparkles className="accent-text" aria-hidden="true" /><h2 style={{ fontSize: 22 }}>Let's make your first video</h2></div>
-          <p className="muted">Pick a faceless style below. You'll see the script before anything is made, and you can turn it into a series later.</p>
+          <p className="muted">Pick a faceless style below. You'll see the script before anything is made, and you can turn it into a series later. Have a podcast or stream? <Link className="text-link" to="/app/clips">Turn it into clips</Link>.</p>
           <div className="choice-grid">
             {(["scary", "facts", "dayinlife", "mashup", "motivation", "storytime"] as const).map((id) => (
               <Link key={id} to={`/app/create?template=${id}`} className="choice" style={{ textDecoration: "none" }}>

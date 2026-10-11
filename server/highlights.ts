@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { App, DbUser, Env } from "./types";
 import { DAY, mediaEnabled, now, uid } from "./types";
 import { dbFailure, json } from "./db";
-import { rate, take } from "./security";
+import { hit, take } from "./security";
 import { aiJson, clean } from "./ai";
 import { allowance } from "./billing";
 import { claimSpeech, listening, mayHaveSpeech, mayTranscribe, speechView, storedTranscript } from "./speech";
@@ -162,13 +162,13 @@ export function sourceView(a: any) {
     wanted,
     momentsError: typeof meta.momentsError === "string" ? meta.momentsError : null,
     /** What transcribing it costs (a long video), or 0 when its speech is found for free. */
-    transcribeCredits: a.status === "ready" && mayTranscribe(a, meta.hasAudio) ? speechCredits(a.duration) : 0,
+    transcribeCredits: a.status === "ready" && (view.speech === null || view.speech === "failed") && mayTranscribe(a, meta.hasAudio) ? speechCredits(a.duration) : 0,
     clips: Number(a.clips) || 0,
   };
 }
-const SOURCE_FIELDS = "a.id,a.kind,a.name,a.mime,a.bytes,a.duration,a.width,a.height,a.status,a.video_id,a.created_at,a.user_id,json_remove(a.meta,'$.transcript','$.alignment','$.token','$.listen') AS meta,"
+export const SOURCE_FIELDS = "a.id,a.kind,a.name,a.mime,a.bytes,a.duration,a.width,a.height,a.status,a.video_id,a.created_at,a.user_id,json_remove(a.meta,'$.transcript','$.alignment','$.token','$.listen') AS meta,"
   + "(SELECT COUNT(*) FROM videos v WHERE v.user_id=a.user_id AND v.kind='highlight' AND json_extract(v.spec,'$.source.assetId')=a.id) AS clips";
-async function ownedSource(env: Env, userId: string, id: string) {
+export async function ownedSource(env: Env, userId: string, id: string) {
   const a = z.uuid().safeParse(id).success
     ? await env.DB.prepare(`SELECT ${SOURCE_FIELDS} FROM media_assets a WHERE a.id=? AND a.user_id=? AND a.kind='upload' AND a.mime LIKE 'video/%'`).bind(id, userId).first<any>()
     : null;
@@ -244,46 +244,58 @@ highlights.get("/sources/:id", async (c) => {
  */
 highlights.post("/sources/:id/find", async (c) => {
   const user = c.get("user");
+  const d = findSchema.parse(await c.req.json());
+  const { status, body } = await findClips(c.env, user, c.req.param("id"), d);
+  return c.json(body, status);
+});
+export const findSchema = momentRequestSchema.extend({ idempotencyKey: z.uuid(), credits: z.number().int().min(0).default(0) });
+const tooMany = (message: string) => new HTTPException(429, { message });
+/**
+ * Finds clips in one of the owner's videos (the app's page, the REST API and the MCP server): at once when its speech
+ * is known (200); otherwise its speech is found first — free up to 10 minutes, else for `credits`, the price the person
+ * was shown — and the search follows in the background (202).
+ */
+export async function findClips(env: Env, user: DbUser, sourceId: string, d: z.infer<typeof findSchema>) {
   requireVerified(user);
-  const d = momentRequestSchema.extend({ idempotencyKey: z.uuid(), credits: z.number().int().min(0).default(0) }).parse(await c.req.json());
-  await rate(c, "moments", 30, 3600, user.id);
-  const a = await ownedSource(c.env, user.id, c.req.param("id"));
+  if ((await hit(env, "moments", 3600, user.id)) > 30) throw tooMany("That's a lot of searches for one hour. Try again later.");
+  const a = await ownedSource(env, user.id, sourceId);
   if (a.status !== "ready") throw new HTTPException(409, { message: a.status === "failed" ? "This video can't be used. Upload it again." : "This video is still being checked. Try again in a moment." });
   const meta = json<any>(a.meta, {}), speech = speechView(a).speech;
   const request: MomentRequest = { count: d.count, length: d.length, focus: d.focus };
+  const view = async () => sourceView(await ownedSource(env, user.id, a.id));
   if (meta.hasAudio === false) throw new HTTPException(400, { message: "This video has no sound. Clips are cut from what people say." });
   if (speech === "none") throw new HTTPException(409, { message: "We didn't hear anyone speak in this video, so it has no moments to cut." });
   if (speech === "found") {
-    await searchMoments(c.env, user.id, a.id, request);
-    return c.json({ source: sourceView(await ownedSource(c.env, user.id, a.id)) });
+    await searchMoments(env, user.id, a.id, request);
+    return { status: 200 as const, body: { source: await view() } };
   }
   const wanted = { ...request, at: now() };
   // Already being transcribed: the search waits for it — unless the speech was found meanwhile, then it runs now.
   if (speech === "pending") {
-    const waiting = await c.env.DB.prepare("UPDATE media_assets SET meta=json_remove(json_set(meta,'$.wanted',json(?)),'$.momentsError'),updated_at=? WHERE id=? AND json_extract(meta,'$.speech.status')='pending'")
+    const waiting = await env.DB.prepare("UPDATE media_assets SET meta=json_remove(json_set(meta,'$.wanted',json(?)),'$.momentsError'),updated_at=? WHERE id=? AND json_extract(meta,'$.speech.status')='pending'")
       .bind(JSON.stringify(wanted), now(), a.id).run();
-    if (!waiting.meta.changes) await searchMoments(c.env, user.id, a.id, request);
-    return c.json({ source: sourceView(await ownedSource(c.env, user.id, a.id)) }, waiting.meta.changes ? 202 : 200);
+    if (!waiting.meta.changes) await searchMoments(env, user.id, a.id, request);
+    return { status: waiting.meta.changes ? 202 as const : 200 as const, body: { source: await view() } };
   }
-  if (!mediaEnabled(c.env) || !c.env.CONTENT || !c.env.ELEVENLABS_API_KEY?.trim()) throw new HTTPException(503, { message: "Finding speech isn't available right now. Please try again later." });
-  const stored = (await c.env.DB.prepare("SELECT meta FROM media_assets WHERE id=?").bind(a.id).first<{ meta: string }>())?.meta;
+  if (!mediaEnabled(env) || !env.CONTENT || !env.ELEVENLABS_API_KEY?.trim()) throw new HTTPException(503, { message: "Finding speech isn't available right now. Please try again later." });
+  const stored = (await env.DB.prepare("SELECT meta FROM media_assets WHERE id=?").bind(a.id).first<{ meta: string }>())?.meta;
   const full = { ...json<any>(stored, {}), wanted, momentsError: undefined };
   if (mayHaveSpeech(a, meta.hasAudio)) {
-    await rate(c, "speech", 10, 3600, user.id);
-    const next = await claimSpeech(c.env, user.id, full, a.duration);
-    if (!next) throw new HTTPException(429, { message: "You've used today's free speech finding (20 files or 30 minutes of video). Try again tomorrow." });
-    await c.env.DB.prepare("UPDATE media_assets SET meta=?,updated_at=? WHERE id=?").bind(JSON.stringify(next), now(), a.id).run();
+    if ((await hit(env, "speech", 3600, user.id)) > 10) throw tooMany("That's a lot of videos to listen to for one hour. Try again later.");
+    const next = await claimSpeech(env, user.id, full, a.duration);
+    if (!next) throw tooMany("You've used today's free speech finding (20 files or 30 minutes of video). Try again tomorrow.");
+    await env.DB.prepare("UPDATE media_assets SET meta=?,updated_at=? WHERE id=?").bind(JSON.stringify(next), now(), a.id).run();
     try {
-      await c.env.CONTENT.create({ id: `speech-${a.id}-${now()}`, params: { inspectId: a.id } });
+      await env.CONTENT.create({ id: `speech-${a.id}-${now()}`, params: { inspectId: a.id } });
     } catch {
-      await c.env.DB.prepare("UPDATE media_assets SET meta=? WHERE id=?").bind(JSON.stringify({ ...full, wanted: undefined, speech: { status: "failed", at: now() } }), a.id).run();
+      await env.DB.prepare("UPDATE media_assets SET meta=? WHERE id=?").bind(JSON.stringify({ ...full, wanted: undefined, speech: { status: "failed", at: now() } }), a.id).run();
       throw new HTTPException(503, { message: "Finding speech isn't available right now. Please try again later." });
     }
-    return c.json({ source: sourceView(await ownedSource(c.env, user.id, a.id)) }, 202);
+    return { status: 202 as const, body: { source: await view() } };
   }
   if (!mayTranscribe(a, meta.hasAudio)) throw new HTTPException(400, { message: "Choose one of your own videos up to 2 hours long." });
-  return c.json(await transcribeForCredits(c.env, user, a, full, d.idempotencyKey, d.credits), 202);
-});
+  return { status: 202 as const, body: await transcribeForCredits(env, user, a, full, d.idempotencyKey, d.credits) };
+}
 /**
  * A long video transcribed for credits: a run of kind "speech" reserves them (refunded if it fails); one at a time per
  * file. The same request twice is charged once.

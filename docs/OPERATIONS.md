@@ -76,8 +76,9 @@ The thresholds are constants at the top of `server/operations.ts` (`FAILURE_BURS
 ## 4. Failure codes
 
 Runs store a short code (`runs.error`); people see a plain message on the video and "Your credits were refunded". The
-summary groups codes by prefix: `GENERATION_` is fal, `VOICE_` is ElevenLabs, `RENDER…` and `MEDIA_TIMEOUT` the
-renderer, everything else "Other".
+summary groups codes by prefix: `GENERATION_` is fal, `VOICE_` and `SPEECH_` are ElevenLabs, `RENDER…` and
+`MEDIA_TIMEOUT` the renderer, everything else "Other". A run of kind `speech` transcribes a long video for credits (no
+video is attached to it); its failure refunds the credits and the Clips page says the video couldn't be transcribed.
 
 | Code | Meaning |
 | --- | --- |
@@ -90,6 +91,9 @@ renderer, everything else "Other".
 | `VOICE_UNAVAILABLE` | ElevenLabs refused the key or plan (401/402), or the key or voice is missing |
 | `VOICE_BUSY` | ElevenLabs rate or concurrency limit (429) |
 | `VOICE_FAILED` | the narration failed, or a retried step found a claimed voice without its result |
+| `SPEECH_UNAVAILABLE`, `SPEECH_BUSY`, `SPEECH_FAILED` | Scribe refused the key or plan, was rate limited, or failed transcribing a long video |
+| `SPEECH_UNCERTAIN` | a paid transcription was claimed but its answer was lost: it may have been billed by ElevenLabs |
+| `SPEECH_INVALID` | the video to transcribe was deleted or changed before the run started. Caused by the request |
 | `RENDERER_UNAVAILABLE` | the container did not answer, or the `MEDIA_RENDERER` binding is missing |
 | `MEDIA_TIMEOUT` | no render finished in about 40 minutes (no free container, or a stuck render), or maintenance ended a run at 3 hours |
 | `MEDIA_LOST` | the container no longer knew the job (it restarted) |
@@ -223,7 +227,8 @@ privacy policy) together.
 
 ## 10. Migrations and rollback
 
-The schema is `migrations/0001_initial.sql`. Apply new migrations **before** deploying the code that needs them
+The schema is in `migrations/` (`0001_initial.sql`, then `0002_clips.sql`, which rebuilt `runs` with every row,
+index and trigger to allow runs of kind `speech`). Apply new migrations **before** deploying the code that needs them
 (`npm run db:remote`) and keep them additive (new tables, nullable columns, indexes, triggers), so the version already
 running keeps working on the newer schema and a Worker rollback (`npx wrangler rollback`) never needs a schema
 rollback. To check: `npx wrangler d1 migrations list faceless --remote` shows nothing left to apply.

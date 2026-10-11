@@ -258,9 +258,9 @@ const types: Record<string, MediaType> = {
   "video/mp4": "video", "video/quicktime": "video", "video/webm": "video",
   "audio/mpeg": "audio", "audio/wav": "audio", "audio/x-wav": "audio", "audio/mp4": "audio", "audio/x-m4a": "audio", "audio/aac": "audio", "audio/ogg": "audio",
 };
-/** The server's limits per type (server/media.ts). */
+/** The server's limits per type (server/media.ts): videos up to the plan's (long videos for clips on paid plans). */
 const limits: Record<MediaType, number> = { image: 20 * MB, video: 500 * MB, audio: 50 * MB };
-const limitFor = (type: MediaType, _plan?: string) => limits[type];
+const limitFor = (type: MediaType, plan?: string) => (type === "video" ? planById(plan).videoMb * MB : limits[type]);
 export const ACCEPT: Record<MediaType | "any", string> = {
   image: "image/jpeg,image/png,image/webp",
   video: "video/mp4,video/quicktime,video/webm,.mov",
@@ -323,7 +323,7 @@ export function useUploads(options: { only?: MediaType; onDone?: (asset: Asset) 
         ? only ? `Choose ${typeWords[only].one} file.` : "This file type isn't supported. Upload JPG, PNG or WebP images, MP4, MOV or WebM videos, or MP3, WAV, M4A or OGG tracks."
         : only && type !== only ? `Choose ${typeWords[only].one} file.`
         : file.size > limitFor(type, settings.current.plan)
-          ? `${typeWords[type].many} can be up to ${limitFor(type, settings.current.plan) / MB} MB${type === "video" && planById(settings.current.plan).id === "free" ? " on the free trial (paid plans take videos up to 2 hours)" : ""}.`
+          ? `${typeWords[type].many} can be up to ${(limitFor(type, settings.current.plan) / MB).toLocaleString("en-US")} MB${type === "video" && planById(settings.current.plan).id === "free" ? " on the free trial (paid plans take videos up to 2 hours)" : ""}.`
         : file.size < 24 ? "This file is empty." : null;
       const key = newKey();
       fresh.push({ key, name: file.name, bytes: file.size, type, progress: 0, status: problem ? "failed" : "queued", error: problem, asset: null });

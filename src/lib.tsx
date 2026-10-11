@@ -5,6 +5,7 @@ import type { SpeechStatus } from "../shared/speech";
 import type { SeriesSettings } from "../shared/series";
 import type { TemplateId, VideoKind } from "../shared/templates";
 import type { PlatformId } from "../shared/social";
+import type { Moment, MomentRequest } from "../shared/highlights";
 
 // The app's API client, signed-in state and shared types. Every request goes to /api on this site.
 
@@ -36,6 +37,16 @@ export type Asset = {
   status: "uploading" | "checking" | "ready" | "failed"; videoId: string | null; hasAudio: boolean | null; error: string | null; createdAt: number; url: string;
   /** Speech found in an own video or track (null: never looked for), and the language it was heard in. */
   speech?: SpeechStatus | null; speechLanguage?: string | null;
+};
+/** One of the owner's videos as a source of clips (server/highlights.ts): what was found in it, and its clips. */
+export type Source = Asset & {
+  moments: Moment[]; momentsAt: number | null;
+  /** A search waiting for the video's speech to be found. */
+  wanted: (MomentRequest & { at: number }) | null;
+  momentsError: string | null;
+  /** What transcribing it costs (a long video), or 0. */
+  transcribeCredits: number;
+  clips: number;
 };
 export type LibraryItem = { id: string; kind: "music" | "clip"; name: string; tags: string[]; duration: number; width: number; height: number; url: string; thumb: string | null };
 export type { VideoKind };
