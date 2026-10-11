@@ -151,7 +151,7 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
           : <button type="button" className="btn sm" onClick={onBackdrop}><Film size={14} aria-hidden="true" /> Choose clip</button>}>
         {spec.backdrop && <div className="row wrap" style={{ gap: 8 }}><span className="small">{backdrop?.name || "Library clip"}</span><button type="button" className="btn sm" onClick={onBackdrop}>Swap</button></div>}
       </EditorSection>
-      <EditorSection title="Subtitles" hint="Word by word over the whole voice. Key word: Title Case, one key word per line in green."
+      <EditorSection title="Subtitles" hint="Word by word over the whole voice. Key word: Title Case, one key word per line in lime."
         action={<Switch checked={spec.captions.enabled} onChange={(enabled) => onChange({ ...spec, captions: { ...spec.captions, enabled } })} label="Show subtitles" />}>
         {spec.captions.enabled && <CaptionStylePicker label="Subtitle style" value={spec.captions.style} onChange={(style) => onChange({ ...spec, captions: { ...spec.captions, style } })} />}
       </EditorSection>
