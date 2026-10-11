@@ -6,7 +6,8 @@ The payloads and the HTTP API are described in shared/render.ts:
   GET    /jobs/:id/file/:n  -> the n-th output file (video/mp4 or image/jpeg)
   DELETE /jobs/:id          -> forgets the job (stops it if running)
 Operations: 'compose' (segments + voice + music + burned ASS -> MP4, optional JPEG cover), 'stills' (one JPEG per
-slide; carousel slides place a picture in a rounded box on a page colour and a logo over it), 'inspect' (what an uploaded file is) and 'track' (where the speaker is in a part of a video, for clips).
+slide; carousel slides place a picture in a rounded box on a page colour and a logo over it), 'inspect' (what an
+uploaded file is) and 'track' (where the speaker is in a part of a video, and the two people seen most, for clips).
 One job runs at a time; inputs are downloaded only from SOURCE_ORIGIN.
 """
 import bisect, json, math, os, re, shutil, struct, subprocess, tempfile, threading, time, urllib.error, urllib.request
@@ -52,6 +53,7 @@ FACE_SCORE = 0.7
 CUT_SCORE = 0.35        # FFmpeg scene score of a hard cut
 NARROWEST = 9 / 16      # the frame the crop makes: the part of a wide video it keeps sets how still the crop holds
 MAX_TRACK_POINTS = 400
+MAX_PANES = 2           # windows of a clip's picture stacked in the frame (two speakers; a screen and a camera)
 # The caption fonts (renderer/fonts, the same files the browser preview uses); libass loads them before system fonts.
 FONTS_DIR = os.environ.get('FONTS_DIR', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts'))
 CURRENT = threading.local()  # the job this worker thread processes, so a cancel can stop its FFmpeg
@@ -398,11 +400,44 @@ def segment_plan(s, count, width, height):
     if loop and keep: raise ValueError('Invalid loop: with cuts')
     # The crop filter is built (and so the path checked) now; the path is on the segment's own clock.
     follow = follow_crop(s['follow'], width, height) if video and s.get('follow') is not None else None
+    panes = panes_plan(s['panes'], width, height) if video and s.get('panes') is not None else None
+    if follow and panes: raise ValueError('Invalid panes: with a speaker path')
     # Fields that do not apply to the kind are checked above but ignored.
     return {'kind': kind, 'input': index(s.get('input'), count), 'frames': frames, 'fit': mode,
             'motion': motion if kind == 'image' else None, 'trim': trim if video else 0.0,
-            'audio': audio if video else 0.0, 'keep': keep, 'follow': follow, 'transition': transition,
+            'audio': audio if video else 0.0, 'keep': keep, 'follow': follow, 'panes': panes, 'transition': transition,
             'loop': loop and video}
+
+def panes_plan(panes, width, height):
+    """A clip's layout (shared/highlights.ts): 1-2 windows of the picture (x, y, w, h: shares of it) stacked from the
+    top, each scaled to fill the frame's width and its `height` (even pixels); the heights add up to the frame's."""
+    if not isinstance(panes, list) or not 1 <= len(panes) <= MAX_PANES: raise ValueError('Invalid panes')
+    plan, total = [], 0
+    for p in panes:
+        if not isinstance(p, dict): raise ValueError('Invalid pane')
+        x, y, w, h = number(p['x'], 0, 1), number(p['y'], 0, 1), number(p['w'], 0.02, 1), number(p['h'], 0.02, 1)
+        if x + w > 1.0005 or y + h > 1.0005: raise ValueError('Invalid pane: outside the picture')
+        tall = number(p['height'], 16, height)
+        if tall != int(tall) or int(tall) % 2: raise ValueError('Invalid pane height')
+        plan.append({'x': x, 'y': y, 'w': w, 'h': h, 'height': int(tall)})
+        total += int(tall)
+    if total != height: raise ValueError('Invalid panes: heights')
+    return plan
+
+def panes_filter(graph, source, label, panes, width):
+    """Crops each window of the picture `source` (whole even pixels, inside the picture), fills its pane with it and
+    stacks the panes from the top; returns the result's label."""
+    n = len(panes)
+    parts = [f'{label}s{k}' for k in range(n)]
+    if n > 1: graph.append(f'{source}split={n}{"".join(f"[{p}]" for p in parts)}')
+    for k, p in enumerate(panes):
+        crop = (f"crop=w='max(2,trunc(iw*{p['w']:.5f}/2)*2)':h='max(2,trunc(ih*{p['h']:.5f}/2)*2)'"
+                f":x='min(iw-ow,trunc(iw*{p['x']:.5f}))':y='min(ih-oh,trunc(ih*{p['y']:.5f}))'")
+        graph.append(f'{source if n == 1 else f"[{parts[k]}]"}{crop},{cover_filter(width, p["height"])}[{label}p{k}]')
+    if n == 1: return f'[{label}p0]'
+    graph.append(f'{"".join(f"[{label}p{k}]" for k in range(n))}vstack=inputs={n}[{label}]')
+    return f'[{label}]'
+
 
 def transition_plan(t):
     """A segment's transition in: its first frames blend over the last ones of what comes before (xfade), for a whole
@@ -555,7 +590,8 @@ def compose(job, payload, origin):
                 cut = '+'.join(f'gte(t,{a - 0.001:.6f})*lt(t,{b - 0.001:.6f})' for a, b in s['keep'])
                 graph.append(f"{picture}select='{cut}',setpts=N/{FPS}/TB[c{i}]")
                 picture = f'[c{i}]'
-            picture = fit(graph, picture, f'f{i}', s['fit'], width, height, blur)
+            # A clip's layout stacks windows of the picture; anything else is fitted to the frame.
+            picture = panes_filter(graph, picture, f'f{i}', s['panes'], width) if s['panes'] else fit(graph, picture, f'f{i}', s['fit'], width, height, blur)
             # A source shorter than the segment holds its last frame.
             graph.append(f'{picture}format=yuv420p,tpad=stop_mode=clone:stop_duration={length:.3f},trim=end_frame={n},'
                          f'setpts=N/{FPS}/TB[v{i}]')
@@ -908,14 +944,35 @@ def track_path(samples, cuts, aspect, fps=TRACK_FPS):
     kept = sorted(start for _, start in sorted(zip(jumps, [s for s, _ in shots[1:]]), reverse=True)[:(MAX_TRACK_POINTS - 2) // 4])
     return {'v': 1, 'points': keyframes(shot_cameras(samples, kept, crop, fps)[0], 0.06)[0][:MAX_TRACK_POINTS]}
 
+def face_pair(samples):
+    """The two people seen most over a part of a video, as [[x, y], [x, y]] centres of their faces (shares of the
+    picture), the left one first; None when fewer than two people were found. A face joins the group whose centre is
+    nearest across the picture (within 0.15 of its width); a group weighs its faces' summed width, so the people on
+    screen longest and largest win. The second must weigh at least a fifth of the first and sit apart from it."""
+    groups = []
+    for faces in samples:
+        for cx, cy, w, _h in faces:
+            near = min(groups, key=lambda g: abs(g['x'] - cx), default=None)
+            if near is not None and abs(near['x'] - cx) < 0.15:
+                total = near['weight'] + w
+                near.update(x=(near['x'] * near['weight'] + cx * w) / total, y=(near['y'] * near['weight'] + cy * w) / total, weight=total)
+            else:
+                groups.append({'x': cx, 'y': cy, 'weight': w})
+    groups.sort(key=lambda g: -g['weight'])
+    if len(groups) < 2 or groups[1]['weight'] < 0.2 * groups[0]['weight']: return None
+    left, right = sorted(groups[:2], key=lambda g: g['x'])
+    if right['x'] - left['x'] < 0.2: return None
+    return [[round(min(1, max(0, g['x'])), 3), round(min(1, max(0, g['y'])), 3)] for g in (left, right)]
+
 def track_plan(payload, origin):
     """Validates a track payload completely, before anything is downloaded."""
     return {'url': input_url(payload.get('url'), origin), 'start': number(payload['start'], 0, LONG_LENGTH),
             'length': number(payload['length'], 1, TRACK_WINDOW)}
 
 def track(job, payload, origin):
-    """Where the main face is in a part of a video (the path of shared/track.ts, on the video's own clock). No file
-    comes back: the path is in the job's status. A video no wider than 9:16 is never cropped, so it needs none."""
+    """Where the main face is in a part of a video (the path of shared/track.ts, on the video's own clock), and the two
+    people seen most in it (`faces`, for the two-speaker layout). No file comes back: both are in the job's status. A
+    video no wider than 9:16 is never cropped, so it needs neither."""
     plan = checked(track_plan, payload, origin)
     source = os.path.join(job['dir'], 'input0')
     download(plan['url'], source)
@@ -929,6 +986,8 @@ def track(job, payload, origin):
         path = track_path(samples, cuts, media['width'] / media['height'])
         # From the part's clock to the video's.
         path['points'] = [[round(t + start, 2), x] for t, x in path['points']]
+        pair = face_pair(samples)
+        if pair: path['faces'] = pair
     job.update(status='completed', duration=round(length, 3), files=0, outputs=[], track=path)
 
 def failure_code(e):

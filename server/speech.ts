@@ -4,14 +4,15 @@ import { DAY, now } from "./types";
 import { json } from "./db";
 import { take, token } from "./security";
 import { failureCode, providerFetch, ProviderError } from "./providers/http";
-import { SPEECH_MAX_SECONDS, TRANSCRIPT_MAX_WORDS, type SpeechStatus, type Transcript } from "../shared/speech";
+import { LONG_VIDEO_SECONDS, SPEECH_MAX_SECONDS, TRANSCRIPT_MAX_WORDS, type SpeechStatus, type Transcript } from "../shared/speech";
 import type { CaptionWord } from "../shared/captions";
 
 // Speech in uploaded videos and tracks: an owner's own voiceover is timed by its words for subtitles and scenes.
 // ElevenLabs Scribe v2 (the pipeline rech-bg runs in production) reads the file itself through a short-lived
 // capability link and returns word timings in the language it detects. The words are kept in the file's meta
 // (bounded); failures only mean "no subtitles", never a failed upload. Files up to 10 minutes are transcribed for
-// free, bounded per person and day (files and minutes).
+// free, bounded per person and day (files and minutes); longer videos (for clips) on request, for credits (a run of
+// kind "speech").
 
 export const SCRIBE_MODEL = "scribe_v2";
 export const SCRIBE_URL = "https://api.elevenlabs.io/v1/speech-to-text";
@@ -64,9 +65,9 @@ export async function transcribe(e: Env, url: string, duration: number): Promise
   body.set("source_url", url);
   body.set("timestamps_granularity", "word");
   body.set("tag_audio_events", "false");
-  // About ten minutes, and more for longer files (Scribe answers when the whole file is done).
+  // About ten minutes, and more for long videos (Scribe answers when the whole file is done).
   const r = await providerFetch(SCRIBE_URL, {
-    method: "POST", headers: { "xi-api-key": key }, body, signal: AbortSignal.timeout((10 + Math.min(duration, SPEECH_MAX_SECONDS) / 240) * 60000),
+    method: "POST", headers: { "xi-api-key": key }, body, signal: AbortSignal.timeout((10 + Math.min(duration, LONG_VIDEO_SECONDS) / 240) * 60000),
   });
   if (!r.ok) throw new ProviderError(await failureCode(r, "SPEECH"));
   return scribeWords(await r.json(), duration);
@@ -92,6 +93,10 @@ const ownSound = (a: { kind: string; mime: string; duration: number }, hasAudio:
 /** Whether a file's speech is transcribed for free: an own video or track with sound, up to 10 minutes. */
 export function mayHaveSpeech(a: { kind: string; mime: string; duration: number }, hasAudio: boolean | null | undefined) {
   return ownSound(a, hasAudio) && a.duration <= SPEECH_MAX_SECONDS;
+}
+/** Whether a longer file can be transcribed on request (for credits): an own video or track with sound, up to 2 hours. */
+export function mayTranscribe(a: { kind: string; mime: string; duration: number }, hasAudio: boolean | null | undefined) {
+  return ownSound(a, hasAudio) && a.duration > SPEECH_MAX_SECONDS && a.duration <= LONG_VIDEO_SECONDS + 1;
 }
 /** Meta for a file whose speech is about to be transcribed: pending, with a capability token Scribe reads it with. */
 export function listening(meta: Record<string, unknown>, extra: Record<string, unknown> = {}) {

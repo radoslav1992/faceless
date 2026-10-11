@@ -694,6 +694,40 @@ class CutsTest(RendererTest):
             self.assert_fails({'operation': 'compose', 'urls': [FIXTURES.url('bands.mp4')], 'width': 720, 'height': 1280,
                                'synthetic': False, 'ass': '', 'segments': [segment]}, 'MEDIA_INVALID')
 
+    def test_panes_stack_windows_of_the_picture(self):
+        # Two speakers: the left (red) band on top, the right (blue) band below, each filling its half.
+        panes = [{'x': 0, 'y': 0, 'w': 1 / 3, 'h': 1, 'height': 640}, {'x': 2 / 3, 'y': 0, 'w': 1 / 3, 'h': 1, 'height': 640}]
+        job = self.compose('bands.mp4', {'input': 0, 'kind': 'video', 'duration': 1.0, 'trim': 0.5, 'audio': 1, 'panes': panes})
+        self.assertEqual(job['status'], 'completed', job)
+        mp4 = job['outputs'][0]
+        self.assertEqual(ffprobe(mp4)['streams'][0]['width'], 720)
+        for x in (10, 360, 710):
+            self.assertTrue(near(pixel(mp4, 0.5, x, 320), (255, 0, 0)), f'red on top at {x}')
+            self.assertTrue(near(pixel(mp4, 0.5, x, 960), (0, 0, 255)), f'blue below at {x}')
+        # A screen and a camera: a small window of the middle band on top (a third of the frame), the whole picture below.
+        panes = [{'x': 0.4, 'y': 0.2, 'w': 0.2, 'h': 0.4, 'height': 426}, {'x': 0, 'y': 0, 'w': 1, 'h': 1, 'height': 854}]
+        job = self.compose('bands.mp4', {'input': 0, 'kind': 'video', 'duration': 1.0, 'audio': 1, 'panes': panes, 'keep': [[0, 0.5], [1, 1.5]]})
+        self.assertEqual(job['status'], 'completed', job)
+        mp4 = job['outputs'][0]
+        self.assertTrue(near(pixel(mp4, 0.5, 360, 200), (0, 255, 0)), 'the camera window')
+        self.assertTrue(near(pixel(mp4, 0.5, 360, 1100), (0, 255, 0)), 'the middle of the screen below')
+        # One fixed window over the whole frame: the right band.
+        job = self.compose('bands.mp4', {'input': 0, 'kind': 'video', 'duration': 1.0, 'audio': 1,
+                                         'panes': [{'x': 0.7, 'y': 0, 'w': 0.3, 'h': 1, 'height': 1280}]})
+        self.assertEqual(job['status'], 'completed', job)
+        for x in (10, 710): self.assertTrue(near(pixel(job['outputs'][0], 0.5, x, 640), (0, 0, 255)))
+
+    def test_invalid_panes_fail_before_any_download(self):
+        video = lambda **s: {'input': 0, 'kind': 'video', 'duration': 2.0, **s}
+        pane = lambda **p: {'x': 0, 'y': 0, 'w': 1, 'h': 1, 'height': 640, **p}
+        for segment in (video(panes=[]), video(panes=[pane()]), video(panes=[pane(), pane(), pane(height=0)]),
+                        video(panes=[pane(), pane(height=639)]), video(panes=[pane(height=641), pane(height=639)]),
+                        video(panes=[pane(x=0.5), pane()]), video(panes=[pane(w=0.01), pane()]), video(panes=[pane(x='0'), pane()]),
+                        video(panes=[pane(height=640.5), pane(height=639.5)]), video(panes='top'), video(panes=[[0, 0, 1, 1], pane()]),
+                        video(panes=[pane(height=1280)], follow=[[0, 0.5]])):
+            self.assert_fails({'operation': 'compose', 'urls': [FIXTURES.url('bands.mp4')], 'width': 720, 'height': 1280,
+                               'synthetic': False, 'ass': '', 'segments': [segment]}, 'MEDIA_INVALID')
+
     def test_inspect_allows_long_videos_only_when_asked(self):
         self.assertEqual(run({'operation': 'inspect', 'url': FIXTURES.url('long.wav')}).get('error'), 'MEDIA_TOO_LONG')
         job = run({'operation': 'inspect', 'url': FIXTURES.url('long.wav'), 'maxSeconds': 7200})
@@ -774,6 +808,17 @@ class TrackTest(RendererTest):
         points = server.track_path(self.faces(xs), [k * 2.0 for k in range(1, 300)], self.WIDE)['points']
         self.assertValid(points)
         self.assertGreater(len(points), 100)
+
+    def test_the_two_people_seen_most_left_one_first(self):
+        # Two people side by side the whole time, one more often found; a passer-by on the far right now and then.
+        samples = [[(0.7, 0.42, 0.1, 0.18)] + ([(0.28, 0.38, 0.12, 0.2)] if i % 3 else []) + ([(0.97, 0.5, 0.05, 0.08)] if i == 5 else [])
+                   for i in range(40)]
+        self.assertEqual(server.face_pair(samples), [[0.28, 0.38], [0.7, 0.42]])
+        # One person, two faces too close to tell apart, or a second one seen only for a moment: no pair.
+        self.assertIsNone(server.face_pair(self.faces([0.3] * 40)))
+        self.assertIsNone(server.face_pair([[(0.4, 0.4, 0.1, 0.18), (0.52, 0.4, 0.1, 0.18)]] * 20))
+        self.assertIsNone(server.face_pair([[(0.3, 0.4, 0.1, 0.18)] + ([(0.8, 0.4, 0.1, 0.18)] if i < 2 else []) for i in range(40)]))
+        self.assertIsNone(server.face_pair([]))
 
     def test_follow_crop_builds_a_flat_sum_and_refuses_bad_paths(self):
         crop = server.follow_crop([[0, 0.2], [1, 0.2], [1, 0.8], [3, 0.6]], 720, 1280)

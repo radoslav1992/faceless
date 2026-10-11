@@ -41,6 +41,12 @@ export type ComposeSegment = {
    */
   follow?: [number, number][] | null;
   /**
+   * Video only, a clip's layout (shared/highlights.ts), instead of `fit` and never with `follow`: windows of the
+   * picture stacked from the top, each `x`, `y`, `w`, `h` (shares of the picture: the window cropped) scaled to fill
+   * the frame's width and `height` pixels (even). The heights add up to the frame's.
+   */
+  panes?: { x: number; y: number; w: number; h: number; height: number }[] | null;
+  /**
    * The way in from the segment before (not on the first): its first `duration` seconds (a whole number of frames)
    * blend over the last ones before it, so the output is shorter by that overlap. Absent: a hard cut.
    */
@@ -99,7 +105,8 @@ export type StillsPayload = {
 export type InspectPayload = { id: string; operation: "inspect"; url: string; maxSeconds?: number };
 /**
  * Where the main face is in seconds `start` to `start + length` (at most 10 minutes) of a video: the speaker path of
- * shared/track.ts on the video's own clock, in the status (`track`). No file comes back.
+ * shared/track.ts on the video's own clock, and the two people seen most (`faces`), in the status (`track`). No file
+ * comes back.
  */
 export type TrackPayload = { id: string; operation: "track"; url: string; start: number; length: number };
 export type RenderPayload = ComposePayload | StillsPayload | InspectPayload | TrackPayload;
@@ -114,6 +121,6 @@ export type RenderStatus = {
   files?: number;
   /** inspect: what the file is. */
   meta?: { kind: "video" | "audio" | "image"; width: number; height: number; hasAudio: boolean };
-  /** track: the speaker path (checked against shared/track.ts by the Worker). */
-  track?: { v: number; points: [number, number][] };
+  /** track: the speaker path and the two people seen most (checked against shared/track.ts by the Worker). */
+  track?: { v: number; points: [number, number][]; faces?: [number, number][] };
 };

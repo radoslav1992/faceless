@@ -9,7 +9,7 @@ import { hit, rate, sha } from "./security";
 import { spendSpeech, speechView, storedTranscript } from "./speech";
 import { forcedAlignment } from "./providers/elevenlabs";
 import { ProviderError } from "./providers/http";
-import { narrationCurrent, specSchema, type StorySpec } from "../shared/formats";
+import { narrationCurrent, storySpec, type StorySpec } from "../shared/formats";
 import { voices } from "../shared/voices";
 import { SPEECH_CHARS_PER_SECOND } from "../shared/credits";
 import { languageCodes, languageName, type LanguageCode } from "../shared/series";
@@ -190,7 +190,7 @@ export type SpecChoices = {
 export function conceptToSpec(k: StoryConcept, c: SpecChoices): StorySpec | null {
   const hashtags = [...(c.hashtags || []), ...k.hashtags].map((h) => h.replace(/[^\p{L}\p{N}_#]/gu, "")).filter((h) => /^#?[\p{L}\p{N}_]{1,60}$/u.test(h)).slice(0, 15);
   const animate = Math.min(c.animate || 0, k.scenes.length);
-  const parsed = specSchema.safeParse({
+  const parsed = storySpec.safeParse({
     format: "story", kind: c.kind, language: c.language,
     narration: { kind: "voice", voiceId: c.voiceId },
     scenes: k.scenes.map((s, i) => ({ text: s.text, description: s.picture, keys: s.keys, source: !c.backdropId && i < animate ? "clip" : "image" })),

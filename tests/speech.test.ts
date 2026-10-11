@@ -221,37 +221,47 @@ describe("speech in uploads (free, up to 10 minutes)", () => {
     expect(await claimSpeech(env, "u4", {}, 29 * 60)).not.toBeNull();
   });
 
-  it("never transcribes a file over 10 minutes for free, on any plan", async () => {
-    // The renderer is asked to refuse files over 10 minutes: such an upload fails, unheard.
+  it("never transcribes a file over 10 minutes for free; long videos only on paid plans", async () => {
+    // On the free trial the renderer is asked to refuse files over 10 minutes: such an upload fails, unheard.
     const refused = setup(3000, "MEDIA_TOO_LONG");
-    subscribe(refused.sqlite, refused.user.id, "studio");
     let calls = scribeService(refused.env, () => [["x", 0, 1]]);
     const long = await upload(refused.env, refused.sqlite, refused.user);
     await run(refused.env, { inspectId: long });
     expect(refused.log[0]).toMatchObject({ operation: "inspect", maxSeconds: SPEECH_MAX_SECONDS });
     expect(calls).toHaveLength(0);
     expect((await call(worker, refused.env, "GET", `/api/media/${long}`, undefined, refused.user.cookie)).data.asset)
-      .toMatchObject({ status: "failed", bytes: 0, error: "Videos and tracks can be up to 10 minutes long.", speech: null });
+      .toMatchObject({ status: "failed", bytes: 0, error: "Videos can be up to 10 minutes long on the free trial; paid plans take videos up to 2 hours.", speech: null });
 
-    // A longer file that got through anyway is kept, but never sent to Scribe (nor on request).
-    const { env, sqlite, user } = setup(3000);
+    // A long video uploaded on a paid plan is checked up to 2 hours and kept, but never sent to Scribe for free (nor on
+    // "Find speech": clips are found in it for credits, server/highlights.ts).
+    const { env, sqlite, user, log } = setup(3000);
     calls = scribeService(env, () => [["x", 0, 1]]);
     const id = await upload(env, sqlite, user);
+    sqlite.prepare("UPDATE media_assets SET meta=? WHERE id=?").run(JSON.stringify({ token: "t".repeat(64), maxSeconds: 7200 }), id);
     await run(env, { inspectId: id });
+    expect(log[0]).toMatchObject({ operation: "inspect", maxSeconds: 7200 });
     expect(calls).toHaveLength(0);
     expect((await call(worker, env, "GET", `/api/media/${id}`, undefined, user.cookie)).data.asset).toMatchObject({ status: "ready", duration: 3000, speech: null });
     const asked = await call(worker, env, "POST", `/api/media/${id}/speech`, {}, user.cookie);
     expect(asked.status).toBe(400);
-    expect(asked.data.error).toMatch(/up to 10 minutes long/);
+    expect(asked.data.error).toMatch(/longer than 10 minutes: find clips in it on the Clips page/);
     expect(meta(sqlite, id).listen).toBeUndefined();
 
-    // Uploads are bounded the same for everyone: a paid plan takes no larger videos.
+    // Uploads: 500 MB and 10 minutes on the free trial, 2,000 MB and 2 hours on a paid plan.
+    const free = await call(worker, env, "POST", "/api/media/uploads", { name: "Podcast.mp4", mime: "video/mp4", bytes: 800 * 1024 * 1024 }, user.cookie);
+    expect(free.status).toBe(413);
+    expect(free.data.error).toBe("Videos can be up to 500 MB on the free trial; paid plans take videos up to 2 hours.");
+    const short = await call(worker, env, "POST", "/api/media/uploads", { name: "Clip.mp4", mime: "video/mp4", bytes: 1000 }, user.cookie);
+    expect(meta(sqlite, short.data.id)).toEqual({ token: expect.stringMatching(/^[0-9a-f]{64}$/), maxSeconds: 600 });
     subscribe(sqlite, user.id, "studio");
-    const big = await call(worker, env, "POST", "/api/media/uploads", { name: "Podcast.mp4", mime: "video/mp4", bytes: 800 * 1024 * 1024 }, user.cookie);
-    expect(big.status).toBe(413);
-    expect(big.data.error).toBe("Videos can be up to 500 MB.");
-    const small = await call(worker, env, "POST", "/api/media/uploads", { name: "Clip.mp4", mime: "video/mp4", bytes: 1000 }, user.cookie);
-    expect(small.status).toBe(201);
-    expect(Object.keys(meta(sqlite, small.data.id))).toEqual(["token"]);
+    const paid = await call(worker, env, "POST", "/api/media/uploads", { name: "Podcast.mp4", mime: "video/mp4", bytes: 800 * 1024 * 1024 }, user.cookie);
+    expect(paid.status).toBe(201);
+    expect(meta(sqlite, paid.data.id).maxSeconds).toBe(7200);
+    const huge = await call(worker, env, "POST", "/api/media/uploads", { name: "Stream.mp4", mime: "video/mp4", bytes: 2100 * 1024 * 1024 }, user.cookie);
+    expect(huge.status).toBe(413);
+    expect(huge.data.error).toBe("Videos can be up to 2,000 MB.");
+    // Tracks keep their own limit whatever the plan.
+    const track = await call(worker, env, "POST", "/api/media/uploads", { name: "Song.mp3", mime: "audio/mpeg", bytes: 60 * 1024 * 1024 }, user.cookie);
+    expect(track.data.error).toBe("Tracks can be up to 50 MB.");
   });
 });
