@@ -1,14 +1,20 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, CalendarClock, Check, Columns2, Compass, Plus, ScanFace, Scissors, Sparkles, Wand2, X } from "lucide-react";
+import {
+  ArrowRight, CalendarClock, Captions, Check, ChevronLeft, ChevronRight, Columns2, Compass, Download, Image as ImageIcon, Mic, PenLine, Plus, ScanFace, Scissors, Send,
+  Sparkles, Wand2, X,
+} from "lucide-react";
 import { useAuth } from "../lib";
 import { SamplePhone, reel } from "./Phone";
 import { PlanCards } from "./Pricing";
 import { categories, templateIds, templates, type CategoryId } from "../../shared/templates";
 import { PRODUCT } from "../../shared/brand";
+import { storyStyles, type StoryStyle } from "../../shared/styles";
+import { StyleArt } from "../art";
 
-// The home page: what the product does, a video to try right here, the faceless styles, how it compares, plans and
-// questions. Every word and picture on it is ours; it shows drawn samples, never invented results, users or reviews.
+// The home page: what the product does, its popular formats, how it compares, what every video includes, how it works,
+// a video to try right here, every style, clips, plans and questions. Every word and picture on it is ours; it shows
+// drawn samples (and a drawing of the dashboard), never invented results, users or reviews.
 
 /** A draft started on the home page, picked up by Create after sign-up. */
 export const DEMO_DRAFT = "hss-demo-draft";
@@ -133,61 +139,210 @@ export function Faq({ items }: { items: [string, string][] }) {
   );
 }
 
+/** The formats the coverflow shows: the popular ones. */
+const showcase = templateIds.filter((id) => "popular" in templates[id] && templates[id].popular);
+const categoryName = (id: CategoryId) => categories.find((c) => c.id === id)?.name ?? "";
+const musicLabel = (mood: string) => (mood === "none" ? "No music" : mood === "auto" ? "Matching music" : `${mood[0].toUpperCase()}${mood.slice(1)} music`);
+
+/** Popular formats in a 3D coverflow: the one in front can be made at once. */
+function FormatCarousel({ to }: { to: (id: string) => string }) {
+  const [at, setAt] = useState(0);
+  const n = showcase.length;
+  const go = (step: number) => setAt((x) => (x + step + n) % n);
+  return (
+    <div className="coverflow" role="region" aria-roledescription="carousel" aria-label="Popular formats">
+      <div className="cf-stage">
+        {showcase.map((id, i) => {
+          let off = i - at;
+          if (off > n / 2) off -= n;
+          if (off < -n / 2) off += n;
+          const t = templates[id];
+          const front = off === 0;
+          return (
+            <div key={id} className="cf-card" data-off={Math.abs(off) > 2 ? "far" : off} role="group" aria-roledescription="slide"
+              aria-label={`${i + 1} of ${n}: ${t.name}`} aria-hidden={!front}>
+              {/* A card at the side comes to the front when clicked (keyboards use the buttons below). */}
+              {!front && <button type="button" className="cf-pick" tabIndex={-1} onClick={() => setAt(i)} aria-label={`Show ${t.name}`} />}
+              <span className="cf-kind">{categoryName(t.category)}</span>
+              <strong className="cf-name">{t.name}</strong>
+              <SamplePhone style={t.style} kind={t.kind} title={t.kind === "pov" ? `POV: ${t.examples[0]}` : t.kind === "mashup" ? "Toastero Froggarino" : t.examples[0]}
+                caption={t.short} backdrop={t.kind === "backdrop" ? "bd-city" : undefined} />
+              <span className="cf-facts" aria-label={`${storyStyles[t.style].name} art, about ${t.seconds} seconds, ${musicLabel(t.music).toLowerCase()}`}>
+                <span>{storyStyles[t.style].name}</span><span>~{t.seconds} s</span><span>{musicLabel(t.music)}</span>
+              </span>
+              {front && <Link className="btn primary" to={to(id)}>Make one <ArrowRight size={16} aria-hidden="true" /></Link>}
+            </div>
+          );
+        })}
+      </div>
+      <div className="cf-controls">
+        <button type="button" className="cf-nav" onClick={() => go(-1)} aria-label="Previous format"><ChevronLeft size={20} /></button>
+        <span className="cf-count" aria-live="polite">{templates[showcase[at]].name}</span>
+        <button type="button" className="cf-nav" onClick={() => go(1)} aria-label="Next format"><ChevronRight size={20} /></button>
+      </div>
+    </div>
+  );
+}
+
+/** A drawing of the dashboard: a series' week of videos, made, scheduled and posted. */
+const mockTiles: { style: StoryStyle; status: string; tone: "done" | "next" | "wait" }[] = [
+  { style: "dark", status: "Posted", tone: "done" },
+  { style: "anime", status: "Posted", tone: "done" },
+  { style: "cinematic", status: "Ready", tone: "next" },
+  { style: "watercolor", status: "Thu 18:00", tone: "wait" },
+  { style: "oil", status: "Fri 18:00", tone: "wait" },
+  { style: "clay", status: "Sat 12:00", tone: "wait" },
+  { style: "comic", status: "Sun 12:00", tone: "wait" },
+  { style: "neon", status: "Mon 18:00", tone: "wait" },
+];
+function AppMock() {
+  return (
+    <div className="app-mock" role="img" aria-label={`A drawing of the ${PRODUCT.name} dashboard: a series with this week's videos posted, ready and scheduled`}>
+      <div className="am-bar" aria-hidden="true"><span /><span /><span /><em>hookstreak.app/app/series</em></div>
+      <div className="am-body" aria-hidden="true">
+        <div className="am-head">
+          <div><strong>Ocean mysteries</strong><small>Daily · TikTok, YouTube, Instagram</small></div>
+          <span className="am-chip">Autopilot on</span>
+        </div>
+        <div className="am-grid">
+          {mockTiles.map((t, i) => (
+            <div key={i} className="am-tile">
+              <StyleArt style={t.style} />
+              <span className={`am-status ${t.tone}`}>{t.status}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const included: [typeof Mic, string, string][] = [
+  [PenLine, "A script that hooks", "Written for your niche, with a first line made to stop the scroll and an ending worth staying for."],
+  [Mic, "Natural AI voices", "Narrators that sound human, or your own recording, timed word by word."],
+  [ImageIcon, "A picture for every sentence", "Drawn in one style from start to finish (cinematic, anime, watercolor, comic and more), or your own clips."],
+  [Captions, "Subtitles that pop", "Word-by-word captions with the key words in colour, in the style you choose."],
+  [Send, "Posts itself", "To TikTok, YouTube Shorts and Instagram Reels on your days and times, or after your OK."],
+  [Download, "Yours to keep", "Every video downloads as a 1080 × 1920 MP4, on every plan."],
+];
+
 export function Landing() {
   const { user } = useAuth();
   const start = user ? "/app" : "/register";
+  const make = (id: string) => (user ? `/app/create?template=${id}` : `/register?next=${encodeURIComponent(`/app/create?template=${id}`)}`);
   return (
     <>
       <section className="hero">
         <div className="pub-wrap">
-          <span className="kicker">Faceless channels on autopilot</span>
-          <h1 style={{ marginTop: 16 }}>Grow a faceless channel <span className="glow-text">without lifting a finger</span></h1>
-          <p className="lead">{PRODUCT.name} writes, narrates, illustrates and subtitles short videos in your niche, then posts them to TikTok, YouTube Shorts and Instagram Reels on your schedule.</p>
-          <div className="center-row">
-            <Link className="btn primary big" to={start}>{user ? "Open dashboard" : "Start for free"}</Link>
-            <Link className="btn big" to="/tools">Browse video tools</Link>
+          <div className="hero-card">
+            <p className="hero-pill"><span className="dot" aria-hidden="true" />Posts to TikTok, YouTube Shorts and Instagram Reels</p>
+            <h1>Grow a faceless channel <span className="glow-text">without lifting a finger</span></h1>
+            <p className="lead">{PRODUCT.name} writes, narrates, illustrates and subtitles short videos in your niche, then posts them on your schedule.</p>
+            <div className="center-row">
+              <Link className="btn primary big" to={start}>{user ? "Open dashboard" : "Start for free"}</Link>
+              <Link className="btn big" to="/tools">Browse video tools</Link>
+            </div>
+            <p className="hero-note">Free trial · no card needed · cancel any time</p>
+            <div className="reel" aria-label="Example videos (drawn samples)">
+              {reel.map((r) => <SamplePhone key={r.title} {...r} />)}
+            </div>
           </div>
-          <p className="hero-note">Free trial · no card needed · cancel any time</p>
-        </div>
-        <div className="reel" aria-label="Example videos (drawn samples)">
-          {reel.map((r) => <SamplePhone key={r.title} {...r} />)}
         </div>
       </section>
 
       <section className="pub-section">
         <div className="pub-wrap">
           <div className="pub-section-head center">
+            <span className="kicker">Formats</span>
+            <h2 className="title">Made for <span className="glow-text">every niche</span></h2>
+            <p className="sub">Each format comes with its own script recipe, voice, art style and music. Pick one and get your first video in minutes.</p>
+          </div>
+          <FormatCarousel to={make} />
+          <p className="sample-note">Drawn samples. Your videos are written and drawn fresh for your topic.</p>
+        </div>
+      </section>
+
+      <section className="pub-section">
+        <div className="pub-wrap">
+          <div className="pub-section-head center">
+            <span className="kicker">Why {PRODUCT.name}</span>
+            <h2 className="title">Why creators switch</h2>
+            <p className="sub">Compared with the usual ways of keeping a short-form channel alive.</p>
+          </div>
+          <div className="compare">
+            <div className="compare-card">
+              <div className="compare-top"><h3>Hiring video editors</h3><X size={20} aria-label="Slow and costly" /></div>
+              <p>Briefs, back-and-forth and a fee for every single video. Hard to keep up a daily pace without a big budget.</p>
+            </div>
+            <div className="compare-card">
+              <div className="compare-top"><h3>Making every video yourself</h3><X size={20} aria-label="Slow" /></div>
+              <p>Finding ideas, writing scripts, finding visuals, recording voiceovers, editing, captioning and posting: hours per video.</p>
+            </div>
+            <div className="compare-card yes">
+              <div className="compare-top"><h3>{PRODUCT.name}</h3><Check size={20} aria-label="Fast" /></div>
+              <p>Original faceless videos written, made and posted on autopilot to TikTok, YouTube and Instagram, with your review whenever you want it.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="pub-section tight">
+        <div className="pub-wrap">
+          <div className="glow-panel">
+            <div className="pub-section-head center">
+              <span className="kicker">Everything included</span>
+              <h2 className="title">Every part, <span className="glow-text">done for you</span></h2>
+              <p className="sub">No editing software, no stock sites, no recording booth.</p>
+            </div>
+            <div className="included">
+              {included.map(([Icon, title, text]) => (
+                <div key={title} className="included-item">
+                  <span className="pub-icon"><Icon size={20} aria-hidden="true" /></span>
+                  <h3>{title}</h3>
+                  <p>{text}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="pub-section">
+        <div className="pub-wrap system">
+          <div>
             <span className="kicker">How it works</span>
-            <h2 className="title">Your content system for short-form video</h2>
-            <p className="sub">Set it up once. New videos keep coming, and you stay in control of every one.</p>
+            <h2 className="title">Your AI content system for short-form video</h2>
+            <p className="sub">Create, edit and schedule videos with AI, all in one place.</p>
+            <ul className="system-steps">
+              <li><span className="pub-icon"><Compass size={20} aria-hidden="true" /></span><div><h3>Pick a style</h3><p>Start from a proven faceless format, or describe your own topic.</p></div></li>
+              <li><span className="pub-icon"><Wand2 size={20} aria-hidden="true" /></span><div><h3>Shape the draft</h3><p>The AI writes the script and draws every scene. Change any word, picture, voice or subtitle before it goes out.</p></div></li>
+              <li><span className="pub-icon"><CalendarClock size={20} aria-hidden="true" /></span><div><h3>Stay consistent</h3><p>Set the days and times. Each episode is made ahead and posted on schedule, or waits for your OK.</p></div></li>
+            </ul>
           </div>
-          <div className="steps">
-            <div className="step"><Compass size={30} aria-hidden="true" /><h3>Pick a style</h3><p>Start from a proven faceless format — scary stories, history, POV, facts, brainrot — or describe your own topic.</p></div>
-            <div className="step"><Wand2 size={30} aria-hidden="true" /><h3>Shape the draft</h3><p>The AI writes the script and draws every scene. Change any word, picture, voice or subtitle before it goes out.</p></div>
-            <div className="step"><CalendarClock size={30} aria-hidden="true" /><h3>Stay consistent</h3><p>Set the days and times. Each episode is made ahead and posted on schedule — or waits for your OK.</p></div>
-          </div>
+          <AppMock />
         </div>
       </section>
 
       <section className="pub-section tight" id="try">
         <div className="pub-wrap">
-          <div className="pub-section-head center">
-            <span className="kicker">Try it</span>
-            <h2 className="title">Make a free video right here</h2>
-            <p className="sub">Change anything below and watch the preview. Create it when you like it.</p>
+          <div className="try-band">
+            <div className="pub-section-head center">
+              <h2 className="title">Try creating a free video below</h2>
+              <p className="sub">Change anything and watch the preview. Create it when you like it.</p>
+            </div>
+            <Demo />
           </div>
-          <Demo />
         </div>
       </section>
 
       <section className="pub-section">
         <div className="pub-wrap">
           <div className="pub-section-head">
-            <span className="kicker">Faceless styles</span>
+            <span className="kicker">All styles</span>
             <h2 className="title">Start from a format that works</h2>
             <p className="sub">Every style comes with its own script recipe, voice, art style and music. Make one video, or turn it into a series.</p>
           </div>
-          <StyleGallery to={(id) => (user ? `/app/create?template=${id}` : `/register?next=${encodeURIComponent(`/app/create?template=${id}`)}`)} />
+          <StyleGallery to={make} />
         </div>
       </section>
 
@@ -205,21 +360,6 @@ export function Landing() {
             <div className="feature"><Scissors size={22} className="accent-text" aria-hidden="true" /><h3>Edit, schedule, post</h3><p>Trim any clip on its words, then post the batch on your channels one a day, or whenever you choose.</p></div>
           </div>
           <p className="price-note"><Link className="text-link" to={user ? "/app/clips" : `/register?next=${encodeURIComponent("/app/clips")}`}>Clip a video <ArrowRight size={15} aria-hidden="true" /></Link></p>
-        </div>
-      </section>
-
-      <section className="pub-section">
-        <div className="pub-wrap">
-          <div className="pub-section-head center">
-            <span className="kicker">Why {PRODUCT.name}</span>
-            <h2 className="title">Why creators switch</h2>
-            <p className="sub">Compared with the usual ways of keeping a short-form channel alive.</p>
-          </div>
-          <div className="compare">
-            <div className="compare-row"><div><h3>Hiring video editors</h3><p>Briefs, back-and-forth and a fee for every single video. Hard to keep up a daily pace without a big budget.</p></div><span className="mark"><X size={22} aria-label="Slow and costly" /></span></div>
-            <div className="compare-row"><div><h3>Making every video yourself</h3><p>Finding ideas, writing scripts, finding visuals, recording voiceovers, editing, captioning and posting — hours per video.</p></div><span className="mark"><X size={22} aria-label="Slow" /></span></div>
-            <div className="compare-row yes"><div><h3>{PRODUCT.name}</h3><p>Original faceless videos written, made and posted on autopilot to TikTok, YouTube and Instagram, with your review whenever you want it.</p></div><span className="mark"><Check size={22} aria-label="Fast" /></span></div>
-          </div>
         </div>
       </section>
 
