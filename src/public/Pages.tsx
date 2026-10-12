@@ -252,7 +252,7 @@ export function Mcp() {
             <li><code>create_video</code> — writes and makes a video (uses credits)</li>
             <li><code>get_video</code> — status and a download link when ready</li>
             <li><code>list_videos</code>, <code>list_series</code>, <code>set_series_status</code></li>
-            <li><code>list_long_videos</code>, <code>find_clips</code>, <code>get_long_video</code> — your uploaded videos and the moments found in them</li>
+            <li><code>list_long_videos</code>, <code>import_video</code>, <code>find_clips</code>, <code>get_long_video</code> — your videos (uploaded, or imported from a link) and the moments found in them</li>
             <li><code>make_clip</code> — makes a vertical clip of a moment (uses credits)</li>
             <li><code>get_account</code> — plan and credits left</li>
           </ul>
@@ -274,6 +274,7 @@ curl ${origin}/api/v1/videos/VIDEO_ID -H "Authorization: Bearer hss_your_api_key
           <div className="feature"><Plus size={20} className="accent-text" aria-hidden="true" /><h3>POST /api/v1/videos</h3><p>Write and make a video.</p></div>
           <div className="feature"><Clapperboard size={20} className="accent-text" aria-hidden="true" /><h3>GET /api/v1/videos/:id</h3><p>Status and download link.</p></div>
           <div className="feature"><Layers size={20} className="accent-text" aria-hidden="true" /><h3>GET /api/v1/sources</h3><p>Your uploaded videos and the moments found in them, with their virality scores.</p></div>
+          <div className="feature"><Plus size={20} className="accent-text" aria-hidden="true" /><h3>POST /api/v1/sources</h3><p>Import a video from a link to the file, or a Dropbox or Google Drive share link.</p></div>
           <div className="feature"><Plus size={20} className="accent-text" aria-hidden="true" /><h3>POST /api/v1/sources/:id/find</h3><p>Find clips in one of them.</p></div>
           <div className="feature"><Plus size={20} className="accent-text" aria-hidden="true" /><h3>POST /api/v1/clips</h3><p>Make a clip of a moment.</p></div>
         </div>

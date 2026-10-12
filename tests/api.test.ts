@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import worker from "../server/index";
 import { MCP_PROTOCOL } from "../server/api";
 import { call, signedIn, subscribe, testEnv, SITE } from "./helpers";
@@ -16,6 +16,7 @@ const written = {
     ],
   }),
 };
+afterEach(() => vi.unstubAllGlobals());
 function setup() {
   const { env, sqlite } = testEnv({ MEDIA_ENABLED: "true", FAL_KEY: "fal", ELEVENLABS_API_KEY: "el" });
   env.AI.run = async () => written;
@@ -157,7 +158,7 @@ describe("the MCP server", () => {
     const tools = (await bearer(env, "POST", "/mcp", key, rpc("tools/list"))).data.result.tools;
     expect(tools.map((t: any) => t.name)).toEqual([
       "list_video_types", "create_video", "get_video", "list_videos", "list_series", "set_series_status",
-      "list_long_videos", "find_clips", "get_long_video", "make_clip", "get_account",
+      "list_long_videos", "import_video", "find_clips", "get_long_video", "make_clip", "get_account",
     ]);
     for (const t of tools) expect(t.inputSchema.type).toBe("object");
     const account = (await bearer(env, "POST", "/mcp", key, rpc("tools/call", { name: "get_account", arguments: {} }))).data.result;
@@ -201,6 +202,27 @@ describe("the MCP server", () => {
     expect((await bearer(env, "GET", `/api/v1/sources/${podcast}`, key)).data.source.clips).toBe(2);
     expect((await bearer(env, "GET", `/api/v1/sources/${crypto.randomUUID()}`, key)).status).toBe(404);
     expect((await tool("get_account", {})).structuredContent.credits.left).toBe(60 - 2 - 2);
+  });
+
+  it("imports the owner's videos from links, and says why a YouTube link can't be", async () => {
+    const { env, user } = setup();
+    const key = await newKey(env, user.cookie);
+    await call(worker, env, "GET", "/api/auth/me", undefined, user.cookie);
+    const bytes = new Uint8Array(4000).fill(1);
+    bytes.set([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (url !== "https://cdn.example.com/Webinar.mp4") throw new Error("unexpected " + url);
+      return new Response(bytes.slice(), { headers: { "Content-Type": "video/mp4", "Content-Length": "4000" } });
+    });
+    const rest = await bearer(env, "POST", "/api/v1/sources", key, { url: "https://cdn.example.com/Webinar.mp4" });
+    expect(rest.status).toBe(202);
+    expect(rest.data.source).toMatchObject({ name: "Webinar.mp4", status: "checking", importing: true, error: null, moments: [] });
+    const tool = async (name: string, args: unknown) => (await bearer(env, "POST", "/mcp", key, rpc("tools/call", { name, arguments: args }))).data.result;
+    const imported = await tool("import_video", { url: "https://cdn.example.com/Webinar.mp4" });
+    expect(imported).toMatchObject({ isError: false, structuredContent: { status: "checking", importing: true } });
+    const youtube = await tool("import_video", { url: "https://www.youtube.com/watch?v=abc" });
+    expect(youtube).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/^YouTube links can't be imported/) }] });
+    expect(env.CONTENT.created.map((c: any) => c.params.importId)).toEqual([rest.data.source.id, imported.structuredContent.id]);
   });
 
   it("reports failures as results or JSON-RPC errors, never internals, and needs a key", async () => {

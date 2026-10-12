@@ -8,6 +8,7 @@ import { siteUrl } from "./config";
 import { allowance } from "./billing";
 import { canCreate, checkReferences, createVideo, newVideoCredits, videoView } from "./videos";
 import { findClips, findSchema, ownedSource, SOURCE_FIELDS, sourceView } from "./highlights";
+import { importLink } from "./imports";
 import { draftVideo, type DraftRequest } from "./story";
 import { nextSlot, seriesSettings } from "./series";
 import { cancelScheduled } from "./publishing";
@@ -148,8 +149,9 @@ async function account(env: Env, user: DbUser) {
 /** A long video as the API shows it: where it stands, what finding clips in it costs, and the moments found. */
 function sourceOut(s: ReturnType<typeof sourceView>) {
   return {
-    id: s.id, name: s.name, duration: s.duration, status: s.status, speech: s.speech, transcribeCredits: s.transcribeCredits,
-    searching: !!s.wanted || s.speech === "pending", error: s.momentsError, clips: s.clips,
+    id: s.id, name: s.name, duration: s.duration, status: s.status, importing: s.importing, error: s.status === "failed" ? s.error : s.momentsError,
+    speech: s.speech, transcribeCredits: s.transcribeCredits,
+    searching: !!s.wanted || s.speech === "pending", clips: s.clips,
     // score: the moment's virality score; reactions: the times people laughed, applauded or cheered in it.
     moments: s.moments.map((m, index) => ({
       index, title: m.title, start: m.start, end: m.end, score: m.score, reactions: m.reactions ?? 0, why: m.why, caption: m.caption, hashtags: m.hashtags,
@@ -162,6 +164,11 @@ async function listSources(env: Env, user: DbUser) {
   return rows.map((a) => sourceOut(sourceView(a)));
 }
 const getSource = async (env: Env, user: DbUser, id: string) => sourceOut(sourceView(await ownedSource(env, user.id, id)));
+/** Imports a video from a link (server/imports.ts); it is downloaded and checked in the background. */
+async function importSource(env: Env, user: DbUser, input: any) {
+  const d = z.object({ url: z.string().trim().min(1).max(2000) }).parse(input);
+  return getSource(env, user, await importLink(env, user, d.url));
+}
 async function findIn(env: Env, user: DbUser, id: string, input: any) {
   const d = findSchema.parse({ ...input, idempotencyKey: input?.idempotencyKey || uid() });
   const { status, body } = await findClips(env, user, id, d);
@@ -216,6 +223,7 @@ restApi.post("/videos", async (c) => c.json({ video: await makeVideo(c.env, c.ge
 restApi.get("/videos/:id", async (c) => c.json({ video: await getVideo(c.env, c.get("user"), c.req.param("id")) }));
 restApi.get("/series", async (c) => c.json({ series: await listSeries(c.env, c.get("user")) }));
 restApi.get("/sources", async (c) => c.json({ sources: await listSources(c.env, c.get("user")) }));
+restApi.post("/sources", async (c) => c.json({ source: await importSource(c.env, c.get("user"), await c.req.json()) }, 202));
 restApi.get("/sources/:id", async (c) => c.json({ source: await getSource(c.env, c.get("user"), c.req.param("id")) }));
 restApi.post("/sources/:id/find", async (c) => {
   const source = await findIn(c.env, c.get("user"), c.req.param("id"), await c.req.json());
@@ -288,6 +296,11 @@ const tools = [
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
+    name: "import_video",
+    description: "Imports one of the owner's videos from a link, to find clips in it: a direct link to an MP4, MOV or WebM file, or a Dropbox or Google Drive link anyone can open. YouTube and other video platform pages can't be imported. The video is downloaded and checked in the background: call get_long_video until its status is 'ready' (or 'failed', with the error).",
+    inputSchema: { type: "object", properties: { url: { type: "string", description: "https link to the video file or share link." } }, required: ["url"], additionalProperties: false },
+  },
+  {
     name: "find_clips",
     description: "Finds the best stand-alone moments in one of the owner's videos, each with a virality score of 10–99: an AI estimate of how well it works as a short on its own (hook, payoff, clarity, energy, and the laughter or applause heard in it), not a prediction of views. Free when its speech is known or it is up to 10 minutes long; a longer video is transcribed first for transcribeCredits (pass them as credits to agree to the price). When 'searching' is true, call list_long_videos or get_long_video later for the moments.",
     inputSchema: {
@@ -341,6 +354,7 @@ async function callTool(env: Env, user: DbUser, name: string, args: any) {
     case "list_series": return { series: await listSeries(env, user) };
     case "set_series_status": return setSeriesStatus(env, user, String(args?.id || ""), args?.status === "paused" ? "paused" : "active");
     case "list_long_videos": return { videos: await listSources(env, user) };
+    case "import_video": return importSource(env, user, args || {});
     case "find_clips": return findIn(env, user, String(args?.source || ""), args || {});
     case "get_long_video": return getSource(env, user, String(args?.id || ""));
     case "make_clip": return makeClip(env, user, args || {});
@@ -355,7 +369,7 @@ async function handle(env: Env, user: DbUser, m: Rpc) {
         protocolVersion: typeof m.params?.protocolVersion === "string" ? m.params.protocolVersion : MCP_PROTOCOL,
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: PRODUCT.slug, version: "1.0.0" },
-        instructions: `Make faceless short videos with ${PRODUCT.name}: call list_video_types, then create_video, then get_video until it is ready. To clip the owner's long videos: list_long_videos, find_clips, then make_clip.`,
+        instructions: `Make faceless short videos with ${PRODUCT.name}: call list_video_types, then create_video, then get_video until it is ready. To clip the owner's long videos: list_long_videos (or import_video from a link), find_clips, then make_clip.`,
       });
     case "ping": return result(m.id, {});
     case "tools/list": return result(m.id, { tools });

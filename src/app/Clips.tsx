@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, CalendarClock, Check, Clapperboard, Film, Play, Scissors, Sparkles, Trash2, UploadCloud } from "lucide-react";
-import { del, errorText, newKey, post, useApi, useAuth, usePoll, type Account, type Source, type Video } from "../lib";
+import { ArrowLeft, CalendarClock, Check, Clapperboard, Film, Link2, Play, Scissors, Sparkles, Trash2, UploadCloud } from "lucide-react";
+import { del, errorText, newKey, post, useApi, useAuth, usePoll, type Account, type Asset, type Source, type Video } from "../lib";
 import { Modal, Spinner, Switch, useToast } from "../ui";
 import { ConfirmDialog, CreditBlockNotice, DropZone, FileButton, ACCEPT, UploadList, creditBlock, firstFrame, useRetryKey, useSignedInUser, useUploads } from "./pickers";
 import { CaptionStylePicker, EditorSection } from "./CaptionPickers";
@@ -28,6 +28,7 @@ export const length = (s: number) => {
 };
 /** Where a video stands on its way to clips, in a few words. */
 function sourceState(s: Source): { text: string; tone: string; busy?: boolean } {
+  if (s.importing) return { text: "Importing", tone: "orange", busy: true };
   if (s.status === "uploading" || s.status === "checking") return { text: "Checking", tone: "orange", busy: true };
   if (s.status === "failed") return { text: "Can't be used", tone: "red" };
   if (s.speech === "pending") return { text: "Listening", tone: "orange", busy: true };
@@ -51,8 +52,14 @@ export function ClipsPage() {
       else navigate(`/app/clips/${asset.id}`);
     },
   });
+  const [importing, setImporting] = useState(false);
   const sources = data?.sources || [];
   usePoll(() => { void reload(); }, 5000, sources.some((s) => sourceState(s).busy));
+  const imported = (asset: Asset) => {
+    setImporting(false);
+    navigate(`/app/clips/${asset.id}`);
+  };
+  const importButton = <button type="button" className="btn" onClick={() => setImporting(true)}><Link2 size={16} aria-hidden="true" />Import from a link</button>;
   const plan = planById(user.plan);
   const limits = plan.id === "free" ? "Videos up to 10 minutes and 500 MB on the free trial; paid plans take videos up to 2 hours (2 GB)." : `Videos up to ${plan.videoMinutes / 60} hours and ${(plan.videoMb / 1000).toFixed(0)} GB.`;
   return (
@@ -62,8 +69,12 @@ export function ClipsPage() {
           <h1>Clips</h1>
           <p>Turn a podcast, interview, stream or webinar into vertical clips that follow the speaker, with captions.</p>
         </div>
-        <FileButton accept={ACCEPT.video} className="btn primary" label="Upload a video" icon={<UploadCloud size={16} aria-hidden="true" />} onFiles={(files) => uploads.add(files.slice(0, 1))} disabled={uploads.busy} />
+        <div className="toolbar">
+          {importButton}
+          <FileButton accept={ACCEPT.video} className="btn primary" label="Upload a video" icon={<UploadCloud size={16} aria-hidden="true" />} onFiles={(files) => uploads.add(files.slice(0, 1))} disabled={uploads.busy} />
+        </div>
       </div>
+      {importing && <ImportDialog onClose={() => setImporting(false)} onImported={imported} />}
       <DropZone onFiles={(files) => uploads.add(files.slice(0, 1))} disabled={uploads.busy} label="Drop a video to find clips in it">
         <div className="stack" style={{ gap: 18 }}>
           {uploads.items.some((u) => u.status !== "ready") && <UploadList items={uploads.items.filter((u) => u.status !== "ready")} onDismiss={uploads.dismiss} />}
@@ -93,17 +104,60 @@ export function ClipsPage() {
               <Scissors size={34} className="accent-text" aria-hidden="true" />
               <h2 style={{ fontSize: 22 }}>Your first clips are one upload away</h2>
               <ol className="clip-steps">
-                <li><strong>Upload</strong> a podcast, interview, stream or webinar.</li>
+                <li><strong>Upload</strong> a podcast, interview, stream or webinar, or import it from a link.</li>
                 <li><strong>Find clips:</strong> we listen to it and pick the moments that stand on their own, each with a virality score.</li>
                 <li><strong>Make and post</strong> them as vertical clips that follow the speaker, with captions, on your schedule.</li>
               </ol>
-              <FileButton accept={ACCEPT.video} className="btn primary" label="Upload a video" icon={<UploadCloud size={16} aria-hidden="true" />} onFiles={(files) => uploads.add(files.slice(0, 1))} disabled={uploads.busy} />
+              <div className="row wrap" style={{ gap: 8, justifyContent: "center" }}>
+                <FileButton accept={ACCEPT.video} className="btn primary" label="Upload a video" icon={<UploadCloud size={16} aria-hidden="true" />} onFiles={(files) => uploads.add(files.slice(0, 1))} disabled={uploads.busy} />
+                {importButton}
+              </div>
             </div>
           )}
-          <p className="muted small">{limits} Only upload videos you have the rights to, and film people with their consent.</p>
+          <p className="muted small">{limits} Only upload or import videos you have the rights to, and film people with their consent.</p>
         </div>
       </DropZone>
     </main>
+  );
+}
+
+/** Imports a video from a link: a video file, or a Dropbox or Google Drive share link. */
+function ImportDialog({ onClose, onImported }: { onClose: () => void; onImported: (asset: Asset) => void }) {
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setProblem(null);
+    try {
+      onImported((await post<{ asset: Asset }>("/media/imports", { url })).asset);
+    } catch (err) {
+      setProblem(errorText(err));
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title="Import a video from a link" onClose={onClose} footer={
+      <>
+        <button type="button" className="btn" onClick={onClose}>Cancel</button>
+        <button type="submit" form="import-link" className="btn primary" disabled={busy || !url.trim()}>
+          {busy ? <Spinner label="Opening the link" /> : <Link2 size={16} aria-hidden="true" />}Import
+        </button>
+      </>
+    }>
+      <form id="import-link" className="stack" onSubmit={submit}>
+        <label className="field"><span className="small">Link to the video</span>
+          <input className="input" type="url" inputMode="url" autoComplete="off" spellCheck={false} maxLength={2000} required value={url}
+            onChange={(e) => setUrl(e.target.value)} placeholder="https://www.dropbox.com/scl/fi/…/episode.mp4" aria-describedby="import-link-hint" />
+        </label>
+        <p id="import-link-hint" className="muted small">
+          A direct link to an MP4, MOV or WebM file, or a Dropbox or Google Drive link that anyone with the link can open. YouTube links can't be
+          imported: if it's your video, download it in YouTube Studio and upload the file.
+        </p>
+        {problem && <p className="notice bad small" role="alert">{problem}</p>}
+      </form>
+    </Modal>
   );
 }
 
@@ -219,7 +273,9 @@ export function SourcePage() {
         <div className="stack" style={{ gap: 18 }}>
           {source.status !== "ready" ? (
             <section className="card stack">
-              {source.status === "failed" ? <p className="notice bad">{source.error}</p> : <p className="row"><Spinner label="Checking" /> Checking the video. Long videos take a few minutes.</p>}
+              {source.status === "failed" ? <p className="notice bad">{source.error}</p>
+                : source.importing ? <p className="row"><Spinner label="Importing" /> Downloading the video from its link. Long videos take a few minutes.</p>
+                : <p className="row"><Spinner label="Checking" /> Checking the video. Long videos take a few minutes.</p>}
             </section>
           ) : (
             <section className="card stack" aria-labelledby="find-title">

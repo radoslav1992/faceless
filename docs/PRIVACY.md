@@ -29,13 +29,14 @@ hours rather than in one expensive run.
 | Processed Stripe event IDs (webhook de-duplication; no personal data) | 90 days | Removed hourly |
 | Work set aside for a manual check (run ID, provider request ID, reason) | 90 days | Removed by maintenance |
 
-The scene descriptions and script sent to the AI providers are part of the video itself (its spec): they stay as
-long as the video does. A long video's transcript is sent to the text model (Cloudflare Workers AI) when the owner
-finds clips in it; the moments found are kept with the video until it is deleted. Transcripts also hold who spoke when
-(speakers numbered by ElevenLabs Scribe, never identified) and the sounds it tagged, such as laughter or applause, for
-as long as the file. To frame a clip the renderer finds the faces in its moment and compares how their lips move while
-someone talks: it only locates people (no face recognition, nothing kept per face), and only the crop's path and the
-two people's positions are stored with the clip.
+The scene descriptions and script sent to the AI providers are part of the video itself (its spec): they stay as long
+as the video does. A video imported from a link is fetched from that link by our Worker; the link is kept only until
+the file is downloaded (then the file is kept like an upload). A long video's transcript is sent to the text model
+(Cloudflare Workers AI) when the owner finds clips in it; the moments found are kept with the video until it is
+deleted. Transcripts also hold who spoke when (speakers numbered by ElevenLabs Scribe, never identified) and the
+sounds it tagged, such as laughter or applause, for as long as the file. To frame a clip the renderer finds the faces
+in its moment and compares how their lips move while someone talks: it only locates people (no face recognition,
+nothing kept per face), and only the crop's path and the two people's positions are stored with the clip.
 
 ## Kept after the account is deleted
 

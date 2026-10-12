@@ -35,6 +35,8 @@ export type Account = { id: string; platform: PlatformId; name: string; handle: 
 export type Asset = {
   id: string; kind: string; name: string; mime: string; bytes: number; duration: number; width: number; height: number;
   status: "uploading" | "checking" | "ready" | "failed"; videoId: string | null; hasAudio: boolean | null; error: string | null; createdAt: number; url: string;
+  /** A video imported from a link that is still being downloaded (it is checked next). */
+  importing?: boolean;
   /** Speech found in an own video or track (null: never looked for), and the language it was heard in. */
   speech?: SpeechStatus | null; speechLanguage?: string | null;
 };

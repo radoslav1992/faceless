@@ -5,7 +5,7 @@ export interface Env {
   AI: { run: (model: string, input: Record<string, unknown>) => Promise<unknown> };
   ASSETS: Fetcher;
   /** Video runs ({runId}), upload checks ({inspectId}) and series episodes ({episode}). */
-  CONTENT?: Workflow<{ runId?: string; inspectId?: string; episode?: { seriesId: string; slot: number; first?: boolean } }>;
+  CONTENT?: Workflow<{ runId?: string; inspectId?: string; importId?: string; episode?: { seriesId: string; slot: number; first?: boolean } }>;
   PUBLISH?: Workflow<{ publicationId: string }>;
   MEDIA_RENDERER?: DurableObjectNamespace;
   EMAIL?: SendEmail;

@@ -177,7 +177,8 @@ everything you upload, including permission for every person shown.
        it from the signed link.
     9. On a paid plan, upload a podcast over 10 minutes on the Clips page, find clips in it (check the credits charged
        for its transcription), make one clip of two people talking with "Speaker focus" (check the crop cuts to
-       whoever talks) and one with "Two speakers", and post one.
+       whoever talks) and one with "Two speakers", and post one. Import a video from a Dropbox and a Google Drive
+       link, and check that a YouTube link is refused with its explanation.
 
 ## Known limits
 
@@ -193,8 +194,11 @@ everything you upload, including permission for every person shown.
   the speaker is the face whose lips move while the transcript says someone talks: a speaker turned away from the
   camera, off screen or very small is not followed (the crop stays where it was), and videos transcribed before
   speakers were told apart only know when someone talks, not who.
-  Videos are uploaded from the browser only: there is no import from a link or from a YouTube channel (downloading
-  from YouTube is against its terms).
+- **Imports from links**: a video can be imported from a direct link to the file or a Dropbox or Google Drive share
+  link (`server/imports.ts`). Links to YouTube and other video platforms are refused with what to do instead:
+  YouTube's terms (and the YouTube API Services policies this app's posting relies on) don't allow downloading its
+  videos, and the other platforms serve pages, not files. Google Drive may answer large files with a page instead of
+  the file for some accounts; such imports fail with a clear message and the file can still be uploaded.
 - **Legal pages**: the terms and privacy policy are a starting point; have them reviewed for your business and
   markets, in particular the withdrawal section (14 days, refund less the used share of the period's credits) and the
   retention periods ([PRIVACY.md](PRIVACY.md)).

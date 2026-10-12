@@ -118,7 +118,7 @@ export const homeFaq: [string, string][] = [
   ["Can I see upcoming videos before they post?", "Yes. The series page lists the coming slots and the episodes already made for them, with their status. You get an e-mail when each one is ready."],
   ["Can I post to several social accounts?", "Yes. A series can post to TikTok, YouTube Shorts and Instagram Reels at the same time, and different series can post to different accounts."],
   ["Can I download my videos?", "Always. Every video downloads as a 1080 × 1920 MP4, on every plan, including the free trial."],
-  ["Can I turn my podcast or stream into clips?", "Yes. Upload the video (up to 10 minutes on the free trial, up to 2 hours on paid plans) and we find the moments that stand on their own, give each a virality score, and make the ones you choose into vertical clips that cut to whoever is talking, with captions. A clip costs 1 credit per started minute."],
+  ["Can I turn my podcast or stream into clips?", "Yes. Upload the video or paste a link to it — a link to the file, or a Dropbox or Google Drive link (up to 10 minutes on the free trial, up to 2 hours on paid plans) — and we find the moments that stand on their own, give each a virality score, and make the ones you choose into vertical clips that cut to whoever is talking, with captions. A clip costs 1 credit per started minute."],
 ];
 export function Faq({ items }: { items: [string, string][] }) {
   return (

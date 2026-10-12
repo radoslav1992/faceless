@@ -123,10 +123,24 @@ by the renderer (`inspect`: kind, picture size, length up to the plan's `videoMi
 or 2 hours for videos on paid plans — and sound) and, when they may hold speech and last up to 10 minutes, transcribed
 once by ElevenLabs Scribe v2 for free within the same daily allowance. A failed transcription only means no subtitles.
 
+**Imports from links** (`server/imports.ts`, `POST /api/media/imports`, the Clips page's *Import from a link*,
+`POST /api/v1/sources` and the MCP tool `import_video`): a direct link to an MP4, MOV or WebM file, or a Dropbox
+(`dl=1`) or Google Drive (its `drive.usercontent.google.com` download address) share link. Only https on the default
+port to a public host name is fetched: no IP addresses, local or reserved names, credentials or this site — on every
+redirect too (at most five, followed by hand). Links to YouTube, TikTok, Instagram, Facebook, X, Twitch, Vimeo and
+Kick are refused before any request, with what to do instead (YouTube's terms and API policies don't allow
+downloading its videos). While the person waits the link is opened once: a page, a missing file or a file whose first
+bytes are not MP4, MOV or WebM is refused at once, as is a size over the plan's `videoMb`. The file is then a
+`checking` upload with `meta.import` (the link and the bytes reserved: its size, or the plan's largest video when the
+link doesn't tell); the workflow (`importId`) downloads it into R2 in 5 MiB parts (`storeStream`, never past the
+reserved size, 40 minutes at most, one more try after a minute) and checks it like an upload. Confirmed emails only;
+30 links an hour and 3 imports at once per person.
+
 ## The content workflow
 
-`ContentGeneration` (`server/content-workflow.ts`) runs three kinds of jobs: a video's run (`runId`), an upload check
-(`inspectId`) and a series episode (`episode`, below). A **run** is created with its video (or for an edit) in one
+`ContentGeneration` (`server/content-workflow.ts`) runs four kinds of jobs: a video's run (`runId`), an upload check
+(`inspectId`), a video imported from a link (`importId`: downloaded, then checked) and a series episode (`episode`,
+below). A **run** is created with its video (or for an edit) in one
 D1 batch, so the credits are reserved by the triggers before any work starts. Its steps:
 
 1. **Load**: the run becomes `running`, gets a capability token and a render job ID.
@@ -184,11 +198,11 @@ The app's Clips (code: "highlights", so they never mix with a scene's AI clip): 
 `server/highlights.ts`, the `highlight` spec in `shared/formats.ts`, the editor in `src/app/clip-editor.tsx` and
 `src/app/ClipPreview.tsx`.
 
-- **Sources** are the owner's video uploads (`GET /api/highlights/sources`). Each keeps what was found in it in
-  `media_assets.meta`: the transcript (up to 30,000 words, with who spoke when — Scribe's diarization, speakers
-  numbered — and the sounds it tagged, such as laughter or applause), the last moments found (`moments`), a search
-  waiting for its speech (`wanted`) and the last search's failure (`momentsError`). Lists never carry the transcript;
-  a clip's editor loads the words around its moment (`GET /api/media/:id?from=&to=`).
+- **Sources** are the owner's videos, uploaded or imported from a link (`GET /api/highlights/sources`). Each keeps
+  what was found in it in `media_assets.meta`: the transcript (up to 30,000 words, with who spoke when — Scribe's
+  diarization, speakers numbered — and the sounds it tagged, such as laughter or applause), the last moments found
+  (`moments`), a search waiting for its speech (`wanted`) and the last search's failure (`momentsError`). Lists never
+  carry the transcript; a clip's editor loads the words around its moment (`GET /api/media/:id?from=&to=`).
 - **Finding clips** (`POST /api/highlights/sources/:id/find`: how many, short/medium/long, an optional focus). With
   the speech known, the text model reads the transcript numbered by sentence, with the sounds heard after each
   (`[laughter]`, `[applause]`), in parts of 24,000 characters (up to 8, in parallel), as data; it picks
@@ -346,14 +360,15 @@ checks as the app; making a video through the API is limited to 30 an hour.
 - **REST** (`/api/v1`): `GET /me` (plan and credits), `GET /types` (video types, art styles, voices, languages),
   `GET /videos`, `POST /videos` (writes and makes a video), `GET /videos/:id`, `GET /series`,
   `POST /series/:id/pause|resume`.
-- **Clips** (REST): `GET /sources`, `GET /sources/:id` (moments with their index), `POST /sources/:id/find` (with
-  `credits` to agree to transcribing a long video) and `POST /clips` (a moment by index, or `start`/`end`; layout,
-  caption style, captions, hook title, pause removal).
+- **Clips** (REST): `GET /sources`, `POST /sources` (import a video from a link, `{ url }`; 202 while it downloads),
+  `GET /sources/:id` (moments with their index), `POST /sources/:id/find` (with `credits` to agree to transcribing a
+  long video) and `POST /clips` (a moment by index, or `start`/`end`; layout, caption style, captions, hook title,
+  pause removal).
 - **MCP** (`/mcp`, Streamable HTTP, JSON-RPC 2.0, protocol `2025-06-18`): `POST` with one message or a batch of up to
   20; notifications get 202; `GET` and `DELETE` answer 405 (no server stream, no session). Tools: `list_video_types`,
-  `create_video`, `get_video`, `list_videos`, `list_series`, `set_series_status`, `list_long_videos`, `find_clips`,
-  `get_long_video`, `make_clip`, `get_account`. A tool's failure is returned as its result with `isError`, in plain
-  words. 300 requests an hour per person.
+  `create_video`, `get_video`, `list_videos`, `list_series`, `set_series_status`, `list_long_videos`, `import_video`,
+  `find_clips`, `get_long_video`, `make_clip`, `get_account`. A tool's failure is returned as its result with
+  `isError`, in plain words. 300 requests an hour per person.
 - **Signed download links**: a ready video's `download` is
   `/api/v1/files/:video?exp=&sig=`, an HMAC-SHA256 (keyed with `TOKEN_ENCRYPTION_KEY`) of the video, its render and the
   expiry, valid for one hour, served as an attachment without a session.

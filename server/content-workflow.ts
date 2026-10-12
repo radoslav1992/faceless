@@ -15,6 +15,7 @@ import { planRender, type Media, type Plan, type PlanContext } from "./render-pl
 import { failAsset } from "./media";
 import { claimSpeech, mayHaveSpeech, storedTranscript, transcribe } from "./speech";
 import { momentsAfterSpeech } from "./highlights";
+import { downloadImport, importFailure } from "./imports";
 import { narrationContext } from "./story";
 import { runEpisode, videoReady, videoFailed } from "./series";
 import { LONG_VIDEO_SECONDS, SPEECH_MAX_SECONDS, speechTurns } from "../shared/speech";
@@ -30,8 +31,8 @@ import type { RenderPayload, RenderStatus } from "../shared/render";
 // people are), then the render (the video and its cover). A run of kind "speech" transcribes a long video for credits.
 // Paid provider calls are made once: a claim is stored before each call and its ticket right after, so a retried step
 // polls the existing job instead of paying again; a claim without a ticket (the answer was lost) fails the run and
-// refunds the credits. The same workflow checks uploads (`inspectId`) and finds the speech in them, and the moments
-// for clips asked for before it was found.
+// refunds the credits. The same workflow checks uploads (`inspectId`; videos imported from a link are downloaded first,
+// `importId`) and finds the speech in them, and the moments for clips asked for before it was found.
 
 type RunState = {
   token?: string;
@@ -85,11 +86,12 @@ const safe = { retries: { limit: 2, delay: "10 seconds" as const }, timeout: "5 
 /** Finding moments reads a long transcript in parallel parts (a minute or two); one more try if it fails outright. */
 const momentsStep = { retries: { limit: 1, delay: "30 seconds" as const }, timeout: "6 minutes" as const };
 
-type Job = { runId?: string; inspectId?: string; episode?: { seriesId: string; slot: number; first?: boolean } };
+type Job = { runId?: string; inspectId?: string; importId?: string; episode?: { seriesId: string; slot: number; first?: boolean } };
 export class ContentGeneration extends WorkflowEntrypoint<Env, Job> {
   async run(event: WorkflowEvent<Job>, step: WorkflowStep) {
     const e = withDefaults(this.env);
     if (event.payload.inspectId) return inspectUpload(e, step, event.payload.inspectId);
+    if (event.payload.importId) return importVideo(e, step, event.payload.importId);
     // A series' episode: written (the text model, slow) and created once; the video's own run makes it.
     if (event.payload.episode) {
       const { seriesId, slot } = event.payload.episode;
@@ -469,6 +471,23 @@ async function inspectUpload(e: Env, step: WorkflowStep, assetId: string) {
     } as Record<string, string>)[code] || "This file couldn't be checked. Try uploading it again."));
   }
   if (speech) await findSpeech(e, step, asset.id);
+}
+
+/** Downloading an imported video: one more try after a minute (a dropped connection), 40 minutes each at most. */
+const importOnce = { retries: { limit: 1, delay: "1 minute" as const }, timeout: "45 minutes" as const };
+/**
+ * A video imported from a link (server/imports.ts): downloaded into storage, then checked and transcribed like an
+ * upload. A failed download fails the file with the reason; nothing is charged.
+ */
+async function importVideo(e: Env, step: WorkflowStep, assetId: string) {
+  try {
+    if (!(await step.do("import", importOnce, () => downloadImport(e, assetId)))) return;
+  } catch (error) {
+    console.warn("Import failed", { assetId, code: error instanceof Error && /^[A-Z_]{3,40}$/.test(error.message) ? error.message : error instanceof Error ? error.name : "INTERNAL" });
+    await step.do("import-failed", () => failAsset(e, assetId, importFailure(error)));
+    return;
+  }
+  await inspectUpload(e, step, assetId);
 }
 
 /** Changes a file's meta (read fresh, so other changes are kept). */
