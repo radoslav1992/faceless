@@ -34,11 +34,15 @@ under `/api/admin` answers 404 to anyone else.
   reads by network, transcriptions); accounts to reconnect by network; Stripe (the nightly reconciliation, renewals
   overdue, the last webhook event, free months running); work set aside for a manual check (section 5).
 - **Billing**: *Withdrawal within 14 days* (section 6) and *Free month of a plan* (section 7).
-- **Library**: the shared music and background clips. Upload (kind, file up to 50 MB, name, tags with suggestions:
-  moods for music, themes for clips), preview, rename, retag, switch off or delete. Music is picked by its mood tags
-  (`calm`, `upbeat`, `inspiring`, `dark`, `epic`, `mysterious`, `playful`, `ambient`); background clips loop behind
-  storytime videos and can be any scene's picture. Switched-off or deleted items leave new videos; made videos keep
-  their render.
+- **Library**: the shared music, clips and pictures people search and pick from. Upload (kind, file up to 50 MB or
+  a 20 MB picture, name, description, tags with suggestions, the AI mark) or **Add from my media** (your uploads and
+  the AI pictures and clips made for your videos, with their name, prompt as the description and the AI mark; the
+  details open right after to check). Preview, edit the name, description, tags and AI mark, switch off or delete; the
+  list shows what each item is used by. People search by name, description and tag, so describe what an item shows
+  or sounds like. Music is picked by its mood tags (`calm`, `upbeat`, `inspiring`, `dark`, `epic`, `mysterious`,
+  `playful`, `ambient`); clips loop behind storytime videos and, like pictures, can be any scene's picture. Videos that
+  show an item marked as AI-made are disclosed as AI-made when they're posted. Switched-off or deleted items leave new
+  videos; made videos keep their render.
 - **Messages**: the last 100 contact-form messages; abuse reports are red, billing and withdrawal requests amber. Each
   message is also e-mailed to `ADMIN_EMAILS`.
 

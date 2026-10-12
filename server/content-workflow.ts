@@ -378,8 +378,9 @@ async function resolveContext(e: Env, run: RunInfo, spec: Spec): Promise<PlanCon
       };
   const items = referencedLibrary(spec);
   if (items.length)
-    for (const l of (await e.DB.prepare(`SELECT id,object_key,mime,duration FROM library_items WHERE id IN (${items.map(() => "?").join(",")})`).bind(...items).all<any>()).results)
-      media[l.id] = { key: l.object_key, kind: l.mime.split("/")[0], duration: l.duration };
+    for (const l of (await e.DB.prepare(`SELECT id,object_key,mime,duration,ai FROM library_items WHERE id IN (${items.map(() => "?").join(",")})`).bind(...items).all<any>()).results)
+      // A library item made with AI is disclosed like the owner's AI pictures.
+      media[l.id] = { key: l.object_key, kind: l.mime.split("/")[0], duration: l.duration, ai: !!l.ai };
   for (const id of [...assets, ...items]) if (!media[id]) throw new Error("MEDIA_INPUT");
   // Free-trial videos carry a small mark with the product's name.
   return { media, narration: isHighlight(spec) ? undefined : await narrationContext(e, run.user_id, spec), watermark: run.payload.watermark ? PRODUCT.name : "" };

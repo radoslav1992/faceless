@@ -44,8 +44,8 @@ handler runs `maintenance()` every minute.
 
 ## Data model
 
-`migrations/0001_initial.sql`, `0002_clips.sql` (runs of kind `speech`) and `0003_voices.sql` (narration voices); D1
-always enforces foreign keys.
+`migrations/0001_initial.sql`, `0002_clips.sql` (runs of kind `speech`), `0003_voices.sql` (narration voices) and
+`0004_library.sql` (library pictures, descriptions and the AI mark); D1 always enforces foreign keys.
 
 | Area | Tables |
 | --- | --- |
@@ -88,8 +88,8 @@ and the post text (caption, hashtags, title, topic). `generated` (the recorded A
 by the server: the browser never sets it.
 
 A scene's picture is an **AI image** (made once, then shown with a slow zoom or pan), an **AI clip** made from that
-image (5 or 10 s), the owner's **image or video**, or a **library clip**. Scenes hold words, never times: times come
-from the voice's word timings, so an edit only moves words between scenes and keeps the paid recording
+image (5 or 10 s), the owner's **image or video**, or a **library clip or picture**. Scenes hold words, never times:
+times come from the voice's word timings, so an edit only moves words between scenes and keeps the paid recording
 (`narrationKey`: voice, length and a fingerprint of the script).
 
 **Credits** (`specCredits`, `shared/credits.ts`): a new video costs 1 credit per started 30 seconds of its estimated
@@ -109,6 +109,18 @@ default (`PATCH /api/admin/voices/:id`; the default is always offered); only a v
 deleted. `GET /api/public/voices` lists the offered voices (the app's voice pickers, with a sample to play; the API's
 `/types` and `list_video_types`). A new video or series must use an offered voice; one that already has a voice keeps
 it once hidden (`voiceUsable` with the kept voice), and a template whose voice was hidden gets the default.
+
+**Library** (`server/library.ts`, `library_items`, Admin → Library in `src/app/AdminLibrary.tsx` and
+`server/routes/admin-library.ts`). Music, clips and pictures shared by everyone, with a name, a description and tags.
+Administrators upload them (a picture's size is read from its header on the server; a clip's or track's length and a
+thumbnail come from the browser) or copy one of their own media files (`POST /api/admin/library/from-media`: an upload,
+or an AI picture or clip made for one of their videos, with its name, its prompt as the description and the AI mark;
+`source_asset` keeps it from being added twice), then rename, describe, tag, mark as AI-made, switch off or delete
+them; the list shows how many videos and series use each item. `GET /api/library?kind=clip,image&q=&tag=` searches
+the active items (all of them, folded to lowercase without accents, a plural matching its singular): every word must
+be in the name, description or tags, name matches first, then tags, then descriptions; `?ids=` returns particular
+items (the editor's scenes). Music is a track, a background a clip, a scene a clip or a picture (`checkReferences`).
+An item marked as AI-made makes the video that shows it AI-made (`compose.synthetic`), like the owner's AI pictures.
 
 ## Writing
 

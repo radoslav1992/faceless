@@ -23,7 +23,8 @@ and `npx wrangler deploy` as the deploy command (a full deploy, so the container
 Apply the schema once, and again whenever a file lands in `migrations/` — before the code that needs it is deployed
 (`0002_clips.sql` lets a long video be transcribed for credits, a run of kind `speech`, and indexes clips by their
 video; `0003_voices.sql` creates the narration voices managed in Admin → Voices, with the twelve voices offered
-before; the code already running keeps working on both):
+before; `0004_library.sql` rebuilds `library_items` with its rows to add pictures, descriptions and the AI mark; the
+code already running keeps working on all three):
 
 ```sh
 npm run db:remote     # wrangler d1 migrations apply faceless --remote
@@ -139,15 +140,21 @@ bound to the person who started it. Review and audit steps per network: [SOCIAL.
 ## 5. Content library (as an admin)
 
 Sign in with an address in `ADMIN_EMAILS` (confirmed), open **Admin → Library** and upload (each file up to 50 MB,
-half a second to 10 minutes, at most 4096 px a side; length, size and a thumbnail are measured in the browser):
+pictures up to 20 MB; clips and tracks half a second to 10 minutes; at most 4096 px a side; length, size and a
+thumbnail are made in the browser), or **Add from my media**: your own uploads, and the AI pictures and clips made for
+your videos, copied with their name, their prompt as the description and the AI mark. Give each item a description
+and tags: people search the library by name, description and tag. Mark what was made with AI (videos using it are
+then disclosed as AI-made when they're posted).
 
 - **Music**: tracks licensed for commercial use, tagged with the moods series choose from: `calm`, `upbeat`,
   `inspiring`, `dark`, `epic`, `mysterious`, `playful`, `ambient`. The writer picks a track whose tags include the
   series' mood (any track for "auto", and any when no track has that mood). Without music in the library, videos have
   none.
-- **Background clips**: short vertical clips (tags such as `satisfying`, `gameplay-style`, `parkour`, `cooking`,
-  `nature`, `city`). Storytime loops one behind the whole video, and any scene can use one. Without an active clip,
-  storytime videos get AI pictures instead.
+- **Clips**: short vertical clips (tags such as `satisfying`, `gameplay-style`, `parkour`, `cooking`, `nature`,
+  `city`). Storytime loops one behind the whole video, and any scene can use one. Without an active clip, storytime
+  videos get AI pictures instead.
+- **Pictures**: vertical stills any scene can show (with the same slow zoom or pan as AI pictures), for example the
+  best AI pictures of your own videos, so people can reuse them instead of paying for new ones.
 
 Switching an item off removes it from new videos; videos already made keep their render. You need the rights to
 everything you upload, including permission for every person shown.
@@ -161,7 +168,7 @@ everything you upload, including permission for every person shown.
 3. Deploy, then check `GET /api/health` (`{"ok":true}`) and point an uptime monitor at it.
 4. Check e-mail deliverability (SPF, DKIM, DMARC; [OPERATIONS.md](OPERATIONS.md)).
 5. Set `FAL_KEY` and `ELEVENLABS_API_KEY`, wait for the renderer image to roll out, then set `MEDIA_ENABLED=true`.
-6. Fill the library: music for every mood and a few background clips (section 5).
+6. Fill the library: music for every mood, a few clips and pictures, each with a description (section 5).
 7. Configure Stripe (section 3) and set `BILLING_ENABLED=true`.
 8. Configure the social apps (section 4) and start their reviews.
 9. Set `REGISTRATION_ENABLED=true`, last.

@@ -62,8 +62,8 @@ function text(ass: string, value: string, look: TextLook, from: number, to: numb
 const total = (segments: ComposeSegment[]) => round(segments.reduce((n, s) => n + s.duration - (s.transition?.duration ?? 0), 0));
 /**
  * A scene's picture for `seconds` (its segment, transitions included): its AI clip, or its AI picture moving slowly,
- * or the owner's image or video, or a library clip. A clip shorter than its scene loops, except AI clips (made for the
- * scene, they hold their last frame for the moment of a transition).
+ * or the owner's image or video, or a library clip or picture. A clip shorter than its scene loops, except AI clips
+ * (made for the scene, they hold their last frame for the moment of a transition).
  */
 function sceneSegment(ctx: PlanContext, inputs: Inputs, scene: StoryScene, seconds: number, n: number): ComposeSegment {
   const id = scene.source === "clip" ? scene.clipId || scene.imageId : scene.source === "image" ? scene.imageId : scene.source === "own" ? scene.assetId : scene.libraryId;
@@ -115,7 +115,7 @@ function planStory(spec: StorySpec, ctx: PlanContext): Plan {
   if (length > MAX_SECONDS + 0.5) throw new Error("MEDIA_TOO_LONG");
   const track = spec.music, id = track?.trackId || track?.assetId;
   const music = track && id ? { input: inputs.add(need(ctx, id).key), volume: track.volume, duck: [[0, d]] as [number, number][] } : null;
-  // Marked as AI-made when its voice, or any picture or clip in it, is (EU AI Act Art. 50, platform AI labels).
+  // Marked as AI-made when its voice, or any picture, clip or track in it, is (EU AI Act Art. 50, platform AI labels).
   const synthetic = spec.narration.kind === "voice" || Object.values(ctx.media).some((m) => m.ai && inputs.keys.includes(m.key));
   return {
     compose: {
@@ -169,7 +169,9 @@ function planHighlight(spec: HighlightSpec, ctx: PlanContext): Plan {
   return {
     compose: {
       operation: "compose", width: W, height: H, segments: [segment], voice: null, music, overlay: null,
-      ass: ctx.watermark ? withWatermark(ass, ctx.watermark, W, H) : ass, coverAt: Math.min(coverAt, Math.max(0, d - 0.1)), synthetic: false, keys: inputs.keys,
+      // The owner's own video: AI-made only through a library track marked as made with AI.
+      ass: ctx.watermark ? withWatermark(ass, ctx.watermark, W, H) : ass, coverAt: Math.min(coverAt, Math.max(0, d - 0.1)),
+      synthetic: Object.values(ctx.media).some((m) => m.ai && inputs.keys.includes(m.key)), keys: inputs.keys,
     },
   };
 }

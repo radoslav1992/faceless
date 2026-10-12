@@ -214,6 +214,9 @@ describe("the clip format", () => {
     const scored = planRender({ ...base, music: { trackId: track, volume: 0.2 } }, { ...ctx, media: { ...ctx.media, [track]: { key: "library/t/a.mp3", kind: "audio", duration: 30 } }, watermark: "Hookstreak Shorts" }).compose;
     expect(scored.music).toEqual({ input: 1, volume: 0.2, duck: [[0, scored.segments[0].duration]] });
     expect(scored.ass).toContain("Hookstreak Shorts");
+    // The owner's own video is AI-made only through a library track marked as made with AI.
+    expect(scored.synthetic).toBe(false);
+    expect(planRender({ ...base, music: { trackId: track, volume: 0.2 } }, { ...ctx, media: { ...ctx.media, [track]: { key: "library/t/a.mp3", kind: "audio", duration: 30, ai: true } }, watermark: "" }).compose.synthetic).toBe(true);
     // The source must be a video, and the moment must fit the renderer's three minutes.
     expect(() => planRender(base, { media: { [id]: { ...ctx.media[id], kind: "audio" } }, watermark: "" })).toThrow("MEDIA_INPUT");
   });

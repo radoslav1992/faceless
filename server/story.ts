@@ -118,7 +118,7 @@ export type WriteRequest = {
   /** Titles of recent videos of the series, never to be repeated. */
   recent: string[];
   /** Music the model may pick from (by code). */
-  music?: { ref: string; name: string; tags?: string }[];
+  music?: { ref: string; name: string; tags?: string; description?: string }[];
 };
 /** How each video type is written, on top of the template's brief. */
 const kindRules: Record<Exclude<VideoKind, "script">, (r: WriteRequest) => string[]> = {
@@ -174,7 +174,7 @@ export async function writeVideo(env: Env, r: WriteRequest): Promise<StoryConcep
     template: { name: t.name, brief: t.brief },
     ownerRequest: r.prompt || "",
     ...(r.subject && { subject: r.subject }),
-    music: (r.music || []).map((m) => ({ code: m.ref, name: m.name, tags: m.tags })),
+    music: (r.music || []).map((m) => ({ code: m.ref, name: m.name, tags: m.tags, ...(m.description && { description: m.description }) })),
     recentTitles: r.recent.slice(0, 40),
   };
   return acceptStory(await aiJson(env, instructions, input, storyJson, Math.min(12000, 1500 + count * 220), 90000));
@@ -273,9 +273,10 @@ story.post("/plan", async (c) => {
 /** Library music for the writer to choose from: of a mood (any when none has it), numbered by code. */
 export async function musicCatalog(env: Env, mood: string) {
   if (mood === "none") return [];
-  const all = (await env.DB.prepare("SELECT id,name,tags FROM library_items WHERE kind='music' AND active=1 ORDER BY created_at DESC LIMIT 60").all<{ id: string; name: string; tags: string }>()).results;
+  const all = (await env.DB.prepare("SELECT id,name,tags,description FROM library_items WHERE kind='music' AND active=1 ORDER BY created_at DESC LIMIT 60")
+    .all<{ id: string; name: string; tags: string; description: string }>()).results;
   const fitting = mood === "auto" ? all : all.filter((m) => m.tags.toLowerCase().split(/[,\s]+/).includes(mood));
-  return (fitting.length ? fitting : all).slice(0, 30).map((m, i) => ({ ref: `music${i + 1}`, id: m.id, name: m.name, tags: m.tags }));
+  return (fitting.length ? fitting : all).slice(0, 30).map((m, i) => ({ ref: `music${i + 1}`, id: m.id, name: m.name, tags: m.tags, description: m.description.slice(0, 160) }));
 }
 /** A background clip for storytime: the chosen one, else a random active library clip (null: none in the library). */
 export async function backdropFor(env: Env, chosen: string | null | undefined) {

@@ -38,8 +38,9 @@ and the maintenance cron.
   skipped for lack of credits or because the trial ended.
 - **Editing.** Any video can be changed before it posts: the words of each scene (on a timeline of the voice, with
   draggable scene edges, split and merge), each scene's picture (a new AI picture, an AI clip made from it, the owner's
-  own image or video, or a library clip), transitions, the on-screen title, subtitles, music and the post text. The
-  voice can be an AI voice or the owner's own recording, timed by its transcript or by forced alignment of its script.
+  own image or video, or a clip or picture searched in the shared library), transitions, the on-screen title,
+  subtitles, music and the post text. The voice can be an AI voice or the owner's own recording, timed by its
+  transcript or by forced alignment of its script.
   The editor shows the exact credit price before anything is made.
 - **Clips from long videos** (`shared/highlights.ts`, `server/highlights.ts`). The owner uploads a podcast, interview,
   stream or webinar (up to 10 minutes on the free trial, 2 hours and 2 GB on paid plans), or imports it from a link to
@@ -81,8 +82,9 @@ and the maintenance cron.
 - **API and MCP.** Personal API keys (Settings) work with a small REST API (`/api/v1`) and an MCP server (`/mcp`), so
   scripts and AI assistants can make videos, find and make clips of the owner's long videos, fetch download links and
   pause or resume series, with the same credits and limits as the app.
-- **Administration.** Administrators (`ADMIN_EMAILS`) fill the shared library (music tagged by mood, background
-  clips), see operations and failures, handle withdrawals within 14 days and give free months of a plan.
+- **Administration.** Administrators (`ADMIN_EMAILS`) fill the shared library people search (music tagged by mood,
+  clips and pictures, each with a description; uploaded or copied from their own AI pictures and clips), choose the
+  narration voices, see operations and failures, handle withdrawals within 14 days and give free months of a plan.
 
 The public pages show drawn samples of the styles (`src/art.tsx`), never invented results, user numbers, reviews or
 trend data.

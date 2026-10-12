@@ -145,5 +145,5 @@ heading receives focus and the title updates; icons beside text are `aria-hidden
 - **Billing**: the current plan and credits, plan cards (monthly or yearly), credit packs, *Changed your mind?* (the
   14-day withdrawal), and what every plan includes and what credits buy.
 - **Settings**: account name, password, API keys (created once, shown once) and account deletion.
-- **Admin** (administrators only): Overview, Operations, Billing, Library and Messages tabs
+- **Admin** (administrators only): Overview, Operations, Billing, Voices, Library and Messages tabs
   ([OPERATIONS.md](OPERATIONS.md)).
