@@ -6,12 +6,11 @@ import { useToast } from "../ui";
 import { StyleArt } from "../art";
 import { StoryStylePicker } from "./StoryStyles";
 import { VideoEditor } from "./EditVideo";
-import { creditBlock, CreditBlockNotice } from "./pickers";
+import { creditBlock, CreditBlockNotice, useOfferedVoice, VoiceSelect } from "./pickers";
 import { categories, isTemplate, templateIds, templates, type CategoryId, type TemplateId } from "../../shared/templates";
 import { languages, musicMoods } from "../../shared/series";
 import { specCredits, type StorySpec } from "../../shared/formats";
 import { storyStyles, type StoryStyle } from "../../shared/story";
-import { voices } from "../../shared/voices";
 import { creditsLabel, videoCredits } from "../../shared/credits";
 import "./create.css";
 
@@ -86,6 +85,8 @@ export function Create() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the style changes
   }, [template]);
   const set = (patch: Partial<Form>) => setForm((f) => ({ ...f, ...patch }));
+  // A template's voice that is no longer offered gives way to the default voice.
+  useOfferedVoice(form.voiceId, (voiceId) => set({ voiceId }));
   const left = user ? Math.max(0, user.limit - user.used) : null;
   const t = template ? templates[template] : null;
   const ready = !!t && (t.kind === "script" ? form.script.trim().length >= 20 : t.kind === "mashup" ? true : t.kind === "backdrop" ? true : form.prompt.trim().length >= 2 || template === "random");
@@ -204,7 +205,7 @@ export function Create() {
               <select className="select" value={form.language} onChange={(e) => set({ language: e.target.value })}>{languages.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</select>
             </label>
             <label className="field"><span>Voice</span>
-              <select className="select" value={form.voiceId} onChange={(e) => set({ voiceId: e.target.value })}>{voices.map((v) => <option key={v.id} value={v.id}>{v.name} — {v.tone}</option>)}</select>
+              <VoiceSelect value={form.voiceId} onChange={(voiceId) => set({ voiceId })} />
             </label>
           </div>
           <label className="field"><span>Music</span>

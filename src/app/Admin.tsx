@@ -5,6 +5,7 @@ import { Modal, Spinner, Switch, useToast } from "../ui";
 import { ApiError, bytes, del, errorText, number, patch, seconds, useApi, useAuth, type LibraryItem } from "../lib";
 import { ConfirmDialog, Empty, Tabs, ago, formatDate, tabPanel, useStableCallback } from "./pickers";
 import { BillingTab, OperationsTab } from "./AdminOps";
+import { VoicesTab } from "./AdminVoices";
 import "./pages.css";
 
 type Kind = LibraryItem["kind"];
@@ -14,8 +15,8 @@ type Overview = {
 };
 type AdminItem = LibraryItem & { active: boolean; rawTags: string };
 type Message = { id: string; name: string; email: string; topic: string; message: string; created_at: number };
-type Tab = "overview" | "operations" | "billing" | "library" | "messages";
-const tabIds: Tab[] = ["overview", "operations", "billing", "library", "messages"];
+type Tab = "overview" | "operations" | "billing" | "voices" | "library" | "messages";
+const tabIds: Tab[] = ["overview", "operations", "billing", "voices", "library", "messages"];
 const kindNames: Record<Kind, string> = { clip: "Background clip", music: "Music" };
 const topics: Record<string, string> = { question: "Question", billing: "Billing", withdrawal: "Withdrawal (14 days)", partnership: "Partnership", abuse: "Report abuse", other: "Other" };
 const flagNames: Record<string, string> = {
@@ -42,19 +43,20 @@ function AdminConsole() {
       <div className="page-head">
         <div>
           <h1>Admin</h1>
-          <p>Service health and operations, withdrawals and free months, the shared library and contact messages.</p>
+          <p>Service health and operations, withdrawals and free months, narration voices, the shared library and contact messages.</p>
         </div>
       </div>
       <div style={{ marginBottom: 20 }}>
         <Tabs label="Admin sections" idBase="admin" value={tab} onChange={(t) => setParams(t === "overview" ? {} : { tab: t }, { replace: true })} items={[
           { id: "overview", label: "Overview" }, { id: "operations", label: "Operations" }, { id: "billing", label: "Billing" },
-          { id: "library", label: "Library" }, { id: "messages", label: "Messages" },
+          { id: "voices", label: "Voices" }, { id: "library", label: "Library" }, { id: "messages", label: "Messages" },
         ]} />
       </div>
       <div {...tabPanel("admin", tab)}>
         {tab === "overview" && <OverviewTab />}
         {tab === "operations" && <OperationsTab />}
         {tab === "billing" && <BillingTab />}
+        {tab === "voices" && <VoicesTab />}
         {tab === "library" && <LibraryTab />}
         {tab === "messages" && <MessagesTab />}
       </div>

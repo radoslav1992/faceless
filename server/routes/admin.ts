@@ -10,9 +10,10 @@ import { GRANT_PREFIX } from "../billing";
 import { adminWithdrawals } from "../withdrawals";
 import { planGrants } from "../plan-grants";
 import { operationsSnapshot } from "../operations";
+import { adminVoices } from "./admin-voices";
 
-// Administration: health and operations, withdrawals and plan grants, the shared library (music by mood, background
-// clips) and contact messages.
+// Administration: health and operations, withdrawals and plan grants, the narration voices, the shared library (music
+// by mood, background clips) and contact messages.
 export const admin = new Hono<App>();
 admin.use("*", async (c, next) => {
   if (!isAdmin(c.env, c.get("user"))) throw new HTTPException(404, { message: "Not found." });
@@ -21,6 +22,7 @@ admin.use("*", async (c, next) => {
 admin.get("/operations", async (c) => c.json(await operationsSnapshot(c.env)));
 admin.route("/withdrawals", adminWithdrawals);
 admin.route("/grants", planGrants);
+admin.route("/voices", adminVoices);
 admin.get("/overview", async (c) => {
   const since = now() - DAY;
   const one = async (sql: string, ...args: unknown[]) => (await c.env.DB.prepare(sql).bind(...args).first<{ n: number }>())?.n || 0;

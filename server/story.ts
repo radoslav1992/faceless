@@ -10,7 +10,8 @@ import { spendSpeech, speechView, storedTranscript } from "./speech";
 import { forcedAlignment } from "./providers/elevenlabs";
 import { ProviderError } from "./providers/http";
 import { narrationCurrent, storySpec, type StorySpec } from "../shared/formats";
-import { voices } from "../shared/voices";
+import { voiceIdSchema } from "../shared/voices";
+import { offeredVoice, voiceUsable } from "./voices";
 import { SPEECH_CHARS_PER_SECOND } from "../shared/credits";
 import { languageCodes, languageName, type LanguageCode } from "../shared/series";
 import { templateIds, templateOf, type TemplateId, type VideoKind } from "../shared/templates";
@@ -292,7 +293,7 @@ const draftSchema = z.object({
   mashup: z.object({ animal: z.string().trim().max(60).default(""), object: z.string().trim().max(60).default("") }).optional(),
   seconds: z.number().int().min(15).max(160).default(60),
   language: z.enum(languageCodes as [LanguageCode, ...LanguageCode[]]).default("en"),
-  voiceId: z.enum(voices.map((v) => v.id) as [string, ...string[]]).optional(),
+  voiceId: voiceIdSchema.optional(),
   style: styleEnum.optional(),
   subject: z.string().trim().max(300).default(""),
   captions: z.object({ enabled: z.boolean(), style: z.enum(captionStyles) }).optional(),
@@ -307,7 +308,9 @@ export type DraftRequest = z.input<typeof draftSchema>;
 export async function draftVideo(env: Env, input: DraftRequest, recent: string[] = []): Promise<StorySpec> {
   const d = draftSchema.parse(input);
   const t = templateOf(d.template);
-  const style = d.style || t.style, voiceId = d.voiceId || t.voice;
+  // A voice asked for must be offered; the template's own is replaced by the default voice when it was hidden.
+  if (d.voiceId && !(await voiceUsable(env, d.voiceId))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
+  const style = d.style || t.style, voiceId = d.voiceId || (await offeredVoice(env, t.voice));
   const catalog = await musicCatalog(env, d.music === "auto" ? t.music : d.music);
   const backdropId = t.kind === "backdrop" ? await backdropFor(env, null) : null;
   let concept: StoryConcept | null;

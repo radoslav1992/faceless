@@ -44,14 +44,15 @@ handler runs `maintenance()` every minute.
 
 ## Data model
 
-`migrations/0001_initial.sql` and `0002_clips.sql` (runs of kind `speech`); D1 always enforces foreign keys.
+`migrations/0001_initial.sql`, `0002_clips.sql` (runs of kind `speech`) and `0003_voices.sql` (narration voices); D1
+always enforces foreign keys.
 
 | Area | Tables |
 | --- | --- |
 | Accounts | `users`, `sessions`, `auth_tokens` (verify/reset), `rate_limits`, `terms_acceptances`, `contact_messages`, `cleanup_tasks` |
 | Billing | `subscriptions` (Stripe subscriptions and `grant_` rows), `stripe_status`, `stripe_reconciled`, `billing_events` (webhook de-duplication), `checkout_intents`, `usage_windows`, `trial_history`, `credit_topups`, `media_limits`, `checkout_consents`, `withdrawals` |
 | Social | `social_accounts` (sealed credentials), `oauth_states` |
-| Making videos | `series`, `videos`, `runs`, `media_assets`, `media_parts`, `library_items` |
+| Making videos | `series`, `videos`, `runs`, `media_assets`, `media_parts`, `library_items`, `voices` |
 | Publishing | `publications` (status, attempts, media-link token, provider ticket, URL, stats) |
 | API | `api_keys` (SHA-256 of the key and a short prefix only) |
 | Operations | `operations_state`, `manual_reviews` |
@@ -96,6 +97,18 @@ length (the owner's recording by its own length), everything included, plus 1 cr
 edit of a made video costs only what it asks for again: new narration when the words or voice changed, 1 credit per
 5 new pictures, and new clips. Changes to the caption, hashtags or title need no new render; other free changes
 (subtitles, music, transitions, timing) re-render for 0 credits.
+
+**Voices** (`server/voices.ts`, `voices` table, Admin → Voices in `src/app/AdminVoices.tsx`). Administrators import a
+voice of the ElevenLabs account (`GET /api/admin/voices/elevenlabs` lists it: `/v2/voices`, 100 at a time; `POST
+/api/admin/voices` reads `/v1/voices/{id}`) with ElevenLabs' details: "George - Warm Storyteller" becomes the name
+George and the description "Warm Storyteller", else the labels (descriptive, use case) or ElevenLabs' description;
+gender, accent and age from the labels; its sample is copied to R2 (`voices/<id>/sample.mp3`, served at
+`/api/public/voices/:id/preview`). Its public ID (made of its name, or chosen) never changes: specs and series keep
+it, and the ElevenLabs voice behind it can be replaced. Administrators rename, describe, order, hide and choose the
+default (`PATCH /api/admin/voices/:id`; the default is always offered); only a voice no series or video uses can be
+deleted. `GET /api/public/voices` lists the offered voices (the app's voice pickers, with a sample to play; the API's
+`/types` and `list_video_types`). A new video or series must use an offered voice; one that already has a voice keeps
+it once hidden (`voiceUsable` with the kept voice), and a template whose voice was hidden gets the default.
 
 ## Writing
 

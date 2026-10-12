@@ -7,7 +7,7 @@ import { dbFailure, json, ownedVideo } from "./db";
 import { rate } from "./security";
 import { allowance, type Allowance } from "./billing";
 import { scheduleEpisode } from "./publishing";
-import { isVoice } from "./voices";
+import { voiceUsable } from "./voices";
 import { isHighlight, referencedAssets, referencedLibrary, specCredits, specHook, specSchema, visualPart, type HighlightSpec, type Spec } from "../shared/formats";
 import { storyScript, STORY_MAX_CHARS, STORY_MAX_SECONDS } from "../shared/story";
 import { creditsLabel } from "../shared/credits";
@@ -17,8 +17,11 @@ import { creditsLabel } from "../shared/credits";
 // one-off videos and clips (server/highlights.ts), and edit any video before it posts.
 export const videos = new Hono<App>();
 
-/** Every file, library item and voice the spec uses exists and is the owner's (or shared). */
-export async function checkReferences(env: Env, userId: string, spec: Spec) {
+/**
+ * Every file, library item and voice the spec uses exists and is the owner's (or shared). The voice must be one that
+ * is offered, or `keptVoice`: the one the video (or its series) already has, which keeps working once hidden.
+ */
+export async function checkReferences(env: Env, userId: string, spec: Spec, keptVoice?: string | null) {
   const assets = referencedAssets(spec);
   if (assets.length) {
     const found = (await env.DB.prepare(`SELECT id FROM media_assets WHERE user_id=? AND status='ready' AND id IN (${assets.map(() => "?").join(",")})`)
@@ -34,7 +37,7 @@ export async function checkReferences(env: Env, userId: string, spec: Spec) {
   if (isHighlight(spec)) return checkSource(env, userId, spec);
   // An AI voice reads at most STORY_MAX_CHARS; an own voiceover is a recording with sound, up to the render's three minutes.
   if (spec.narration.kind === "voice") {
-    if (!isVoice(spec.narration.voiceId)) throw new HTTPException(400, { message: "Choose a voice." });
+    if (!(await voiceUsable(env, spec.narration.voiceId, keptVoice))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
     if (storyScript(spec.scenes).length > STORY_MAX_CHARS) throw new HTTPException(400, { message: `The script can be up to ${STORY_MAX_CHARS.toLocaleString("en-US")} characters (about ${Math.round(STORY_MAX_CHARS / 15)} seconds).` });
   } else {
     const a = await env.DB.prepare("SELECT mime,duration,meta FROM media_assets WHERE id=? AND user_id=?").bind(spec.narration.assetId, userId).first<{ mime: string; duration: number; meta: string }>();
@@ -217,7 +220,7 @@ videos.put("/:id", async (c) => {
   // The paid recording stays with the video while its words and voice do not change (and a clip's tracking while its
   // moment does not).
   const spec = { ...stripGenerated(d.spec), ...serverParts(stored) } as Spec;
-  await checkReferences(c.env, user.id, spec);
+  await checkReferences(c.env, user.id, spec, !isHighlight(stored) && stored.narration?.kind === "voice" ? stored.narration.voiceId : null);
   if (visualPart(spec) === visualPart(stored) && v.render_status === "ready") {
     await c.env.DB.prepare("UPDATE videos SET spec=?,caption=?,title=?,updated_at=? WHERE id=?").bind(JSON.stringify(spec), spec.caption, spec.title, now(), v.id).run();
     return c.json({ video: videoView({ ...v, spec: JSON.stringify(spec), caption: spec.caption, title: spec.title }, true), rendering: false });

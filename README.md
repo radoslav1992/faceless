@@ -28,7 +28,8 @@ and the maintenance cron.
 
   On top of these sit 22 ready-made styles in six categories (scary stories, history, fun facts, POV scenarios,
   bedtime stories, "Your own topic" and more), each with its brief for the writer, voice, art style, length and music
-  mood. There are 15 art styles, 12 voices, 26 narration languages and 21 caption styles.
+  mood. There are 15 art styles, 26 narration languages, 21 caption styles, and the narration voices administrators
+  choose from their ElevenLabs account (Admin → Voices; twelve to start).
 - **Series on autopilot.** A series is one faceless channel: a style, a topic, a language, voice, art style, length
   (30, 45, 60 or 90 s), music mood, subtitles, the connected accounts it posts to and a schedule (times per day on
   chosen weekdays, in its time zone). For every slot an episode is written and made ahead of time (6 hours before;

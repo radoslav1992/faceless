@@ -43,7 +43,8 @@ import {
 import { Link } from "react-router-dom";
 import { AlertCircle, Check, CheckCircle2, ChevronLeft, ChevronRight, Music, Pause, Play, Search, Upload, UploadCloud } from "lucide-react";
 import { Modal, Spinner, useToast } from "../ui";
-import { errorText, newKey, seconds, uploadFile, useApi, useAuth, bytes as formatBytes, type Asset, type LibraryItem, type User } from "../lib";
+import { errorText, newKey, seconds, uploadFile, useApi, useAuth, useVoices, bytes as formatBytes, type Asset, type LibraryItem, type User } from "../lib";
+import { voiceLabel } from "../../shared/voices";
 import { planById } from "../../shared/plans";
 import "./pages.css";
 
@@ -248,6 +249,35 @@ export function PlayButton({ playing, onClick, label }: { playing: boolean; onCl
       {playing ? <Pause size={18} /> : <Play size={18} />}
     </button>
   );
+}
+
+/* ------------------------------------------------------------------------------------------------ voices */
+
+/**
+ * The narration voice: the voices offered (Admin → Voices) and the current one when it no longer is (a video or
+ * series keeps a voice hidden since), with a play button for the chosen voice's sample.
+ */
+export function VoiceSelect({ value, onChange, id }: { value: string; onChange: (id: string) => void; id?: string }) {
+  const { voices, loading, byId } = useVoices();
+  const audio = usePreviewAudio();
+  const current = byId(value);
+  return (
+    <span className="voice-select">
+      <select id={id} className="select" value={value} onChange={(e) => { audio.stop(); onChange(e.target.value); }}>
+        {!current && <option value={value}>{loading ? "Loading voices…" : `${value[0]?.toUpperCase()}${value.slice(1)} (no longer offered)`}</option>}
+        {voices.map((v) => <option key={v.id} value={v.id}>{voiceLabel(v)}</option>)}
+      </select>
+      {current?.preview && <PlayButton playing={audio.playing === current.id} onClick={() => audio.toggle(current.id, current.preview!)} label={`a sample of ${current.name}`} />}
+    </span>
+  );
+}
+/** For something new: when `value` is not an offered voice (a template's voice hidden since), the default voice. */
+export function useOfferedVoice(value: string, onChange: (id: string) => void, enabled = true) {
+  const { voices, loading, fallback } = useVoices();
+  const change = useStableCallback(onChange);
+  useEffect(() => {
+    if (enabled && !loading && fallback && !voices.some((v) => v.id === value)) change(fallback);
+  }, [enabled, loading, fallback, voices, value, change]);
 }
 
 /* ------------------------------------------------------------------------------------------------ uploads */

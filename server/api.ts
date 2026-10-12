@@ -15,7 +15,8 @@ import { cancelScheduled } from "./publishing";
 import { serveObject } from "./storage";
 import { templateIds, templates, type TemplateId } from "../shared/templates";
 import { storyStyleIds, storyStyles } from "../shared/story";
-import { voices } from "../shared/voices";
+import { voiceIdSchema } from "../shared/voices";
+import { activeVoices } from "./voices";
 import { languageCodes, languages } from "../shared/series";
 import { PRODUCT } from "../shared/brand";
 import { specSchema } from "../shared/formats";
@@ -97,7 +98,7 @@ const createSchema = z.object({
   object: z.string().trim().max(60).default(""),
   seconds: z.number().int().min(15).max(160).default(45),
   language: z.enum(languageCodes as [string, ...string[]]).default("en"),
-  voice: z.enum(voices.map((v) => v.id) as [string, ...string[]]).optional(),
+  voice: voiceIdSchema.optional(),
   style: z.enum(storyStyleIds as [string, ...string[]]).optional(),
 });
 /** Writes and makes a video for the key's owner (credits charged as in the app). */
@@ -217,7 +218,7 @@ restApi.use("*", async (c, next) => {
   await next();
 });
 restApi.get("/me", async (c) => c.json(await account(c.env, c.get("user"))));
-restApi.get("/types", (c) => c.json({ types: videoTypes(), styles: storyStyleIds, voices: voices.map((v) => v.id), languages: languages.map((l) => l[0]) }));
+restApi.get("/types", async (c) => c.json({ types: videoTypes(), styles: storyStyleIds, voices: (await activeVoices(c.env)).map((v) => v.id), languages: languages.map((l) => l[0]) }));
 restApi.get("/videos", async (c) => c.json({ videos: await listVideos(c.env, c.get("user"), Number(c.req.query("limit")) || 20) }));
 restApi.post("/videos", async (c) => c.json({ video: await makeVideo(c.env, c.get("user"), await c.req.json()) }, 201));
 restApi.get("/videos/:id", async (c) => c.json({ video: await getVideo(c.env, c.get("user"), c.req.param("id")) }));
@@ -265,7 +266,7 @@ const tools = [
         object: { type: "string", description: "For type 'mashup': the object." },
         seconds: { type: "integer", minimum: 15, maximum: 160, description: "Length of narration in seconds (default 45)." },
         language: { type: "string", enum: languageCodes, description: "Narration language (default en)." },
-        voice: { type: "string", enum: voices.map((v) => v.id) },
+        voice: { type: "string", description: "A voice id from list_video_types (default: the type's voice)." },
         style: { type: "string", enum: storyStyleIds, description: "Art style of the pictures." },
       },
     },
@@ -347,7 +348,11 @@ const rpcError = (id: Rpc["id"], code: number, message: string) => ({ jsonrpc: "
 async function callTool(env: Env, user: DbUser, name: string, args: any) {
   switch (name) {
     case "list_video_types":
-      return { types: videoTypes(), styles: storyStyleIds.map((s) => ({ id: s, name: storyStyles[s].name })), voices: voices.map((v) => ({ id: v.id, name: v.name, tone: v.tone, accent: v.accent })), languages: languages.map(([code, n]) => ({ code, name: n })) };
+      return {
+        types: videoTypes(), styles: storyStyleIds.map((s) => ({ id: s, name: storyStyles[s].name })),
+        voices: (await activeVoices(env)).map((v) => ({ id: v.id, name: v.name, description: v.description, tone: v.description, gender: v.gender, accent: v.accent })),
+        languages: languages.map(([code, n]) => ({ code, name: n })),
+      };
     case "create_video": return makeVideo(env, user, args || {});
     case "get_video": return getVideo(env, user, String(args?.id || ""));
     case "list_videos": return { videos: await listVideos(env, user, Number(args?.limit) || 20) };

@@ -6,6 +6,7 @@ import type { SeriesSettings } from "../shared/series";
 import type { TemplateId, VideoKind } from "../shared/templates";
 import type { PlatformId } from "../shared/social";
 import type { Moment, MomentRequest } from "../shared/highlights";
+import type { Voice } from "../shared/voices";
 
 // The app's API client, signed-in state and shared types. Every request goes to /api on this site.
 
@@ -76,6 +77,21 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
   return data as T;
 }
 export const post = <T = any,>(path: string, data: unknown = {}) => api<T>(path, { method: "POST", body: JSON.stringify(data) });
+
+let voicesRequest: Promise<Voice[]> | null = null;
+/** The narration voices offered (Admin → Voices), loaded once per page; `reloadVoices` after an admin changes them. */
+export function useVoices() {
+  const [voices, setVoices] = useState<Voice[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    voicesRequest ??= api<{ voices: Voice[] }>("/public/voices").then((r) => r.voices).catch((e) => { voicesRequest = null; throw e; });
+    voicesRequest.then((v) => { if (live) setVoices(v); }).catch(() => { if (live) setVoices([]); });
+    return () => { live = false; };
+  }, []);
+  const list = voices || [];
+  return { voices: list, loading: voices === null, byId: (id: string) => list.find((v) => v.id === id), fallback: list.find((v) => v.default)?.id ?? list[0]?.id ?? null };
+}
+export const reloadVoices = () => { voicesRequest = null; };
 export const put = <T = any,>(path: string, data: unknown = {}) => api<T>(path, { method: "PUT", body: JSON.stringify(data) });
 export const patch = <T = any,>(path: string, data: unknown = {}) => api<T>(path, { method: "PATCH", body: JSON.stringify(data) });
 export const del = <T = any,>(path: string, data?: unknown) => api<T>(path, { method: "DELETE", ...(data !== undefined && { body: JSON.stringify(data) }) });

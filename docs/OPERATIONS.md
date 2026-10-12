@@ -196,7 +196,8 @@ again by itself.
   `fal-ai/nano-banana-2` or `fal-ai/flux/schnell`) switches to another model, and `FAL_IMAGE_QUALITY` lowers GPT Image
   2.5's quality and price, both without a deploy. Check section 5 for requests that may still bill.
 - **ElevenLabs** (`VOICE_*`): check the key, the plan's characters and concurrency. A voice ElevenLabs removed can be
-  replaced with `ELEVENLABS_VOICES` (JSON, public voice ID → ElevenLabs voice ID). Forced alignment failing
+  replaced in Admin → Voices (edit the voice, paste another ElevenLabs voice ID; videos keep the voice's ID), or
+  hidden so nobody new chooses it. Forced alignment failing
   (`Narration timing unavailable`, `Forced alignment failed`) only costs exact timings; Scribe failing (`Speech not
   found`) only costs transcripts of uploads.
 - **Renderer** (`RENDERER_UNAVAILABLE`, `MEDIA_TIMEOUT`, `MEDIA_LOST`): check Containers in the dashboard (instances

@@ -368,9 +368,10 @@ describe("the AI voice", () => {
       const characters = [..."Hi there."], starts = characters.map((_, i) => i * 0.12), ends = characters.map((_, i) => Math.min(1.08, (i + 1) * 0.12));
       return Response.json({ audio_base64: Buffer.from(new Uint8Array(48000)).toString("base64"), alignment: { characters, character_start_times_seconds: starts, character_end_times_seconds: ends } });
     });
-    const r = await speak({ ELEVENLABS_API_KEY: "el" } as any, "george", "Hi there.", "en", "original");
+    // George is one of the voices offered (migrations/0003_voices.sql): his ElevenLabs voice speaks.
+    const r = await speak(testEnv({ ELEVENLABS_API_KEY: "el" }).env, "george", "Hi there.", "en", "original");
     expect(SPEECH_MODEL).toBe("eleven_v4");
-    expect(seen[0].url).toContain("/with-timestamps");
+    expect(seen[0].url).toContain("/v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb/with-timestamps");
     expect(seen[0].body).toMatchObject({ text: "Hi there.", model_id: "eleven_v4", language_code: "en" });
     expect(r.seconds).toBe(1);
     expect(r.words.map((w) => w.text)).toEqual(["Hi", "there."]);

@@ -50,8 +50,6 @@ export interface Env {
   /** GPT Image 2.5's quality: low, medium, high (default), xhigh or max. */
   FAL_IMAGE_QUALITY?: string;
   ELEVENLABS_API_KEY?: string;
-  /** Optional JSON {"aria":"<provider voice id>", …} overriding server/voices.ts. */
-  ELEVENLABS_VOICES?: string;
   /** 32 random bytes, base64: encrypts social OAuth tokens at rest. */
   TOKEN_ENCRYPTION_KEY?: string;
   TIKTOK_CLIENT_KEY?: string;

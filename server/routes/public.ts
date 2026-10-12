@@ -4,6 +4,8 @@ import { z } from "zod";
 import type { App } from "../types";
 import { uid, now, ready, mediaEnabled, DAY } from "../types";
 import { defer, hit, rate, sendMail, verifyTurnstile } from "../security";
+import { serveObject } from "../storage";
+import { activeVoices } from "../voices";
 import { PRODUCT } from "../../shared/brand";
 
 export const contactTopics = {
@@ -11,6 +13,16 @@ export const contactTopics = {
 } as const;
 /** Unauthenticated API: site configuration and the contact form. */
 export const publicRoutes = new Hono<App>();
+/** The narration voices offered, in the administrators' order (Admin → Voices), and a sample of each. */
+publicRoutes.get("/api/public/voices", async (c) => {
+  c.header("Cache-Control", "public, max-age=60");
+  return c.json({ voices: await activeVoices(c.env) });
+});
+publicRoutes.get("/api/public/voices/:id/preview", async (c) => {
+  const v = await c.env.DB.prepare("SELECT preview_key FROM voices WHERE id=?").bind(c.req.param("id")).first<{ preview_key: string | null }>();
+  if (!v?.preview_key) throw new HTTPException(404, { message: "Not found." });
+  return serveObject(c.env, v.preview_key, c.req.header("Range"), "public, max-age=86400");
+});
 publicRoutes.get("/api/public/config", (c) =>
   c.json({
     turnstileSiteKey: c.env.TURNSTILE_SITE_KEY || null,

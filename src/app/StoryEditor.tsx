@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Film, Image as ImageIcon, Library, Merge, RefreshCw, Scissors, Sparkles, Star, Trash2, Type, Wand2 } from "lucide-react";
-import { api, fileUrl, type Asset, type LibraryItem } from "../lib";
+import { api, fileUrl, useVoices, type Asset, type LibraryItem } from "../lib";
 import { Switch } from "../ui";
 import { CaptionStylePicker, EditorSection } from "./CaptionPickers";
-import { LibraryPicker, MediaPicker } from "./pickers";
+import { LibraryPicker, MediaPicker, useOfferedVoice, VoiceSelect } from "./pickers";
 import { StoryPreview, type ScenePicture } from "./StoryPreview";
 import { StoryTimeline } from "./StoryTimeline";
 import { StoryStylePicker } from "./StoryStyles";
@@ -20,7 +20,6 @@ import { overlayItems } from "../../shared/overlay";
 import { FRAME } from "../../shared/render";
 import { CLIP_SECONDS, PICTURES_PER_CREDIT, clipCredits, creditsLabel, pictureCredits, speechSeconds, videoCredits, voiceCredits } from "../../shared/credits";
 import { headlineFor } from "../../shared/headline";
-import { voices } from "../../shared/voices";
 import "./story.css";
 
 // The video editor: the preview and the selected scene, the timeline of the whole voice, the on-screen title, the
@@ -99,7 +98,8 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
   }, [spec.headline, clock.duration]);
   const setScenes = (scenes: StoryScene[]) => onChange({ ...spec, scenes });
   const setScene = (patch: Partial<StoryScene>) => setScenes(spec.scenes.map((s, i) => (i === selected ? { ...s, ...patch } as StoryScene : s)));
-  const voiceName = spec.narration.kind === "voice" ? voices.find((v) => v.id === (spec.narration as { voiceId: string }).voiceId)?.name || "AI voice" : "Your recording";
+  const { byId } = useVoices();
+  const voiceName = spec.narration.kind === "voice" ? byId((spec.narration as { voiceId: string }).voiceId)?.name || "AI voice" : "Your recording";
   const voiceLabel = spec.narration.kind === "upload" ? `Your recording · ${clockText(clock.duration)}` : `AI voice · ${voiceName}${clock.source === "estimate" ? " · made with the video" : ""}`;
   const long = clock.duration > STORY_MAX_SECONDS;
   return (
@@ -292,7 +292,8 @@ function StoryPlan({ spec, creditsLeft, music, initial, recordingSeconds }: { sp
   const p = storyPrice(spec, initial, recordingSeconds);
   const missing = spec.backdrop ? -1 : spec.scenes.findIndex((s) => (s.source === "image" || s.source === "clip") && !s.imageId && s.description.trim().length < 3);
   const unchosen = spec.backdrop ? -1 : spec.scenes.findIndex((s) => (s.source === "own" && !s.assetId) || (s.source === "library" && !s.libraryId));
-  const voiceName = spec.narration.kind === "voice" ? voices.find((v) => v.id === (spec.narration as { voiceId: string }).voiceId)?.name ?? "" : "";
+  const { byId } = useVoices();
+  const voiceName = spec.narration.kind === "voice" ? byId((spec.narration as { voiceId: string }).voiceId)?.name ?? "" : "";
   const rows: [string, string, number | null][] = initial
     ? [
       [`New video · about ${clockText(p.seconds)}`, `${spec.narration.kind === "voice" ? `AI voice ${voiceName}` : "your recording"}, ${spec.backdrop ? "a background clip" : `${p.pictures} AI pictures in ${storyStyles[spec.style].name}`}`, p.video],
@@ -335,6 +336,8 @@ export function StoryInputs({ input, onInput, recording, timing, aligning, align
   onPickRecording: (type: "audio" | "video") => void; onAlign: () => void;
 }) {
   const set = (patch: Partial<StoryInput>) => onInput({ ...input, ...patch });
+  // A new video starts with an offered voice; a made one keeps its own.
+  useOfferedVoice(input.voiceId, (voiceId) => set({ voiceId }), !fixed && input.mode === "voice");
   const words = timing?.words.length ?? 0;
   return (
     <>
@@ -343,9 +346,7 @@ export function StoryInputs({ input, onInput, recording, timing, aligning, align
           <span className="label">Voiceover</span>
           {input.mode === "voice" ? (
             <label className="field"><span className="small">Voice <span className="muted">(a new voice is recorded again)</span></span>
-              <select className="select" value={input.voiceId} onChange={(e) => set({ voiceId: e.target.value })}>
-                {voices.map((v) => <option key={v.id} value={v.id}>{v.name} — {v.tone} ({v.accent})</option>)}
-              </select>
+              <VoiceSelect value={input.voiceId} onChange={(voiceId) => set({ voiceId })} />
             </label>
           ) : <span className="small story-file">{recording?.name || "Your recording"}{recording?.duration ? ` · ${clockText(recording.duration)}` : ""}</span>}
         </div>
@@ -358,9 +359,7 @@ export function StoryInputs({ input, onInput, recording, timing, aligning, align
         {input.mode === "voice" ? (
           <div className="story-voice-fields">
             <label className="field"><span className="small">Voice</span>
-              <select className="select" value={input.voiceId} onChange={(e) => set({ voiceId: e.target.value })}>
-                {voices.map((v) => <option key={v.id} value={v.id}>{v.name} — {v.tone} ({v.accent})</option>)}
-              </select>
+              <VoiceSelect value={input.voiceId} onChange={(voiceId) => set({ voiceId })} />
             </label>
             <label className="field"><span className="small">Length</span>
               <select className="select" value={input.seconds} onChange={(e) => set({ seconds: Number(e.target.value) })}>

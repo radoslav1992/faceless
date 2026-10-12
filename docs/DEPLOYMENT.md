@@ -22,7 +22,8 @@ and `npx wrangler deploy` as the deploy command (a full deploy, so the container
 
 Apply the schema once, and again whenever a file lands in `migrations/` — before the code that needs it is deployed
 (`0002_clips.sql` lets a long video be transcribed for credits, a run of kind `speech`, and indexes clips by their
-video; the code already running keeps working on it):
+video; `0003_voices.sql` creates the narration voices managed in Admin → Voices, with the twelve voices offered
+before; the code already running keeps working on both):
 
 ```sh
 npm run db:remote     # wrangler d1 migrations apply faceless --remote
@@ -73,8 +74,7 @@ the Worker reads (`Env` in `server/types.ts`); `.dev.vars.example` lists them fo
 | `FAL_KEY` | secret | AI pictures (`openai/gpt-image-2.5/flare/text-to-image`) and clips (`fal-ai/kling-video/v2.5-turbo/pro/image-to-video`) |
 | `FAL_IMAGE_MODEL` | text | Optional picture model: `openai/gpt-image-2.5/sunburst/text-to-image`, `fal-ai/nano-banana-2` or `fal-ai/flux/schnell` (cheapest); anything else uses the default |
 | `FAL_IMAGE_QUALITY` | text | Optional GPT Image 2.5 quality: `low`, `medium`, `high` (default), `xhigh` or `max`. Each step up costs more per picture |
-| `ELEVENLABS_API_KEY` | secret | Narration (`eleven_v4` with timestamps), forced alignment, and Scribe v2 transcription of uploads (Scribe and forced alignment read files through links on `SITE_URL`) |
-| `ELEVENLABS_VOICES` | text | Optional JSON `{"george":"<voice id>", …}` replacing the ElevenLabs voice behind any of the 12 public voices (`server/voices.ts`) |
+| `ELEVENLABS_API_KEY` | secret | Narration (`eleven_v4` with timestamps), forced alignment, and Scribe v2 transcription of uploads (Scribe and forced alignment read files through links on `SITE_URL`). Admin → Voices lists the account's voices to import, so the key needs the Voices read permission (and Text to Speech, Speech to Text, Forced Alignment) |
 | `TOKEN_ENCRYPTION_KEY` | secret | `openssl rand -base64 32`. Seals OAuth tokens (AES-256-GCM) and signs API download links. Never change it once accounts are connected |
 | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` | secret | TikTok app (section 4) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | secret | Google OAuth client for YouTube (section 4) |
