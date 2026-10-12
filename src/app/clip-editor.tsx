@@ -232,8 +232,8 @@ export function HighlightEditor({ spec, onChange }: { spec: HighlightSpec; onCha
         <p className="muted small">{seconds(keptDuration(keep, length))} · {layoutChoices[choice].name}{spec.layout.kind === "follow" && !tracked ? " · the speaker is found when it's made" : ""}</p>
         {spec.moment && (
           <div className="moment-note small">
-            <span className={`score-badge ${scoreTone(spec.moment.score)}`}>{spec.moment.score}</span>
-            <span>{spec.moment.why || "Clip score"}</span>
+            <span className={`score-badge ${scoreTone(spec.moment.score)}`} title="Virality score: our estimate, not a promise of views" aria-label={`Virality score ${spec.moment.score} of 99`}>{spec.moment.score}</span>
+            <span>{spec.moment.why || "Virality score"}</span>
           </div>
         )}
       </div>
@@ -315,8 +315,11 @@ export function HighlightEditor({ spec, onChange }: { spec: HighlightSpec; onCha
   );
 }
 
-/** The colour of a clip score: strong, good or plain. */
+/** The colour of a virality score: strong, good or plain. */
 export const scoreTone = (score: number) => (score >= 80 ? "high" : score >= 60 ? "mid" : "low");
-/** "Hook 8 · Payoff 7 · Stands alone 7 · Energy 6" */
-export const scoreLine = (scores: Record<keyof typeof scoreParts, number>) =>
-  (Object.keys(scoreParts) as (keyof typeof scoreParts)[]).map((k) => `${scoreParts[k].name} ${scores[k]}`).join(" · ");
+/** "Hook 8 · Payoff 7 · Stands alone 7 · Energy 6 · 2 reactions heard" */
+export const scoreLine = (scores: Record<keyof typeof scoreParts, number>, reactions = 0) =>
+  [
+    ...(Object.keys(scoreParts) as (keyof typeof scoreParts)[]).map((k) => `${scoreParts[k].name} ${scores[k]}`),
+    ...(reactions > 0 ? [`${reactions === 1 ? "1 reaction" : `${reactions} reactions`} heard`] : []),
+  ].join(" · ");

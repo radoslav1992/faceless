@@ -185,14 +185,17 @@ The app's Clips (code: "highlights", so they never mix with a scene's AI clip): 
 `src/app/ClipPreview.tsx`.
 
 - **Sources** are the owner's video uploads (`GET /api/highlights/sources`). Each keeps what was found in it in
-  `media_assets.meta`: the transcript (up to 30,000 words), the last moments found (`moments`), a search waiting for
-  its speech (`wanted`) and the last search's failure (`momentsError`). Lists never carry the transcript; a clip's
-  editor loads the words around its moment (`GET /api/media/:id?from=&to=`).
+  `media_assets.meta`: the transcript (up to 30,000 words, with who spoke when — Scribe's diarization, speakers
+  numbered — and the sounds it tagged, such as laughter or applause), the last moments found (`moments`), a search
+  waiting for its speech (`wanted`) and the last search's failure (`momentsError`). Lists never carry the transcript;
+  a clip's editor loads the words around its moment (`GET /api/media/:id?from=&to=`).
 - **Finding clips** (`POST /api/highlights/sources/:id/find`: how many, short/medium/long, an optional focus). With
-  the speech known, the text model reads the transcript numbered by sentence, in parts of 24,000 characters (up to 8,
-  in parallel), as data; it picks non-overlapping sentence ranges of the asked length and rates each 1–10 for hook,
-  payoff, clarity and energy. `acceptMoments` checks them (sentence edges with a little air, the accepted lengths, no
-  overlap) and `clipScore` weighs the parts into a score of 10–99, shown as an estimate, never a promise of views. The
+  the speech known, the text model reads the transcript numbered by sentence, with the sounds heard after each
+  (`[laughter]`, `[applause]`), in parts of 24,000 characters (up to 8, in parallel), as data; it picks
+  non-overlapping sentence ranges of the asked length and rates each 1–10 for hook, payoff, clarity and energy.
+  `acceptMoments` checks them (sentence edges with a little air, the accepted lengths, no overlap) and `viralityScore`
+  weighs the parts into the **virality score** (10–99), plus 3 for each time people laughed, applauded or cheered in
+  the moment or the 2 s after it (`reactionsIn`, 9 at most). It is shown as an estimate, never a promise of views. The
   best scored are kept. Twenty successful searches per person and day; a failed one gives its search back. A video
   whose speech is not known yet is transcribed first: free up to 10 minutes (the daily allowance), else as a run of
   kind `speech` for `speechCredits` (1 per started 30 minutes, the price the person was shown; refunded if it fails).
@@ -203,16 +206,23 @@ The app's Clips (code: "highlights", so they never mix with a scene's AI clip): 
   writer's note on the moment (`moment`: score and reason, never rendered). It costs 1 credit per started minute of its
   moment; an edit is free unless it keeps less than half of the moment it replaces (`specCredits` with the stored spec);
   a clip whose first run failed (refunded) costs a new one when it is made again.
-- **Layouts**: `follow` (a 9:16 crop following the main face, `shared/track.ts`), `split` with two windows stacked
+- **Layouts**: `follow` (a 9:16 crop on whoever is talking, `shared/track.ts`), `split` with two windows stacked
   (`speakers`: placed on the two people found unless the owner moved them; `screen`: a camera window over the screen),
   `crop` (one window) and `fit` (the whole picture over a blur). A window is a centre and a zoom; `paneWindow` turns it
   into the exact rectangle of the pane's shape inside the picture, the same in the preview and the render plan.
 - **The run**: when the layout needs it (`follow`, or `split` placed automatically) and the moment was not measured
   yet, the renderer's `track` operation finds the faces in the moment (YuNet, 4 samples a second) and returns the crop
-  path and the two people seen most (`faces`), kept as the server-owned `tracked` with the moment's key; a failure only
-  leaves the picture centred. Then `planHighlight` makes one video segment: the moment trimmed, its kept parts, and
-  either the `follow` path, `fit: "contain"` or `panes`; the clip's own sound; captions from the transcript's words cut
-  like the picture; the hook title; music under it all. Nothing in a clip is AI-made, so it is never marked as such.
+  path and the two people seen most (`faces`), kept as the server-owned `tracked` with the moment's key; a failure
+  only leaves the picture centred. **Active speaker**: the Worker sends who talks when in the moment (`speechTurns`:
+  Scribe's diarized turns, or stretches of speech when the transcript has no speakers). For every face the renderer
+  compares its mouth with the last sample (a small patch between the mouth's corners, less the change of one on the
+  nose, so a moving head is not talking); each turn of at least a second goes to the face clearly moving its lips
+  most, and a speaker label keeps the face it was matched to most often (so a turn whose lips were not readable still
+  finds its face). The crop cuts at each change of speaker (never more than once a second) and follows that face
+  calmly within the turn; with no speech, or one face, it follows the face seen most. Then `planHighlight` makes one
+  video segment: the moment trimmed, its kept parts, and either the `follow` path, `fit: "contain"` or `panes`; the
+  clip's own sound; captions from the transcript's words cut like the picture; the hook title; music under it all.
+  Nothing in a clip is AI-made, so it is never marked as such.
 - **Posting**: clips post like any video; the Clips page can schedule a batch one a day (or twice a day, weekly) on
   chosen channels.
 

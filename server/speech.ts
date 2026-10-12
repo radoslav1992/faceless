@@ -4,7 +4,9 @@ import { DAY, now } from "./types";
 import { json } from "./db";
 import { take, token } from "./security";
 import { failureCode, providerFetch, ProviderError } from "./providers/http";
-import { LONG_VIDEO_SECONDS, SPEECH_MAX_SECONDS, TRANSCRIPT_MAX_WORDS, type SpeechStatus, type Transcript } from "../shared/speech";
+import {
+  LONG_VIDEO_SECONDS, SPEECH_MAX_SECONDS, TRANSCRIPT_MAX_EVENTS, TRANSCRIPT_MAX_TURNS, TRANSCRIPT_MAX_WORDS, type SoundEvent, type SpeechStatus, type Transcript, type Turn,
+} from "../shared/speech";
 import type { CaptionWord } from "../shared/captions";
 
 // Speech in uploaded videos and tracks: an owner's own voiceover is timed by its words for subtitles and scenes.
@@ -26,31 +28,52 @@ const LISTEN_SECONDS = 3 * 3600;
 const PENDING_SECONDS = 3600;
 
 // The Scribe answer (ElevenLabs speech-to-text, as in @elevenlabs/elevenlabs-js SpeechToTextChunkResponseModel):
-// language_code (ISO 639-3, e.g. "eng"), text, and words [{ text, start, end, type: word|spacing|audio_event }].
+// language_code (ISO 639-3, e.g. "eng"), text, and words [{ text, start, end, type: word|spacing|audio_event,
+// speaker_id }] — speaker_id ("speaker_0"…) with diarization on.
 const scribeOutput = z.object({
   language_code: z.string().optional(),
-  words: z.array(z.object({ text: z.unknown(), start: z.unknown(), end: z.unknown(), type: z.unknown() }).partial()).optional(),
+  words: z.array(z.object({ text: z.unknown(), start: z.unknown(), end: z.unknown(), type: z.unknown(), speaker_id: z.unknown() }).partial()).optional(),
 });
 const round = (n: number) => Math.round(n * 100) / 100;
+/** A word's speaker turn ends when another speaker talks, or after a pause this long. */
+const TURN_GAP = 1.5;
 /**
  * The words of a Scribe answer, as rech-bg keeps them: only real words with times, never before the previous word's
- * end (times only go forward), cut to the file's length, without brackets or control characters.
+ * end (times only go forward), cut to the file's length, without brackets or control characters. With diarization,
+ * who spoke when (`turns`, speakers numbered in the order they first spoke); the sounds Scribe tagged that are not
+ * speech (`events`: laughter, applause…).
  */
 export function scribeWords(result: unknown, duration: number): Transcript {
   const r = scribeOutput.safeParse(result);
   if (!r.success) return { language: "", words: [] };
-  const limit = duration > 0 ? duration : Infinity, words: CaptionWord[] = [];
+  const limit = duration > 0 ? duration : Infinity, words: CaptionWord[] = [], turns: Turn[] = [], events: SoundEvent[] = [];
+  const speakers = new Map<string, number>();
   let end = 0;
   for (const w of r.data.words || []) {
-    if (w.type !== "word" || typeof w.text !== "string" || typeof w.start !== "number" || typeof w.end !== "number" || !Number.isFinite(w.start) || !Number.isFinite(w.end)) continue;
+    if (typeof w.text !== "string" || typeof w.start !== "number" || typeof w.end !== "number" || !Number.isFinite(w.start) || !Number.isFinite(w.end)) continue;
+    if (w.type === "audio_event") {
+      const text = w.text.toLowerCase().replace(/[^\p{L} ]/gu, "").replace(/\s+/g, " ").trim().slice(0, 40);
+      const start = round(Math.max(0, w.start)), finish = round(Math.min(limit, w.end));
+      if (text && finish > start && events.length < TRANSCRIPT_MAX_EVENTS) events.push({ text, start, end: finish });
+      continue;
+    }
+    if (w.type !== "word" || words.length >= TRANSCRIPT_MAX_WORDS) continue;
     const start = round(Math.max(end, 0, w.start)), finish = round(Math.min(limit, w.end));
     end = finish;
     // eslint-disable-next-line no-control-regex -- control characters never belong in a caption
     const text = w.text.replace(/[[\]<>\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim().slice(0, 80);
-    if (text && finish > start) words.push({ text, start, end: finish });
+    if (!text || finish <= start) continue;
+    words.push({ text, start, end: finish });
+    if (typeof w.speaker_id !== "string" || !w.speaker_id) continue;
+    if (!speakers.has(w.speaker_id) && speakers.size < 64) speakers.set(w.speaker_id, speakers.size);
+    const speaker = speakers.get(w.speaker_id);
+    if (speaker === undefined) continue;
+    const last = turns.at(-1);
+    if (last && last[2] === speaker && start - last[1] <= TURN_GAP) last[1] = finish;
+    else if (turns.length < TRANSCRIPT_MAX_TURNS) turns.push([start, finish, speaker]);
   }
   const language = (r.data.language_code || "").toLowerCase().replace(/[^a-z-]/g, "").slice(0, 12);
-  return { language, words: words.slice(0, TRANSCRIPT_MAX_WORDS) };
+  return { language, words, ...(turns.length && { turns }), ...(events.length && { events }) };
 }
 
 /**
@@ -64,7 +87,9 @@ export async function transcribe(e: Env, url: string, duration: number): Promise
   body.set("model_id", SCRIBE_MODEL);
   body.set("source_url", url);
   body.set("timestamps_granularity", "word");
-  body.set("tag_audio_events", "false");
+  // Who speaks when (the crop of a clip cuts to whoever talks) and laughter or applause (a clip's virality score).
+  body.set("diarize", "true");
+  body.set("tag_audio_events", "true");
   // About ten minutes, and more for long videos (Scribe answers when the whole file is done).
   const r = await providerFetch(SCRIBE_URL, {
     method: "POST", headers: { "xi-api-key": key }, body, signal: AbortSignal.timeout((10 + Math.min(duration, LONG_VIDEO_SECONDS) / 240) * 60000),
@@ -81,12 +106,18 @@ export function speechView(a: { kind?: string; mime: string; meta: string | null
   const status: SpeechStatus = s.status === "pending" && (s.at || 0) < now() - PENDING_SECONDS ? "failed" : s.status;
   return { speech: status, speechLanguage: status === "found" ? s.language || null : null };
 }
-/** The stored transcript of a file, if speech was found; only the words in [from, to] when a range is given. */
+/**
+ * The stored transcript of a file, if speech was found; only what lies in [from, to] when a range is given (its words,
+ * speaker turns and sound events).
+ */
 export function storedTranscript(meta: string | null, from = 0, to = Infinity): Transcript | null {
   const t = json<any>(meta, {}).transcript;
   if (!t || !Array.isArray(t.words) || !t.words.length) return null;
-  const words = from > 0 || to < Infinity ? t.words.filter((w: CaptionWord) => w.end >= from && w.start <= to) : t.words;
-  return { language: String(t.language || ""), words };
+  const ranged = from > 0 || to < Infinity;
+  const words = ranged ? t.words.filter((w: CaptionWord) => w.end >= from && w.start <= to) : t.words;
+  const turns: Turn[] | undefined = Array.isArray(t.turns) ? (ranged ? t.turns.filter((x: Turn) => x[1] >= from && x[0] <= to) : t.turns) : undefined;
+  const events: SoundEvent[] | undefined = Array.isArray(t.events) ? (ranged ? t.events.filter((x: SoundEvent) => x.end >= from && x.start <= to) : t.events) : undefined;
+  return { language: String(t.language || ""), words, ...(turns && { turns }), ...(events && { events }) };
 }
 const ownSound = (a: { kind: string; mime: string; duration: number }, hasAudio: boolean | null | undefined) =>
   a.kind === "upload" && /^(video|audio)\//.test(a.mime) && hasAudio !== false && a.duration >= 1;

@@ -104,11 +104,12 @@ export type StillsPayload = {
  */
 export type InspectPayload = { id: string; operation: "inspect"; url: string; maxSeconds?: number };
 /**
- * Where the main face is in seconds `start` to `start + length` (at most 10 minutes) of a video: the speaker path of
- * shared/track.ts on the video's own clock, and the two people seen most (`faces`), in the status (`track`). No file
- * comes back.
+ * Where the speaker is in seconds `start` to `start + length` (at most 10 minutes) of a video: the speaker path of
+ * shared/track.ts on the video's own clock, and the two people seen most (`faces`), in the status (`track`). With
+ * `turns` (shared/speech.ts speechTurns: [start, end, speaker] on the video's clock), the path cuts to the face whose
+ * lips move while someone talks; without them it follows the face seen most. No file comes back.
  */
-export type TrackPayload = { id: string; operation: "track"; url: string; start: number; length: number };
+export type TrackPayload = { id: string; operation: "track"; url: string; start: number; length: number; turns?: [number, number, number][] };
 export type RenderPayload = ComposePayload | StillsPayload | InspectPayload | TrackPayload;
 
 export type RenderStatus = {

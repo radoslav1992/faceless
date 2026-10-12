@@ -118,7 +118,7 @@ export const homeFaq: [string, string][] = [
   ["Can I see upcoming videos before they post?", "Yes. The series page lists the coming slots and the episodes already made for them, with their status. You get an e-mail when each one is ready."],
   ["Can I post to several social accounts?", "Yes. A series can post to TikTok, YouTube Shorts and Instagram Reels at the same time, and different series can post to different accounts."],
   ["Can I download my videos?", "Always. Every video downloads as a 1080 × 1920 MP4, on every plan, including the free trial."],
-  ["Can I turn my podcast or stream into clips?", "Yes. Upload the video (up to 10 minutes on the free trial, up to 2 hours on paid plans) and we find the moments that stand on their own, score each one, and make the ones you choose into vertical clips that follow the speaker, with captions. A clip costs 1 credit per started minute."],
+  ["Can I turn my podcast or stream into clips?", "Yes. Upload the video (up to 10 minutes on the free trial, up to 2 hours on paid plans) and we find the moments that stand on their own, give each a virality score, and make the ones you choose into vertical clips that cut to whoever is talking, with captions. A clip costs 1 credit per started minute."],
 ];
 export function Faq({ items }: { items: [string, string][] }) {
   return (
@@ -199,8 +199,8 @@ export function Landing() {
             <p className="sub">Upload a podcast, interview, stream or webinar. We listen to it, pick the moments that work on their own and make them vertical.</p>
           </div>
           <div className="feature-list">
-            <div className="feature"><Sparkles size={22} className="accent-text" aria-hidden="true" /><h3>The best moments, scored</h3><p>Every moment comes with a score for its hook, payoff, clarity and energy, and a reason it works. Ask for a topic if you like.</p></div>
-            <div className="feature"><ScanFace size={22} className="accent-text" aria-hidden="true" /><h3>Framed on the speaker</h3><p>The vertical crop keeps the main speaker in frame as they move. Or stack two speakers, put your camera over your screen, or place the crop yourself.</p></div>
+            <div className="feature"><Sparkles size={22} className="accent-text" aria-hidden="true" /><h3>A virality score for every moment</h3><p>Each moment is scored on its hook, payoff, clarity and energy, and on the laughs and applause it gets, with a reason it works. An estimate, never a promise of views. Ask for a topic if you like.</p></div>
+            <div className="feature"><ScanFace size={22} className="accent-text" aria-hidden="true" /><h3>Framed on the speaker</h3><p>The vertical crop cuts to whoever is talking: we hear who speaks and watch whose lips move. Or stack two speakers, put your camera over your screen, or place the crop yourself.</p></div>
             <div className="feature"><Columns2 size={22} className="accent-text" aria-hidden="true" /><h3>Captions and cuts</h3><p>Word-by-word captions in twenty-one styles, a hook title, and long pauses and filler words cut out.</p></div>
             <div className="feature"><Scissors size={22} className="accent-text" aria-hidden="true" /><h3>Edit, schedule, post</h3><p>Trim any clip on its words, then post the batch on your channels one a day, or whenever you choose.</p></div>
           </div>

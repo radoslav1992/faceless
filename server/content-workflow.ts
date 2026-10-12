@@ -17,7 +17,7 @@ import { claimSpeech, mayHaveSpeech, storedTranscript, transcribe } from "./spee
 import { momentsAfterSpeech } from "./highlights";
 import { narrationContext } from "./story";
 import { runEpisode, videoReady, videoFailed } from "./series";
-import { LONG_VIDEO_SECONDS, SPEECH_MAX_SECONDS } from "../shared/speech";
+import { LONG_VIDEO_SECONDS, SPEECH_MAX_SECONDS, speechTurns } from "../shared/speech";
 import {
   isHighlight, narrationCurrent, pendingMedia, referencedAssets, referencedLibrary, specSchema, trackKey, type HighlightSpec, type PendingMedia, type Spec, type StorySpec,
 } from "../shared/formats";
@@ -271,9 +271,10 @@ async function renderAndSave(e: Env, step: WorkflowStep, run: RunInfo, phase: Ph
 const needsTracking = (spec: HighlightSpec) =>
   (spec.layout.kind === "follow" || (spec.layout.kind === "split" && spec.layout.auto)) && spec.tracked?.key !== trackKey(spec);
 /**
- * Where a clip's people are in its moment: the renderer follows the main face (the path of "Speaker focus") and finds
- * the two people seen most (for "Two speakers"), for free. Kept with the clip (`tracked`); a failure only leaves the
- * picture centred (and the speakers where the layout put them), and the next render tries again.
+ * Where a clip's people are in its moment: the renderer follows whoever is talking (the path of "Speaker focus": the
+ * transcript says when someone speaks, the lips say who) and finds the two people seen most (for "Two speakers"), for
+ * free. Kept with the clip (`tracked`); a failure only leaves the picture centred (and the speakers where the layout
+ * put them), and the next render tries again.
  */
 async function trackMoment(e: Env, step: WorkflowStep, run: RunInfo, spec: HighlightSpec, phase: Phase) {
   const source = await step.do("track-source", async () =>
@@ -283,8 +284,12 @@ async function trackMoment(e: Env, step: WorkflowStep, run: RunInfo, spec: Highl
   // A video no wider than the 9:16 frame is never cropped: there is nobody to follow.
   if (source.width > (source.height * 9) / 16 * 1.01) {
     const payload = await step.do("track-payload", async (): Promise<RenderPayload> => {
-      const start = Math.min(spec.source.start, Math.max(0, source.duration - 1));
-      return { id: uid(), operation: "track", url: await inputUrl(e, run.id, source.object_key), start, length: Math.max(1, Math.min(spec.source.end, source.duration) - start) };
+      const start = Math.min(spec.source.start, Math.max(0, source.duration - 1)), length = Math.max(1, Math.min(spec.source.end, source.duration) - start);
+      // Who talks when in the moment (speakers told apart by the transcription, or just when someone talks): the crop
+      // cuts to the face whose lips move with it.
+      const meta = await e.DB.prepare("SELECT meta FROM media_assets WHERE id=? AND user_id=?").bind(spec.source.assetId, run.user_id).first<{ meta: string | null }>();
+      const turns = speechTurns(storedTranscript(meta?.meta ?? null, start, start + length), start, start + length);
+      return { id: uid(), operation: "track", url: await inputUrl(e, run.id, source.object_key), start, length, ...(turns.length && { turns }) };
     });
     try {
       await phase("tracking");

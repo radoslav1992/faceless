@@ -33,7 +33,7 @@ export const momentRequestSchema = z.object({
 });
 export type MomentRequest = z.infer<typeof momentRequestSchema>;
 
-/** What the writer rates every moment on, 1–10 each, and how much each part counts in the clip score. */
+/** What the writer rates every moment on, 1–10 each, and how much each part counts in its virality score. */
 export const scoreParts = {
   hook: { name: "Hook", about: "The first seconds make people stay", weight: 0.35 },
   payoff: { name: "Payoff", about: "It lands a point, a laugh or a surprise", weight: 0.3 },
@@ -43,21 +43,27 @@ export const scoreParts = {
 export type ScorePart = keyof typeof scoreParts;
 export const scorePartIds = Object.keys(scoreParts) as ScorePart[];
 export type Scores = Record<ScorePart, number>;
+/** A sound of people reacting, as the transcription tags it: laughter, applause, cheering, a gasp. */
+export const isReaction = (sound: string) => /\b(laugh|chuckl|giggl|applau|clap|cheer|whoop|gasp)/.test(sound);
+/** Points a reaction heard in a moment adds to its virality score, and the most they add together. */
+export const REACTION_POINTS = 3, REACTION_MAX_POINTS = 9;
 /**
- * The clip score, 10–99: the parts weighted. It is the writer's judgement of how well a moment works as a short on
- * its own — never a prediction of views.
+ * A moment's virality score, 10–99: the writer's four parts weighted, plus 3 for each reaction heard in it (9 at
+ * most). It estimates how well a moment works as a short on its own — never a prediction of views.
  */
-export function clipScore(s: Scores) {
+export function viralityScore(s: Scores, reactions = 0) {
   const total = scorePartIds.reduce((n, k) => n + scoreParts[k].weight * Math.min(10, Math.max(1, s[k])), 0);
-  return Math.min(99, Math.max(10, Math.round(total * 10)));
+  const base = Math.min(99, Math.max(10, Math.round(total * 10)));
+  return Math.min(99, base + Math.min(REACTION_MAX_POINTS, REACTION_POINTS * Math.max(0, reactions)));
 }
 /**
  * A moment: seconds `start` to `end` of the video, a hook title, why it works, the post text it would go with, the
- * words said in it, and its score.
+ * words said in it, its virality score with the parts it is made of, and how many times people laughed, applauded or
+ * cheered in it (`reactions`; moments found before reactions were heard have none).
  */
 export type Moment = {
   title: string; why: string; caption: string; hashtags: string[]; start: number; end: number; text: string;
-  score: number; scores: Scores;
+  score: number; scores: Scores; reactions?: number;
 };
 
 // Layouts -------------------------------------------------------------------------------------------------------------
@@ -71,7 +77,8 @@ export const paneSchema = z.object({ x: share.default(0.5), y: share.default(0.5
 export type Pane = z.infer<typeof paneSchema>;
 /**
  * How the (usually wider) source fills the 9:16 frame:
- * - follow: a 9:16 crop that follows the main speaker (face tracking, shared/track.ts);
+ * - follow: a 9:16 crop that cuts to whoever is talking (shared/track.ts: the transcript says when someone speaks,
+ *   the lips say who; without speech it follows the face seen most);
  * - crop: one fixed window the owner places;
  * - fit: the whole picture over a blurred copy of itself;
  * - split: two windows stacked, the top one `ratio` of the frame's height — two speakers, or a screen and a camera.
@@ -89,7 +96,7 @@ export const layoutSchema = z.discriminatedUnion("kind", [
 export type Layout = z.infer<typeof layoutSchema>;
 /** The layouts as the editor offers them. */
 export const layoutChoices = {
-  follow: { name: "Speaker focus", about: "A vertical crop that keeps the main face in frame" },
+  follow: { name: "Speaker focus", about: "A vertical crop that cuts to whoever is talking" },
   speakers: { name: "Two speakers", about: "Two people stacked, one above the other" },
   screen: { name: "Screen + camera", about: "Your camera on top, the screen or game below" },
   crop: { name: "Fixed crop", about: "You pick the part of the picture; it stays put" },

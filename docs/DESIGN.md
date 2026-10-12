@@ -122,14 +122,16 @@ heading receives focus and the title updates; icons beside text are `aria-hidden
 - **Clips** (`/app/clips`, `Clips.tsx`): the owner's long videos as 16:9 cards with where each stands (Checking,
   Listening, *N moments*, clips made), an upload button and a drop zone. **A video's clips page** has *Find clips*
   (how many, how long, an optional topic; the price when a long video must be transcribed first), the moments as cards
-  ranked by their score badge (lime from 80, amber from 60) with the four part scores, the reason and the words, a
+  ranked by their virality score badge (lime from 80, amber from 60) with the four part scores and the reactions
+  heard, a line saying what the score is (an estimate, not a promise of views), the reason and the words, a
   sticky phone preview of the chosen moment (`ClipPreview.tsx`: the source drawn into the frame by its layout, cut and
   captioned as the render will be), *Make the clips* (layout tiles, caption style, hook title, pause removal, the
   price) and the clips made, with *Schedule clips* (channels, first post, one a day / two a day / one a week).
-- **The clip editor** (`clip-editor.tsx`, on a clip's video page): the preview with the moment's score; a trim bar of
-  the words around the moment whose edges snap to word edges (draggable, or arrow keys); layout tiles, and for a fixed
-  crop or a split the source picture with each window as a draggable box (lime on top, cyan below), its zoom and the
-  split's ratio; captions (position and style), the hook title (text, 3 s / 5 s / whole clip), music and the post text.
+- **The clip editor** (`clip-editor.tsx`, on a clip's video page): the preview with the moment's virality score; a
+  trim bar of the words around the moment whose edges snap to word edges (draggable, or arrow keys); layout tiles, and
+  for a fixed crop or a split the source picture with each window as a draggable box (lime on top, cyan below), its
+  zoom and the split's ratio; captions (position and style), the hook title (text, 3 s / 5 s / whole clip), music and
+  the post text.
 - **Videos** (`/app/videos`): a grid of 9:16 video cards filtered by All, Being made, To review, Ready and Failed.
   **A video's page** shows the player beside its posts (post now or later, privately where possible, retry), review
   (approve / reject), the editor, a retry for a failed render and delete.

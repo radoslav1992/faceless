@@ -150,7 +150,10 @@ function sourceOut(s: ReturnType<typeof sourceView>) {
   return {
     id: s.id, name: s.name, duration: s.duration, status: s.status, speech: s.speech, transcribeCredits: s.transcribeCredits,
     searching: !!s.wanted || s.speech === "pending", error: s.momentsError, clips: s.clips,
-    moments: s.moments.map((m, index) => ({ index, title: m.title, start: m.start, end: m.end, score: m.score, why: m.why, caption: m.caption, hashtags: m.hashtags })),
+    // score: the moment's virality score; reactions: the times people laughed, applauded or cheered in it.
+    moments: s.moments.map((m, index) => ({
+      index, title: m.title, start: m.start, end: m.end, score: m.score, reactions: m.reactions ?? 0, why: m.why, caption: m.caption, hashtags: m.hashtags,
+    })),
   };
 }
 async function listSources(env: Env, user: DbUser) {
@@ -286,7 +289,7 @@ const tools = [
   },
   {
     name: "find_clips",
-    description: "Finds the best stand-alone moments in one of the owner's videos, each scored 10–99 (an estimate, not a prediction of views). Free when its speech is known or it is up to 10 minutes long; a longer video is transcribed first for transcribeCredits (pass them as credits to agree to the price). When 'searching' is true, call list_long_videos or get_long_video later for the moments.",
+    description: "Finds the best stand-alone moments in one of the owner's videos, each with a virality score of 10–99: an AI estimate of how well it works as a short on its own (hook, payoff, clarity, energy, and the laughter or applause heard in it), not a prediction of views. Free when its speech is known or it is up to 10 minutes long; a longer video is transcribed first for transcribeCredits (pass them as credits to agree to the price). When 'searching' is true, call list_long_videos or get_long_video later for the moments.",
     inputSchema: {
       type: "object", additionalProperties: false, required: ["source"],
       properties: {
@@ -300,7 +303,7 @@ const tools = [
   },
   {
     name: "get_long_video",
-    description: "One of the owner's videos with the moments found in it (index, times, title, score).",
+    description: "One of the owner's videos with the moments found in it (index, times, title, virality score, reactions heard).",
     inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"], additionalProperties: false },
   },
   {

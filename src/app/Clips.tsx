@@ -94,7 +94,7 @@ export function ClipsPage() {
               <h2 style={{ fontSize: 22 }}>Your first clips are one upload away</h2>
               <ol className="clip-steps">
                 <li><strong>Upload</strong> a podcast, interview, stream or webinar.</li>
-                <li><strong>Find clips:</strong> we listen to it and pick the moments that stand on their own, each with a score.</li>
+                <li><strong>Find clips:</strong> we listen to it and pick the moments that stand on their own, each with a virality score.</li>
                 <li><strong>Make and post</strong> them as vertical clips that follow the speaker, with captions, on your schedule.</li>
               </ol>
               <FileButton accept={ACCEPT.video} className="btn primary" label="Upload a video" icon={<UploadCloud size={16} aria-hidden="true" />} onFiles={(files) => uploads.add(files.slice(0, 1))} disabled={uploads.busy} />
@@ -263,16 +263,20 @@ export function SourcePage() {
 
           {moments.length > 0 && (
             <section className="stack" aria-labelledby="moments-title" style={{ gap: 10 }}>
-              <h2 id="moments-title" style={{ fontSize: 20 }}>Moments <span className="muted small">best first · scores are our estimate, not a promise of views</span></h2>
+              <h2 id="moments-title" style={{ fontSize: 20 }}>Moments <span className="muted small">best first</span></h2>
+              <p className="muted small">
+                The virality score (10–99) is our AI's estimate of how well a moment works as a short on its own: its hook, payoff, how well it
+                stands alone and its energy, plus the laughter or applause heard in it. It is not a promise of views.
+              </p>
               <ol className="moments list-plain">
                 {moments.map((m) => {
                   const k = momentKey(m), state = made[k];
                   return (
                     <li key={k} className={`moment${focus === k ? " on" : ""}`}>
-                      <span className={`score-badge ${scoreTone(m.score)}`} title={scoreLine(m.scores)} aria-label={`Score ${m.score} of 99`}>{m.score}</span>
+                      <span className={`score-badge ${scoreTone(m.score)}`} title={`Virality score · ${scoreLine(m.scores, m.reactions)}`} aria-label={`Virality score ${m.score} of 99`}>{m.score}</span>
                       <div className="moment-body">
                         <strong>{m.title}</strong>
-                        <span className="muted small">{length(m.start)} – {length(m.end)} · {Math.round(m.end - m.start)} s · {scoreLine(m.scores)}</span>
+                        <span className="muted small">{length(m.start)} – {length(m.end)} · {Math.round(m.end - m.start)} s · {scoreLine(m.scores, m.reactions)}</span>
                         {m.why && <p className="small">{m.why}</p>}
                         <p className="moment-text small">“{m.text}”</p>
                         <div className="row wrap" style={{ gap: 6 }}>

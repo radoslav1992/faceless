@@ -809,6 +809,56 @@ class TrackTest(RendererTest):
         self.assertValid(points)
         self.assertGreater(len(points), 100)
 
+    @staticmethod
+    def talk(spans, seconds=12):
+        """Two people (left at 0.25, right at 0.75), 4 samples a second; spans: (start, end, k) seconds in which person k
+        talks — their lips (a number here) change every sample, the other's stay still."""
+        out = []
+        for i in range(seconds * 4):
+            t = i / 4
+            talking = next((k for a, b, k in spans if a <= t < b), None)
+            out.append([(x, 0.4, 0.12, 0.21, (i % 2) * 0.3 if talking == k else 0.0) for k, x in enumerate((0.25, 0.75))])
+        return out
+
+    def test_the_crop_cuts_to_whoever_is_talking(self):
+        samples = self.talk([(0, 4, 0), (4, 8, 1), (8, 12, 0)])
+        turns = [(0.2, 3.8, 0), (4.1, 7.9, 1), (8.2, 11.8, 0)]
+        points = server.track_path(samples, [], self.WIDE, turns=turns)['points']
+        self.assertValid(points)
+        self.assertEqual(points, [[0.0, 0.25], [4.0, 0.25], [4.0, 0.75], [8.0, 0.75], [8.0, 0.25]])
+        # Without speaker labels the lips alone decide, turn by turn.
+        self.assertEqual(server.track_path(samples, [], self.WIDE, turns=[(a, b, -1) for a, b, _ in turns])['points'], points)
+        # Without speech the main face is followed as before.
+        self.assertEqual(len(server.track_path(samples, [], self.WIDE)['points']), 1)
+
+    def test_a_speaker_label_finds_its_face_when_the_lips_say_nothing(self):
+        # The right person's second turn: their lips are hidden (no patches), but the label was matched with them before.
+        samples = self.talk([(0, 4, 0), (4, 8, 1), (8, 10, 0)])
+        for i in range(40, 48): samples[i] = [samples[i][0][:4] + (0.0,), samples[i][1][:4] + (None,)]
+        turns = [(0.2, 3.8, 0), (4.1, 7.9, 1), (8.2, 9.8, 0), (10.0, 11.8, 1)]
+        points = server.track_path(samples, [], self.WIDE, turns=turns)['points']
+        self.assertEqual(points[-2:], [[10.0, 0.25], [10.0, 0.75]])
+        # With unlabelled turns the hidden one is unclear, so the last speaker stays.
+        unlabelled = server.track_path(samples, [], self.WIDE, turns=[(a, b, -1) for a, b, _ in turns])['points']
+        self.assertEqual(unlabelled[-1], [8.0, 0.25])
+
+    def test_short_or_unclear_turns_and_quick_exchanges_keep_the_crop(self):
+        # A half-second "yeah" from the right person does not move the crop.
+        samples = self.talk([(0, 4, 0), (4, 4.5, 1), (4.5, 10, 0)])
+        self.assertEqual(server.track_path(samples, [], self.WIDE, turns=[(0, 3.9, 0), (4, 4.5, 1), (4.6, 10, 0)])['points'], [[0.0, 0.25]])
+        # Both lips moving alike: nobody is clearly talking, the last speaker stays.
+        both = [[(x, 0.4, 0.12, 0.21, (i % 2) * 0.3) for x in (0.25, 0.75)] for i in range(40)]
+        both[:16] = self.talk([(0, 4, 1)], 4)
+        self.assertEqual(server.track_path(both, [], self.WIDE, turns=[(0, 3.9, -1), (4, 10, -1)])['points'], [[0.0, 0.75]])
+        # Speaker labels outvote a turn whose lips mislead: label 1's long turns are on the right, so its short one is too.
+        mixed = self.talk([(0, 2, 0), (2, 2.5, 1), (2.5, 4, 0), (4, 10, 1)], 10)
+        points = server.track_path(mixed, [], self.WIDE, turns=[(0, 2, 0), (2, 3.2, 1), (3.2, 4, 0), (4, 10, 1)])['points']
+        self.assertEqual(points, [[0.0, 0.25], [2.0, 0.25], [2.0, 0.75]])
+
+    def test_turns_are_checked_before_any_download(self):
+        for turns in ('x', [[0, 1]], [[1, 0, 0]], [[0, 1, 'a']], [[0, 1, True]], [[0, 1, 65]], [[0, 'x', 0]], [[0, 1, 0]] * 4001):
+            self.assert_fails({'operation': 'track', 'url': FIXTURES.url('upright.mp4'), 'start': 0, 'length': 1, 'turns': turns}, 'MEDIA_INVALID')
+
     def test_the_two_people_seen_most_left_one_first(self):
         # Two people side by side the whole time, one more often found; a passer-by on the far right now and then.
         samples = [[(0.7, 0.42, 0.1, 0.18)] + ([(0.28, 0.38, 0.12, 0.2)] if i % 3 else []) + ([(0.97, 0.5, 0.05, 0.08)] if i == 5 else [])

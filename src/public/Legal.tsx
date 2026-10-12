@@ -55,8 +55,9 @@ function terms(op: Operator): Section[] {
           <p>
             With Clips you can upload your own longer videos — a podcast, interview, stream or webinar. We transcribe what is said in them, an AI picks
             and scores moments that could work as short videos (a score is an estimate, never a promise of views), and the moments you choose become
-            vertical clips: cut from your video, framed on the people in it, with captions. Clips are made from your own footage; nothing in them is
-            AI-generated.
+            vertical clips: cut from your video, framed on the people in it, with captions. To frame a clip we find the faces in it and see whose lips
+            move while someone talks; this only locates people in the picture — we never recognise who they are. Clips are made from your own
+            footage; nothing in them is AI-generated.
           </p>
           <p>
             You can make videos one at a time, edit them, download them, and post them straight away or schedule them. A series (“autopilot”) uses the
@@ -442,8 +443,9 @@ function privacy(op: Operator): Section[] {
           </li>
           <li>
             <strong>Uploads:</strong> pictures, videos and audio you upload, such as your own narration recording or a long video you make clips from;
-            for uploads with speech, the words and their timings; and for videos you find clips in, the moments found (their times, titles, scores and
-            suggested post text) and where the people in a clip appear in the picture.
+            for uploads with speech, the words and their timings, when each speaker talks (speakers are numbered, never identified) and sounds such as
+            laughter or applause; and for videos you find clips in, the moments found (their times, titles, scores and suggested post text) and where
+            the people in a clip appear in the picture and which of them is talking.
           </li>
           <li>
             <strong>Generated content:</strong> scripts, titles, captions, scene descriptions, AI pictures and clips, narration, subtitles and finished

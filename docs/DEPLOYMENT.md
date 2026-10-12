@@ -176,7 +176,8 @@ everything you upload, including permission for every person shown.
     8. Create an API key, call `GET /api/v1/me`, make a video through `/api/v1/videos` or the MCP server, and download
        it from the signed link.
     9. On a paid plan, upload a podcast over 10 minutes on the Clips page, find clips in it (check the credits charged
-       for its transcription), make one clip with "Speaker focus" and one with "Two speakers", and post one.
+       for its transcription), make one clip of two people talking with "Speaker focus" (check the crop cuts to
+       whoever talks) and one with "Two speakers", and post one.
 
 ## Known limits
 
@@ -188,8 +189,10 @@ everything you upload, including permission for every person shown.
 - **Credit estimates**: a new video is charged by its script's estimated length (about 15 characters a second) before
   it is spoken; an owner's recording by its real length.
 - **Clips of long videos**: each clip's tracking and render download the whole source video into a container (up to
-  2 GB); a batch of clips of a two-hour stream moves that file once per clip. Faces are found with OpenCV's YuNet, so
-  "Speaker focus" and "Two speakers" follow faces, not voices (a speaker who is not facing the camera may be missed).
+  2 GB); a batch of clips of a two-hour stream moves that file once per clip. Faces are found with OpenCV's YuNet and
+  the speaker is the face whose lips move while the transcript says someone talks: a speaker turned away from the
+  camera, off screen or very small is not followed (the crop stays where it was), and videos transcribed before
+  speakers were told apart only know when someone talks, not who.
   Videos are uploaded from the browser only: there is no import from a link or from a YouTube channel (downloading
   from YouTube is against its terms).
 - **Legal pages**: the terms and privacy policy are a starting point; have them reviewed for your business and
