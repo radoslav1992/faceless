@@ -1,7 +1,7 @@
 import { useEffect, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { PRODUCT } from "../../shared/brand";
-import { CLIP_CREDITS, CLIP_SECONDS, PICTURES_PER_CREDIT, SECONDS_PER_CREDIT } from "../../shared/credits";
+import { CLIP_CREDITS, CLIP_SECONDS, HIGHLIGHT_SECONDS_PER_CREDIT, PICTURES_PER_CREDIT, SECONDS_PER_CREDIT, SPEECH_CREDIT_SECONDS } from "../../shared/credits";
 import { planById, ROLLOVER_MONTHS, TRIAL_DAYS } from "../../shared/plans";
 import { WITHDRAWAL_DAYS } from "../../shared/withdrawal";
 import { publicPages } from "../../shared/seo";
@@ -51,6 +51,13 @@ function terms(op: Operator): Section[] {
             can make narrated stories and facts in an art style of your choice, POV videos, mashup (“brainrot”) videos, videos from your own script, and
             storytime videos (a title card, then the story narrated over a looping background clip from our library or your own upload). You can also use
             your own pictures, video clips and narration recording.
+          </p>
+          <p>
+            With Clips you can upload your own longer videos — a podcast, interview, stream or webinar — or import them from a link to the file. We
+            transcribe what is said in them, an AI picks and scores moments that could work as short videos (a score is an estimate, never a promise
+            of views), and the moments you choose become vertical clips: cut from your video, framed on the people in it, with captions. To frame a
+            clip we find the faces in it and see whose lips move while someone talks; this only locates people in the picture — we never recognise who
+            they are. Clips are made from your own footage; nothing in them is AI-generated.
           </p>
           <p>
             You can make videos one at a time, edit them, download them, and post them straight away or schedule them. A series (“autopilot”) uses the
@@ -109,8 +116,10 @@ function terms(op: Operator): Section[] {
             per started {SECONDS_PER_CREDIT} seconds, with its script, narration and pictures included. Bringing a scene to life as a short AI clip costs{" "}
             {CLIP_CREDITS} credit per {CLIP_SECONDS} seconds of clip. In a video already made, new narration costs 1 credit per started{" "}
             {SECONDS_PER_CREDIT} seconds (your own recording is free) and new pictures 1 credit for every {PICTURES_PER_CREDIT} pictures or part of that;
-            changes to text, subtitles, music and timing are free. The <Link to="/pricing">pricing page</Link> shows the current rates. If AI work fails
-            on our side, its credits are returned.
+            changes to text, subtitles, music and timing are free. A clip of one of your videos costs 1 credit per started{" "}
+            {HIGHLIGHT_SECONDS_PER_CREDIT} seconds of it, and editing it is free unless you move it mostly onto other footage. Videos up to 10 minutes
+            are transcribed for free; transcribing a longer one costs 1 credit per started {SPEECH_CREDIT_SECONDS / 60} minutes of it. The{" "}
+            <Link to="/pricing">pricing page</Link> shows the current rates. If work fails on our side, its credits are returned.
           </p>
           <p>
             Unused credits roll over from month to month while your plan runs, up to {ROLLOVER_MONTHS} months' worth of your plan's credits plus the credit
@@ -195,8 +204,8 @@ function terms(op: Operator): Section[] {
             <li>make sexual content, content involving minors in any sexualised or harmful way, or content that is hateful, harassing, violent or threatening;</li>
             <li>make illegal or defamatory content, or false or misleading claims about products, health, money or politics;</li>
             <li>
-              upload or use pictures, footage, music or recordings that you don't have the rights to, or otherwise infringe anyone's copyright, trademark,
-              privacy or other rights;
+              upload, import or use pictures, footage, music or recordings that you don't have the rights to, or otherwise infringe anyone's copyright,
+              trademark, privacy or other rights;
             </li>
             <li>send spam, or break the rules of TikTok, Instagram, YouTube or any other platform you publish to;</li>
             <li>
@@ -247,6 +256,10 @@ function terms(op: Operator): Section[] {
             </li>
             <li>On TikTok and YouTube you can choose to post privately, so that only the account can see the video.</li>
             <li>You can cancel or move a scheduled post until it starts publishing.</li>
+            <li>
+              Where importing from YouTube is available on your plan, we also use your YouTube connection to list your channel's latest videos and, when
+              you choose one, download it from YouTube to make clips of it. Only videos of a channel you connected can be imported.
+            </li>
             <li>The access tokens the platforms give us are stored encrypted and used only to provide the service.</li>
             <li>
               You can disconnect an account at any time in the app or in the platform's own settings. Disconnecting it in the app cancels the posts still
@@ -433,8 +446,11 @@ function privacy(op: Operator): Section[] {
             posting schedule and the accounts it posts to, and your choices such as review and email notices.
           </li>
           <li>
-            <strong>Uploads:</strong> pictures, video clips and audio you upload, such as your own narration recording, and for uploads with speech the
-            words and their timings.
+            <strong>Uploads:</strong> pictures, videos and audio you upload, such as your own narration recording or a long video you make clips from
+            (or import from a link or your own YouTube channel: we keep the link only until the video is downloaded);
+            for uploads with speech, the words and their timings, when each speaker talks (speakers are numbered, never identified) and sounds such as
+            laughter or applause; and for videos you find clips in, the moments found (their times, titles, scores and suggested post text) and where
+            the people in a clip appear in the picture and which of them is talking.
           </li>
           <li>
             <strong>Generated content:</strong> scripts, titles, captions, scene descriptions, AI pictures and clips, narration, subtitles and finished
@@ -511,8 +527,8 @@ function privacy(op: Operator): Section[] {
               <tbody>
                 <tr>
                   <th scope="row">Cloudflare</th>
-                  <td>Hosting, database, file storage, email sending, the AI text model that writes scripts, titles and captions, and Turnstile security checks</td>
-                  <td>All service data; your topics, prompts and scripts for writing; technical data for security checks</td>
+                  <td>Hosting, database, file storage, email sending, the AI text model that writes scripts, titles and captions and finds moments for clips, and Turnstile security checks</td>
+                  <td>All service data; your topics, prompts and scripts for writing; the transcripts of videos you find clips in; technical data for security checks</td>
                 </tr>
                 <tr>
                   <th scope="row">Stripe</th>
@@ -531,7 +547,7 @@ function privacy(op: Operator): Section[] {
                 </tr>
                 <tr>
                   <th scope="row">TikTok, Meta (Instagram), Google (YouTube)</th>
-                  <td>Publishing your videos and reading their stats — only when you connect an account</td>
+                  <td>Publishing your videos and reading their stats, and importing a video of your own YouTube channel when you choose one — only when you connect an account</td>
                   <td>The videos you post, their titles and captions, and the account tokens</td>
                 </tr>
               </tbody>

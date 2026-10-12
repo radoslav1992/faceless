@@ -4,8 +4,8 @@ export interface Env {
   MEDIA: R2Bucket;
   AI: { run: (model: string, input: Record<string, unknown>) => Promise<unknown> };
   ASSETS: Fetcher;
-  /** Video runs ({runId}), upload checks ({inspectId}) and series episodes ({episode}). */
-  CONTENT?: Workflow<{ runId?: string; inspectId?: string; episode?: { seriesId: string; slot: number; first?: boolean } }>;
+  /** Video runs ({runId}), upload checks ({inspectId}), imports from links ({importId}) and series episodes ({episode}). */
+  CONTENT?: Workflow<{ runId?: string; inspectId?: string; importId?: string; episode?: { seriesId: string; slot: number; first?: boolean } }>;
   PUBLISH?: Workflow<{ publicationId: string }>;
   MEDIA_RENDERER?: DurableObjectNamespace;
   EMAIL?: SendEmail;
@@ -15,6 +15,11 @@ export interface Env {
   BILLING_ENABLED?: string;
   /** Rendering and AI generation (needs the renderer container and provider keys). */
   MEDIA_ENABLED?: string;
+  /**
+   * "true": paid plans can import videos from their own connected YouTube channel for clips (server/youtube-import.ts;
+   * a beta, off by default: see docs/DEPLOYMENT.md before switching it on).
+   */
+  YOUTUBE_IMPORT?: string;
   EMAIL_FROM?: string;
   CONTACT_EMAIL?: string;
   ADMIN_EMAILS?: string;
@@ -45,8 +50,6 @@ export interface Env {
   /** GPT Image 2.5's quality: low, medium, high (default), xhigh or max. */
   FAL_IMAGE_QUALITY?: string;
   ELEVENLABS_API_KEY?: string;
-  /** Optional JSON {"aria":"<provider voice id>", …} overriding server/voices.ts. */
-  ELEVENLABS_VOICES?: string;
   /** 32 random bytes, base64: encrypts social OAuth tokens at rest. */
   TOKEN_ENCRYPTION_KEY?: string;
   TIKTOK_CLIENT_KEY?: string;

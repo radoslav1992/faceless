@@ -45,12 +45,13 @@ class Site:
     """Serves fixture files on the input paths and counts the requests (path and query) it gets."""
     def __init__(self):
         self.dir = Path(tempfile.mkdtemp(prefix='renderer-fixtures-'))
-        self.names, self.requests = [], []
+        self.names, self.requests, self.agents = [], [], []
         site = self
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args): pass
             def do_GET(self):
                 site.requests.append(self.path)
+                site.agents.append(self.headers.get('User-Agent', ''))
                 path = self.path.split('?', 1)[0]
                 if path == f'/api/render-inputs/{JOB}/98':
                     self.send_response(302); self.send_header('Location', site.url('photo.jpg')); self.end_headers(); return
@@ -270,6 +271,8 @@ class ComposeTest(RendererTest):
         clip_path = clip.split(FIXTURES.origin, 1)[1]
         self.assertEqual(FIXTURES.requests[self.requests:].count(clip_path), 1, 'the same URL is downloaded once')
         self.assertIn(f'?token={TOKEN}', FIXTURES.requests[-1])
+        # Downloads say they are this site's renderer (the site's edge refuses Python's default user agent).
+        self.assertEqual(FIXTURES.agents[-1], f'Mozilla/5.0 (compatible; MediaRenderer/1.0; +{FIXTURES.origin})')
         mp4 = job['outputs'][0]
         self.assertGreater(loudness(mp4, 0.1, 0.8), -35)
         self.assertLess(loudness(mp4, 1.1, 0.8), -80)
@@ -694,6 +697,40 @@ class CutsTest(RendererTest):
             self.assert_fails({'operation': 'compose', 'urls': [FIXTURES.url('bands.mp4')], 'width': 720, 'height': 1280,
                                'synthetic': False, 'ass': '', 'segments': [segment]}, 'MEDIA_INVALID')
 
+    def test_panes_stack_windows_of_the_picture(self):
+        # Two speakers: the left (red) band on top, the right (blue) band below, each filling its half.
+        panes = [{'x': 0, 'y': 0, 'w': 1 / 3, 'h': 1, 'height': 640}, {'x': 2 / 3, 'y': 0, 'w': 1 / 3, 'h': 1, 'height': 640}]
+        job = self.compose('bands.mp4', {'input': 0, 'kind': 'video', 'duration': 1.0, 'trim': 0.5, 'audio': 1, 'panes': panes})
+        self.assertEqual(job['status'], 'completed', job)
+        mp4 = job['outputs'][0]
+        self.assertEqual(ffprobe(mp4)['streams'][0]['width'], 720)
+        for x in (10, 360, 710):
+            self.assertTrue(near(pixel(mp4, 0.5, x, 320), (255, 0, 0)), f'red on top at {x}')
+            self.assertTrue(near(pixel(mp4, 0.5, x, 960), (0, 0, 255)), f'blue below at {x}')
+        # A screen and a camera: a small window of the middle band on top (a third of the frame), the whole picture below.
+        panes = [{'x': 0.4, 'y': 0.2, 'w': 0.2, 'h': 0.4, 'height': 426}, {'x': 0, 'y': 0, 'w': 1, 'h': 1, 'height': 854}]
+        job = self.compose('bands.mp4', {'input': 0, 'kind': 'video', 'duration': 1.0, 'audio': 1, 'panes': panes, 'keep': [[0, 0.5], [1, 1.5]]})
+        self.assertEqual(job['status'], 'completed', job)
+        mp4 = job['outputs'][0]
+        self.assertTrue(near(pixel(mp4, 0.5, 360, 200), (0, 255, 0)), 'the camera window')
+        self.assertTrue(near(pixel(mp4, 0.5, 360, 1100), (0, 255, 0)), 'the middle of the screen below')
+        # One fixed window over the whole frame: the right band.
+        job = self.compose('bands.mp4', {'input': 0, 'kind': 'video', 'duration': 1.0, 'audio': 1,
+                                         'panes': [{'x': 0.7, 'y': 0, 'w': 0.3, 'h': 1, 'height': 1280}]})
+        self.assertEqual(job['status'], 'completed', job)
+        for x in (10, 710): self.assertTrue(near(pixel(job['outputs'][0], 0.5, x, 640), (0, 0, 255)))
+
+    def test_invalid_panes_fail_before_any_download(self):
+        video = lambda **s: {'input': 0, 'kind': 'video', 'duration': 2.0, **s}
+        pane = lambda **p: {'x': 0, 'y': 0, 'w': 1, 'h': 1, 'height': 640, **p}
+        for segment in (video(panes=[]), video(panes=[pane()]), video(panes=[pane(), pane(), pane(height=0)]),
+                        video(panes=[pane(), pane(height=639)]), video(panes=[pane(height=641), pane(height=639)]),
+                        video(panes=[pane(x=0.5), pane()]), video(panes=[pane(w=0.01), pane()]), video(panes=[pane(x='0'), pane()]),
+                        video(panes=[pane(height=640.5), pane(height=639.5)]), video(panes='top'), video(panes=[[0, 0, 1, 1], pane()]),
+                        video(panes=[pane(height=1280)], follow=[[0, 0.5]])):
+            self.assert_fails({'operation': 'compose', 'urls': [FIXTURES.url('bands.mp4')], 'width': 720, 'height': 1280,
+                               'synthetic': False, 'ass': '', 'segments': [segment]}, 'MEDIA_INVALID')
+
     def test_inspect_allows_long_videos_only_when_asked(self):
         self.assertEqual(run({'operation': 'inspect', 'url': FIXTURES.url('long.wav')}).get('error'), 'MEDIA_TOO_LONG')
         job = run({'operation': 'inspect', 'url': FIXTURES.url('long.wav'), 'maxSeconds': 7200})
@@ -774,6 +811,67 @@ class TrackTest(RendererTest):
         points = server.track_path(self.faces(xs), [k * 2.0 for k in range(1, 300)], self.WIDE)['points']
         self.assertValid(points)
         self.assertGreater(len(points), 100)
+
+    @staticmethod
+    def talk(spans, seconds=12):
+        """Two people (left at 0.25, right at 0.75), 4 samples a second; spans: (start, end, k) seconds in which person k
+        talks — their lips (a number here) change every sample, the other's stay still."""
+        out = []
+        for i in range(seconds * 4):
+            t = i / 4
+            talking = next((k for a, b, k in spans if a <= t < b), None)
+            out.append([(x, 0.4, 0.12, 0.21, (i % 2) * 0.3 if talking == k else 0.0) for k, x in enumerate((0.25, 0.75))])
+        return out
+
+    def test_the_crop_cuts_to_whoever_is_talking(self):
+        samples = self.talk([(0, 4, 0), (4, 8, 1), (8, 12, 0)])
+        turns = [(0.2, 3.8, 0), (4.1, 7.9, 1), (8.2, 11.8, 0)]
+        points = server.track_path(samples, [], self.WIDE, turns=turns)['points']
+        self.assertValid(points)
+        self.assertEqual(points, [[0.0, 0.25], [4.0, 0.25], [4.0, 0.75], [8.0, 0.75], [8.0, 0.25]])
+        # Without speaker labels the lips alone decide, turn by turn.
+        self.assertEqual(server.track_path(samples, [], self.WIDE, turns=[(a, b, -1) for a, b, _ in turns])['points'], points)
+        # Without speech the main face is followed as before.
+        self.assertEqual(len(server.track_path(samples, [], self.WIDE)['points']), 1)
+
+    def test_a_speaker_label_finds_its_face_when_the_lips_say_nothing(self):
+        # The right person's second turn: their lips are hidden (no patches), but the label was matched with them before.
+        samples = self.talk([(0, 4, 0), (4, 8, 1), (8, 10, 0)])
+        for i in range(40, 48): samples[i] = [samples[i][0][:4] + (0.0,), samples[i][1][:4] + (None,)]
+        turns = [(0.2, 3.8, 0), (4.1, 7.9, 1), (8.2, 9.8, 0), (10.0, 11.8, 1)]
+        points = server.track_path(samples, [], self.WIDE, turns=turns)['points']
+        self.assertEqual(points[-2:], [[10.0, 0.25], [10.0, 0.75]])
+        # With unlabelled turns the hidden one is unclear, so the last speaker stays.
+        unlabelled = server.track_path(samples, [], self.WIDE, turns=[(a, b, -1) for a, b, _ in turns])['points']
+        self.assertEqual(unlabelled[-1], [8.0, 0.25])
+
+    def test_short_or_unclear_turns_and_quick_exchanges_keep_the_crop(self):
+        # A half-second "yeah" from the right person does not move the crop.
+        samples = self.talk([(0, 4, 0), (4, 4.5, 1), (4.5, 10, 0)])
+        self.assertEqual(server.track_path(samples, [], self.WIDE, turns=[(0, 3.9, 0), (4, 4.5, 1), (4.6, 10, 0)])['points'], [[0.0, 0.25]])
+        # Both lips moving alike: nobody is clearly talking, the last speaker stays.
+        both = [[(x, 0.4, 0.12, 0.21, (i % 2) * 0.3) for x in (0.25, 0.75)] for i in range(40)]
+        both[:16] = self.talk([(0, 4, 1)], 4)
+        self.assertEqual(server.track_path(both, [], self.WIDE, turns=[(0, 3.9, -1), (4, 10, -1)])['points'], [[0.0, 0.75]])
+        # Speaker labels outvote a turn whose lips mislead: label 1's long turns are on the right, so its short one is too.
+        mixed = self.talk([(0, 2, 0), (2, 2.5, 1), (2.5, 4, 0), (4, 10, 1)], 10)
+        points = server.track_path(mixed, [], self.WIDE, turns=[(0, 2, 0), (2, 3.2, 1), (3.2, 4, 0), (4, 10, 1)])['points']
+        self.assertEqual(points, [[0.0, 0.25], [2.0, 0.25], [2.0, 0.75]])
+
+    def test_turns_are_checked_before_any_download(self):
+        for turns in ('x', [[0, 1]], [[1, 0, 0]], [[0, 1, 'a']], [[0, 1, True]], [[0, 1, 65]], [[0, 'x', 0]], [[0, 1, 0]] * 4001):
+            self.assert_fails({'operation': 'track', 'url': FIXTURES.url('upright.mp4'), 'start': 0, 'length': 1, 'turns': turns}, 'MEDIA_INVALID')
+
+    def test_the_two_people_seen_most_left_one_first(self):
+        # Two people side by side the whole time, one more often found; a passer-by on the far right now and then.
+        samples = [[(0.7, 0.42, 0.1, 0.18)] + ([(0.28, 0.38, 0.12, 0.2)] if i % 3 else []) + ([(0.97, 0.5, 0.05, 0.08)] if i == 5 else [])
+                   for i in range(40)]
+        self.assertEqual(server.face_pair(samples), [[0.28, 0.38], [0.7, 0.42]])
+        # One person, two faces too close to tell apart, or a second one seen only for a moment: no pair.
+        self.assertIsNone(server.face_pair(self.faces([0.3] * 40)))
+        self.assertIsNone(server.face_pair([[(0.4, 0.4, 0.1, 0.18), (0.52, 0.4, 0.1, 0.18)]] * 20))
+        self.assertIsNone(server.face_pair([[(0.3, 0.4, 0.1, 0.18)] + ([(0.8, 0.4, 0.1, 0.18)] if i < 2 else []) for i in range(40)]))
+        self.assertIsNone(server.face_pair([]))
 
     def test_follow_crop_builds_a_flat_sum_and_refuses_bad_paths(self):
         crop = server.follow_crop([[0, 0.2], [1, 0.2], [1, 0.8], [3, 0.6]], 720, 1280)
@@ -1003,5 +1101,75 @@ class CarouselStillsTest(RendererTest):
         for payload in invalid: self.assert_fails(payload, 'MEDIA_INVALID')
         # A logo that is not a picture is named after the download.
         self.assert_fails(self.payload(urls=[FIXTURES.url('wide.png'), FIXTURES.url('clip.mp4')]), 'MEDIA_FORMAT', network=True)
+
+FAKE_YTDLP = r"""#!/usr/bin/env python3
+# Stands in for yt-dlp (this test never reaches YouTube): records its arguments, then acts as FAKE_YTDLP_MODE says.
+import json, os, shutil, sys
+args = sys.argv[1:]
+with open(os.environ['FAKE_YTDLP_LOG'], 'a') as log: log.write(json.dumps(args) + '\n')
+mode = os.environ['FAKE_YTDLP_MODE']
+errors = {
+    'bot': "ERROR: [youtube] dQw4w9WgXcQ: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication.",
+    'forbidden': 'ERROR: unable to download video data: HTTP Error 403: Forbidden',
+    'members': 'ERROR: [youtube] dQw4w9WgXcQ: Join this channel to get access to members-only content like this video, and other exclusive perks.',
+    'age': 'ERROR: [youtube] dQw4w9WgXcQ: Sign in to confirm your age. This video may be inappropriate for some users.',
+    'removed': 'ERROR: [youtube] dQw4w9WgXcQ: Video unavailable. This video has been removed by the uploader',
+    'other': 'ERROR: something unexpected',
+}
+if mode in errors:
+    print(errors[mode], file=sys.stderr); sys.exit(1)
+if mode == 'big': print('[download] File is larger than max-filesize (2000000 bytes > 1000 bytes). Aborting.'); sys.exit(0)
+if mode == 'filter': print('[youtube] dQw4w9WgXcQ: does not pass filter (duration <= 600), skipping ..'); sys.exit(0)
+shutil.copy(os.environ['FAKE_YTDLP_FILE'], os.path.join(args[args.index('-P') + 1], 'video.mp4'))
+"""
+
+class YoutubeTest(RendererTest):
+    """Operation 'youtube': one video by its ID, with yt-dlp (a stand-in here), and YouTube's refusals as reasons."""
+    def setUp(self):
+        super().setUp()
+        self.bin = Path(tempfile.mkdtemp(dir=WORK))
+        tool = self.bin / 'yt-dlp'
+        tool.write_text(FAKE_YTDLP)
+        tool.chmod(0o755)
+        self.log = self.bin / 'calls.jsonl'
+
+    def download(self, mode, **payload):
+        env = {'PATH': f'{self.bin}{os.pathsep}{os.environ["PATH"]}', 'FAKE_YTDLP_MODE': mode, 'FAKE_YTDLP_LOG': str(self.log),
+               'FAKE_YTDLP_FILE': str(FIXTURES.dir / 'clip.mp4')}
+        with patch.dict(os.environ, env):
+            return run({'operation': 'youtube', 'video': 'dQw4w9WgXcQ', 'maxSeconds': 600, 'maxBytes': 50_000_000, **payload})
+
+    def calls(self):
+        return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
+
+    def test_downloads_the_video_by_its_id_as_one_mp4(self):
+        job = self.download('ok')
+        self.assertEqual((job['status'], job['files']), ('completed', 1), job)
+        self.assertEqual([os.path.basename(p) for p in job['outputs']], ['video.mp4'])
+        self.assertEqual(Path(job['outputs'][0]).read_bytes(), (FIXTURES.dir / 'clip.mp4').read_bytes())
+        self.assert_outputs_only(job)
+        [args] = self.calls()
+        # Only YouTube's own address for that ID; the person's limits; 1080p at most; never their config or a cache.
+        self.assertEqual(args[-2:], ['--', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'])
+        self.assertEqual(args[args.index('--max-filesize') + 1], '50000000')
+        self.assertIn('duration <= 600', args[args.index('--match-filter') + 1])
+        self.assertIn('[height<=1080]', args[args.index('-f') + 1])
+        for flag in ('--ignore-config', '--no-playlist', '--no-cache-dir'): self.assertIn(flag, args)
+        self.assertFalse(any('cookie' in a or 'proxy' in a for a in args))
+        self.assertEqual(len(FIXTURES.requests), self.requests, 'nothing is asked of the site')
+
+    def test_names_youtube_refusals_and_skips(self):
+        for mode, code in (('bot', 'YOUTUBE_BLOCKED'), ('forbidden', 'YOUTUBE_BLOCKED'), ('members', 'YOUTUBE_RESTRICTED'), ('age', 'YOUTUBE_RESTRICTED'),
+                           ('removed', 'YOUTUBE_UNAVAILABLE'), ('other', 'YOUTUBE_FAILED'), ('big', 'MEDIA_TOO_LARGE'), ('filter', 'MEDIA_TOO_LONG')):
+            job = self.download(mode)
+            self.assertEqual((job['status'], job.get('error')), ('failed', code), mode)
+            self.assertEqual(os.listdir(job['dir']), [], mode)
+
+    def test_refuses_anything_but_a_video_id_before_running_anything(self):
+        for payload in ({'video': 'dQw4w9WgXc'}, {'video': '--exec=sh -c'}, {'video': 'https://youtu.be/dQw4w9WgXcQ'}, {'video': None},
+                        {'maxSeconds': 'all'}, {'maxBytes': 0}, {'maxBytes': server.MAX_BYTES + 1}, {'maxSeconds': server.LONG_LENGTH + 1}):
+            job = self.download('ok', **payload)
+            self.assertEqual((job['status'], job.get('error')), ('failed', 'MEDIA_INVALID'), payload)
+        self.assertEqual(self.calls(), [])
 
 if __name__ == '__main__': unittest.main()

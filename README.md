@@ -2,7 +2,8 @@
 
 Faceless videos that post themselves. Pick a niche, a voice and an art style once: Hookstreak Shorts writes, narrates,
 illustrates and subtitles a new short vertical video for every slot in your schedule and posts it to TikTok, YouTube
-Shorts and Instagram Reels.
+Shorts and Instagram Reels. It also cuts your own long videos — podcasts, interviews, streams — into scored, captioned
+vertical clips that follow the speaker.
 
 The product name and wording live in one place (`shared/brand.ts`, plus `index.html` and `public/favicon.svg`). The
 public address is whatever `SITE_URL` says; the Worker's other hosts redirect there, except `*.workers.dev` and
@@ -27,7 +28,8 @@ and the maintenance cron.
 
   On top of these sit 22 ready-made styles in six categories (scary stories, history, fun facts, POV scenarios,
   bedtime stories, "Your own topic" and more), each with its brief for the writer, voice, art style, length and music
-  mood. There are 15 art styles, 12 voices, 26 narration languages and 21 caption styles.
+  mood. There are 15 art styles, 26 narration languages, 21 caption styles, and the narration voices administrators
+  choose from their ElevenLabs account (Admin → Voices; twelve to start).
 - **Series on autopilot.** A series is one faceless channel: a style, a topic, a language, voice, art style, length
   (30, 45, 60 or 90 s), music mood, subtitles, the connected accounts it posts to and a schedule (times per day on
   chosen weekdays, in its time zone). For every slot an episode is written and made ahead of time (6 hours before;
@@ -36,16 +38,34 @@ and the maintenance cron.
   skipped for lack of credits or because the trial ended.
 - **Editing.** Any video can be changed before it posts: the words of each scene (on a timeline of the voice, with
   draggable scene edges, split and merge), each scene's picture (a new AI picture, an AI clip made from it, the owner's
-  own image or video, or a library clip), transitions, the on-screen title, subtitles, music and the post text. The
-  voice can be an AI voice or the owner's own recording, timed by its transcript or by forced alignment of its script.
+  own image or video, or a clip or picture searched in the shared library), transitions, the on-screen title,
+  subtitles, music and the post text. The voice can be an AI voice or the owner's own recording, timed by its
+  transcript or by forced alignment of its script.
   The editor shows the exact credit price before anything is made.
+- **Clips from long videos** (`shared/highlights.ts`, `server/highlights.ts`). The owner uploads a podcast, interview,
+  stream or webinar (up to 10 minutes on the free trial, 2 hours and 2 GB on paid plans), or imports it from a link to
+  the file or a Dropbox or Google Drive share link (`server/imports.ts`), or, in a beta behind `YOUTUBE_IMPORT`, picks
+  a video of their own connected YouTube channel (`server/youtube-import.ts`; other people's YouTube videos are never
+  imported). Its speech is transcribed by ElevenLabs Scribe — free up to 10 minutes, 1 credit per started 30 minutes
+  beyond — and the text model finds the moments that stand on their own (3–12 at a time, short, medium or long,
+  optionally about a topic), each with a title, a reason, post text and a **virality score** — the writer's rating of
+  its hook, payoff, clarity and energy, plus the laughter and applause heard in it; an estimate, never a promise of
+  views. Each chosen moment becomes a clip (1 credit per started minute): pauses and filler words cut out, framed in
+  one of five layouts — **speaker focus** (a 9:16 crop that cuts to whoever is talking: Scribe tells the speakers
+  apart, the renderer matches each turn to the face whose lips move), **two speakers** stacked on the people found,
+  **screen + camera**, a **fixed crop** or the **full frame** over a blur — with captions in any style, a hook title
+  and optional music. The clip editor trims on word edges, moves and zooms the layout's windows over the source
+  picture and previews it all as the render will look; clips can be posted one a day (or on any spacing) across the
+  connected channels.
 - **Posting.** TikTok, YouTube (Shorts) and Instagram (Reels) are connected with OAuth; tokens are stored encrypted.
   Videos post at a series slot, at a chosen time or at once, publicly or (TikTok, YouTube) privately. Published
   videos' views, likes, comments and shares (and saves on Instagram) are read back for 30 days.
 - **Credits and plans** (`shared/plans.ts`, `shared/credits.ts`). Credits are the one currency: a new video costs
   1 credit per started 30 seconds, script, narration and every picture included. Bringing a scene to life with an AI
   clip costs 1 credit per 5 seconds; redoing pictures of a made video 1 credit per 5 pictures; new narration for
-  changed words 1 credit per started 30 seconds. Editing subtitles, music, transitions, timing and text is free.
+  changed words 1 credit per started 30 seconds. A clip of a long video costs 1 credit per started minute, transcribing
+  a video over 10 minutes 1 credit per started 30 minutes. Editing subtitles, music, transitions, timing, layouts and
+  text is free.
 
   | Plan | Monthly | Yearly | Credits a month | Series | Social accounts | Storage |
   | --- | --- | --- | --- | --- | --- | --- |
@@ -60,10 +80,11 @@ and the maintenance cron.
   Subscribers can buy credit packs at any time: 10 credits for $8, 40 for $28, 150 for $90. Credits are reserved when
   work starts and refunded automatically when it fails.
 - **API and MCP.** Personal API keys (Settings) work with a small REST API (`/api/v1`) and an MCP server (`/mcp`), so
-  scripts and AI assistants can make videos, fetch download links and pause or resume series, with the same credits and
-  limits as the app.
-- **Administration.** Administrators (`ADMIN_EMAILS`) fill the shared library (music tagged by mood, background
-  clips), see operations and failures, handle withdrawals within 14 days and give free months of a plan.
+  scripts and AI assistants can make videos, find and make clips of the owner's long videos, fetch download links and
+  pause or resume series, with the same credits and limits as the app.
+- **Administration.** Administrators (`ADMIN_EMAILS`) fill the shared library people search (music tagged by mood,
+  clips and pictures, each with a description; uploaded or copied from their own AI pictures and clips), choose the
+  narration voices, see operations and failures, handle withdrawals within 14 days and give free months of a plan.
 
 The public pages show drawn samples of the styles (`src/art.tsx`), never invented results, user numbers, reviews or
 trend data.
@@ -141,8 +162,10 @@ server/                Worker
   index.ts             middleware and routes, cron entry, exported Workflows and container class
   series.ts            series API, slot planning, episodes, e-mail notices
   videos.ts            videos API, credits, runs
+  highlights.ts        clips of long videos: sources, moments found and scored, paid transcription
   story.ts             the script writer, drafts, picture plans, voiceover timing
-  content-workflow.ts  ContentGeneration: AI pictures and clips, voice, render, upload checks, transcription
+  content-workflow.ts  ContentGeneration: AI pictures and clips, voice, speaker tracking, render, upload checks,
+                       transcription (free and paid) and the moments asked for meanwhile
   render-plan.ts       a video's spec → the renderer payload
   renderer.ts          the MediaRenderer container and its three slots
   publishing.ts        scheduling, the publishing cron, media links for the networks

@@ -1,9 +1,10 @@
-import { CLIP_CREDITS, CLIP_SECONDS, PICTURES_PER_CREDIT, SECONDS_PER_CREDIT } from "./credits";
+import { CLIP_CREDITS, CLIP_SECONDS, HIGHLIGHT_SECONDS_PER_CREDIT, PICTURES_PER_CREDIT, SECONDS_PER_CREDIT, SPEECH_CREDIT_SECONDS } from "./credits";
 
 // Plans: the source of truth for prices and limits. Credits are the one currency: a new video costs one credit per
 // started 30 seconds (shared/credits.ts), so "up to N videos" assumes one-minute videos. The server enforces credits
-// per usage window (a D1 trigger) and `series`, `accounts` and `storageGb` in code. Unused credits roll over from
-// month to month while a plan runs (up to ROLLOVER_MONTHS of them), and subscribers can buy credit packs.
+// per usage window (a D1 trigger) and `series`, `accounts`, `storageGb` and the upload limits of videos (`videoMinutes`,
+// `videoMb`: long videos for clips on paid plans) in code. Unused credits roll over from month to month while a plan
+// runs (up to ROLLOVER_MONTHS of them), and subscribers can buy credit packs.
 export const plans = [
   {
     id: "free",
@@ -14,6 +15,8 @@ export const plans = [
     series: 1,
     accounts: 1,
     storageGb: 1,
+    videoMinutes: 10,
+    videoMb: 500,
     popular: false,
     description: "Try every video type and post your first videos. No card needed.",
     features: ["4 credits (up to 2 one-minute videos)", "All video types and art styles", "1 series on autopilot", "1 social account", "Download in full HD"],
@@ -27,6 +30,8 @@ export const plans = [
     series: 2,
     accounts: 1,
     storageGb: 10,
+    videoMinutes: 120,
+    videoMb: 2000,
     popular: false,
     description: "A few videos a week for one channel.",
     features: ["30 credits a month", "Up to 15 videos a month", "All video types", "Unused credits roll over", "1 social account"],
@@ -40,6 +45,8 @@ export const plans = [
     series: 5,
     accounts: 100,
     storageGb: 30,
+    videoMinutes: 120,
+    videoMb: 2000,
     popular: true,
     description: "A new video every day.",
     features: ["60 credits a month", "Up to 30 videos a month", "All video types", "Unused credits roll over", "Up to 100 social accounts"],
@@ -53,6 +60,8 @@ export const plans = [
     series: 10,
     accounts: 100,
     storageGb: 60,
+    videoMinutes: 120,
+    videoMb: 2000,
     popular: false,
     description: "Two videos a day, or several channels.",
     features: ["120 credits a month", "Up to 60 videos a month", "All video types", "Unused credits roll over", "Up to 100 social accounts"],
@@ -66,6 +75,8 @@ export const plans = [
     series: 30,
     accounts: 100,
     storageGb: 200,
+    videoMinutes: 120,
+    videoMb: 2000,
     popular: false,
     description: "Agencies and networks of channels.",
     features: ["350 credits a month", "Up to 175 videos a month", "All video types", "Unused credits roll over", "Up to 100 social accounts", "Priority support"],
@@ -104,6 +115,7 @@ export const planIncludes = [
   "Natural AI narration in 26 languages",
   "A new AI picture for every sentence, in one art style",
   "Word-by-word subtitles, transitions and background music",
+  "Clips from your podcasts, interviews and streams",
   "Edit any video before it posts, or download it",
   "Commercial use of everything you make",
 ] as const;
@@ -114,6 +126,8 @@ export const tariffs: readonly { name: string; text: string }[] = [
   { name: "Animated scenes", text: `${CLIP_CREDITS} credit per ${CLIP_SECONDS} seconds to bring a scene's picture to life with AI motion (optional).` },
   { name: "New pictures", text: `1 credit per ${PICTURES_PER_CREDIT} pictures redone in a made video.` },
   { name: "New narration", text: `1 credit per started ${SECONDS_PER_CREDIT} seconds when you change the words of a made video. Your own recording is free.` },
-  { name: "Editing", text: "Subtitles, music, transitions, timing and text changes are free." },
+  { name: "Clips from your videos", text: `1 credit per started ${HIGHLIGHT_SECONDS_PER_CREDIT} seconds of each clip: cut, framed on the speaker and captioned.` },
+  { name: "Long videos", text: `Videos up to 10 minutes are transcribed for free; longer ones (up to 2 hours, on paid plans) cost 1 credit per started ${SPEECH_CREDIT_SECONDS / 60} minutes.` },
+  { name: "Editing", text: "Subtitles, music, transitions, timing, layouts and text changes are free." },
 ];
 export const PRICE_NOTE = "Prices in US dollars. Taxes may apply at checkout.";

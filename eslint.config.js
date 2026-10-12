@@ -26,6 +26,8 @@ export default tseslint.config(
       ...jsxA11y.flatConfigs.recommended.rules,
       // Players show generated speech and user uploads; the script and caption editor are the text alternative.
       "jsx-a11y/media-has-caption": "off",
+      // VoiceSelect renders a <select>: a label around it labels that select.
+      "jsx-a11y/label-has-associated-control": ["error", { controlComponents: ["VoiceSelect"], depth: 3 }],
     },
   },
   {

@@ -34,11 +34,15 @@ under `/api/admin` answers 404 to anyone else.
   reads by network, transcriptions); accounts to reconnect by network; Stripe (the nightly reconciliation, renewals
   overdue, the last webhook event, free months running); work set aside for a manual check (section 5).
 - **Billing**: *Withdrawal within 14 days* (section 6) and *Free month of a plan* (section 7).
-- **Library**: the shared music and background clips. Upload (kind, file up to 50 MB, name, tags with suggestions:
-  moods for music, themes for clips), preview, rename, retag, switch off or delete. Music is picked by its mood tags
-  (`calm`, `upbeat`, `inspiring`, `dark`, `epic`, `mysterious`, `playful`, `ambient`); background clips loop behind
-  storytime videos and can be any scene's picture. Switched-off or deleted items leave new videos; made videos keep
-  their render.
+- **Library**: the shared music, clips and pictures people search and pick from. Upload (kind, file up to 50 MB or
+  a 20 MB picture, name, description, tags with suggestions, the AI mark) or **Add from my media** (your uploads and
+  the AI pictures and clips made for your videos, with their name, prompt as the description and the AI mark; the
+  details open right after to check). Preview, edit the name, description, tags and AI mark, switch off or delete; the
+  list shows what each item is used by. People search by name, description and tag, so describe what an item shows
+  or sounds like. Music is picked by its mood tags (`calm`, `upbeat`, `inspiring`, `dark`, `epic`, `mysterious`,
+  `playful`, `ambient`); clips loop behind storytime videos and, like pictures, can be any scene's picture. Videos that
+  show an item marked as AI-made are disclosed as AI-made when they're posted. Switched-off or deleted items leave new
+  videos; made videos keep their render.
 - **Messages**: the last 100 contact-form messages; abuse reports are red, billing and withdrawal requests amber. Each
   message is also e-mailed to `ADMIN_EMAILS`.
 
@@ -76,8 +80,9 @@ The thresholds are constants at the top of `server/operations.ts` (`FAILURE_BURS
 ## 4. Failure codes
 
 Runs store a short code (`runs.error`); people see a plain message on the video and "Your credits were refunded". The
-summary groups codes by prefix: `GENERATION_` is fal, `VOICE_` is ElevenLabs, `RENDER…` and `MEDIA_TIMEOUT` the
-renderer, everything else "Other".
+summary groups codes by prefix: `GENERATION_` is fal, `VOICE_` and `SPEECH_` are ElevenLabs, `RENDER…` and
+`MEDIA_TIMEOUT` the renderer, everything else "Other". A run of kind `speech` transcribes a long video for credits (no
+video is attached to it); its failure refunds the credits and the Clips page says the video couldn't be transcribed.
 
 | Code | Meaning |
 | --- | --- |
@@ -90,6 +95,9 @@ renderer, everything else "Other".
 | `VOICE_UNAVAILABLE` | ElevenLabs refused the key or plan (401/402), or the key or voice is missing |
 | `VOICE_BUSY` | ElevenLabs rate or concurrency limit (429) |
 | `VOICE_FAILED` | the narration failed, or a retried step found a claimed voice without its result |
+| `SPEECH_UNAVAILABLE`, `SPEECH_BUSY`, `SPEECH_FAILED` | Scribe refused the key or plan, was rate limited, or failed transcribing a long video |
+| `SPEECH_UNCERTAIN` | a paid transcription was claimed but its answer was lost: it may have been billed by ElevenLabs |
+| `SPEECH_INVALID` | the video to transcribe was deleted or changed before the run started. Caused by the request |
 | `RENDERER_UNAVAILABLE` | the container did not answer, or the `MEDIA_RENDERER` binding is missing |
 | `MEDIA_TIMEOUT` | no render finished in about 40 minutes (no free container, or a stuck render), or maintenance ended a run at 3 hours |
 | `MEDIA_LOST` | the container no longer knew the job (it restarted) |
@@ -98,6 +106,11 @@ renderer, everything else "Other".
 | `VIDEO_INVALID` | the stored spec no longer validates. Caused by the request |
 | `PROVIDER_REDIRECT`, `PROVIDER_URL`, `PROVIDER_DOWNLOAD` | a provider answered with a redirect or an output on an unexpected host |
 | `INTERNAL` | anything else; the workflow log (`Run failed`) has the run ID |
+
+**Imports from links** fail the imported file (it shows "Can't be used" with the reason), never a run, and charge
+nothing; the workflow logs `Import failed` with the code. YouTube imports (beta) add `YOUTUBE_BLOCKED` (YouTube refused
+the download from our servers: bot check, 429 or 403), `YOUTUBE_RESTRICTED` (members-only, age-restricted, private),
+`YOUTUBE_UNAVAILABLE` (removed or region-blocked) and `YOUTUBE_FAILED` (anything else, often an outdated yt-dlp).
 
 **Publications** store the plain message people read, not a code; Operations groups them by network and the message's
 first sentence. The codes behind them (`server/social/errors.ts`): `AUTH_EXPIRED` (reconnect; the account is marked
@@ -187,12 +200,19 @@ again by itself.
   `fal-ai/nano-banana-2` or `fal-ai/flux/schnell`) switches to another model, and `FAL_IMAGE_QUALITY` lowers GPT Image
   2.5's quality and price, both without a deploy. Check section 5 for requests that may still bill.
 - **ElevenLabs** (`VOICE_*`): check the key, the plan's characters and concurrency. A voice ElevenLabs removed can be
-  replaced with `ELEVENLABS_VOICES` (JSON, public voice ID → ElevenLabs voice ID). Forced alignment failing
+  replaced in Admin → Voices (edit the voice, paste another ElevenLabs voice ID; videos keep the voice's ID), or
+  hidden so nobody new chooses it. Forced alignment failing
   (`Narration timing unavailable`, `Forced alignment failed`) only costs exact timings; Scribe failing (`Speech not
   found`) only costs transcripts of uploads.
 - **Renderer** (`RENDERER_UNAVAILABLE`, `MEDIA_TIMEOUT`, `MEDIA_LOST`): check Containers in the dashboard (instances
   running, the latest image rolled out, errors). Three containers render one job each; more work waits for a free
-  one, and runs time out after about 40 minutes of waiting or rendering.
+  one, and runs time out after about 40 minutes of waiting or rendering. A fourth (`download-0`) only downloads
+  YouTube imports, one at a time.
+- **YouTube import** (beta): many `YOUTUBE_BLOCKED` failures in the logs (`Import failed`) mean YouTube is refusing
+  downloads from Cloudflare's servers; there is nothing to fix on our side, and people are told to upload the file
+  instead. If it lasts, switch `YOUTUBE_IMPORT=false` so people aren't offered a feature that keeps failing. A rise of
+  `YOUTUBE_FAILED` usually means yt-dlp is out of date: raise its version in `renderer/Dockerfile` and deploy. If
+  Google contacts you about downloading, set `YOUTUBE_IMPORT=false` first (no deploy).
 - **Workers AI** (the writer): drafts answer "We couldn't write this video right now", series slots are retried and
   then skipped with reason `failed`, and `Text model failed` is logged (without the input). `TEXT_MODEL` switches the
   model without a deploy.
@@ -223,7 +243,8 @@ privacy policy) together.
 
 ## 10. Migrations and rollback
 
-The schema is `migrations/0001_initial.sql`. Apply new migrations **before** deploying the code that needs them
+The schema is in `migrations/` (`0001_initial.sql`, then `0002_clips.sql`, which rebuilt `runs` with every row,
+index and trigger to allow runs of kind `speech`). Apply new migrations **before** deploying the code that needs them
 (`npm run db:remote`) and keep them additive (new tables, nullable columns, indexes, triggers), so the version already
 running keeps working on the newer schema and a Worker rollback (`npx wrangler rollback`) never needs a schema
 rollback. To check: `npx wrangler d1 migrations list faceless --remote` shows nothing left to apply.

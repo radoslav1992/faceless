@@ -8,6 +8,13 @@ export const PICTURES_PER_CREDIT = 5;
 /** Bringing a scene to life: one credit per 5 seconds of AI clip made from its picture. */
 export const CLIP_CREDITS = 1;
 export const CLIP_SECONDS = 5;
+/**
+ * A clip of a long video (shared/highlights.ts): one credit per started minute of its moment. Edits are free while
+ * the clip keeps at least half of its moment; moved to other footage, it costs a new clip.
+ */
+export const HIGHLIGHT_SECONDS_PER_CREDIT = 60;
+/** Transcribing a long video (over 10 minutes, for clips): one credit per started 30 minutes of it. */
+export const SPEECH_CREDIT_SECONDS = 1800;
 /** English speech runs at about 15 characters a second; lengths are estimated from the script before it is spoken. */
 export const SPEECH_CHARS_PER_SECOND = 15;
 
@@ -20,6 +27,11 @@ export const voiceCredits = (text: string) => videoCredits(speechSeconds(text));
 export const pictureCredits = (count: number) => (count > 0 ? Math.ceil(count / PICTURES_PER_CREDIT) : 0);
 /** AI clips of these lengths. */
 export const clipCredits = (lengths: number[]) => lengths.reduce((n, s) => n + CLIP_CREDITS * Math.ceil(s / CLIP_SECONDS), 0);
+
+/** A clip of a moment `seconds` long. */
+export const highlightCredits = (seconds: number) => Math.max(1, Math.ceil(seconds / HIGHLIGHT_SECONDS_PER_CREDIT - 1e-9));
+/** Transcribing a video of `seconds` (shown before it is charged). */
+export const speechCredits = (seconds: number) => Math.max(1, Math.ceil(seconds / SPEECH_CREDIT_SECONDS - 1e-9));
 
 /** "1 credit", "12 credits" */
 export const creditsLabel = (n: number) => `${n.toLocaleString("en-US")} credit${n === 1 ? "" : "s"}`;

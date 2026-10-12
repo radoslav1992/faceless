@@ -9,6 +9,7 @@ import { rate, sendMail } from "./security";
 import { allowance } from "./billing";
 import { canCreate, checkReferences, createVideo, requireVerified, videoView } from "./videos";
 import { scheduleEpisode, cancelScheduled } from "./publishing";
+import { voiceUsable } from "./voices";
 import { backdropFor, conceptToSpec, musicCatalog, writeVideo } from "./story";
 import { episodeCredits, LATE_GRACE, MAKE_AHEAD, seriesSettingsSchema, type SeriesSettings } from "../shared/series";
 import { seriesTemplates, templateOf, type TemplateId } from "../shared/templates";
@@ -54,8 +55,10 @@ const createSchema = z.object({
   first: z.boolean().default(true),
 });
 /** Settings as given, checked against the account: a valid time zone, the owner's connected accounts, a topic. */
-async function checkSettings(env: Env, user: DbUser, template: TemplateId, settings: SeriesSettings) {
+/** `keptVoice`: the series' voice before an edit, which it keeps even once that voice is no longer offered. */
+async function checkSettings(env: Env, user: DbUser, template: TemplateId, settings: SeriesSettings, keptVoice: string | null = null) {
   if (!validZone(settings.schedule.timezone)) throw new HTTPException(400, { message: "Choose a valid time zone." });
+  if (!(await voiceUsable(env, settings.voiceId, keptVoice))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
   if (template === "custom" && settings.prompt.length < 3) throw new HTTPException(400, { message: "Describe what the videos of this series are about." });
   if (settings.accounts.length) {
     const rows = (await env.DB.prepare(`SELECT id,platform FROM social_accounts WHERE user_id=? AND id IN (${settings.accounts.map(() => "?").join(",")})`)
@@ -130,7 +133,7 @@ series.patch("/:id", async (c) => {
   }).parse(await c.req.json());
   // Partial updates are merged into the stored settings and validated as a whole.
   const settings = d.settings ? seriesSettingsSchema.parse({ ...seriesSettings(s), ...d.settings }) : seriesSettings(s);
-  await checkSettings(c.env, user, s.template, settings);
+  await checkSettings(c.env, user, s.template, settings, seriesSettings(s).voiceId);
   const status = d.status ?? s.status;
   // A new schedule or a resumed series starts again from the next slot from now (made slots are never made twice).
   const restart = status === "active" && (s.status !== "active" || JSON.stringify(settings.schedule) !== JSON.stringify(seriesSettings(s).schedule));
@@ -194,7 +197,7 @@ export async function makeEpisode(env: Env, user: DbUser, s: any, slot: number |
   });
   if (!spec) return { error: "The episode we wrote didn't come out right. Please try again.", status: 502, blocked: "failed" };
   try {
-    await checkReferences(env, user.id, spec);
+    await checkReferences(env, user.id, spec, settings.voiceId);
     // One video per slot: a retried workflow step finds the episode it already created.
     const key = slot ? `episode:${s.id}:${slot}` : uid();
     const previous = await env.DB.prepare("SELECT video_id FROM runs WHERE user_id=? AND idempotency_key=?").bind(user.id, key).first<{ video_id: string }>();

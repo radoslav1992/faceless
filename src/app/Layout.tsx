@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { House, PenSquare, Repeat, Clapperboard, CalendarDays, Share2, CircleDollarSign, Settings, Shield, PanelLeftClose, PanelLeftOpen, Clock, Menu, LogOut, Coins } from "lucide-react";
+import { House, PenSquare, Repeat, Clapperboard, CalendarDays, Share2, CircleDollarSign, Settings, Shield, PanelLeftClose, PanelLeftOpen, Clock, Menu, LogOut, Coins, Scissors } from "lucide-react";
 import { post, timeLeft, useAuth, number } from "../lib";
 import { planById } from "../../shared/plans";
 import { Logo, LogoMark, useToast } from "../ui";
@@ -52,6 +52,7 @@ export function AppLayout() {
         <Link to="/app/create" className="btn primary block new-video" title={collapsed ? "Create video" : undefined}><PenSquare size={18} aria-hidden="true" /><span className="text">Create video</span></Link>
         {item("/app", House, "Home", { end: true })}
         {item("/app/series", Repeat, "Series")}
+        {item("/app/clips", Scissors, "Clips")}
         {item("/app/videos", Clapperboard, "Videos")}
         {item("/app/schedule", CalendarDays, "Schedule")}
         {item("/app/channels", Share2, "Channels")}

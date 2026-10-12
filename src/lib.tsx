@@ -5,6 +5,8 @@ import type { SpeechStatus } from "../shared/speech";
 import type { SeriesSettings } from "../shared/series";
 import type { TemplateId, VideoKind } from "../shared/templates";
 import type { PlatformId } from "../shared/social";
+import type { Moment, MomentRequest } from "../shared/highlights";
+import type { Voice } from "../shared/voices";
 
 // The app's API client, signed-in state and shared types. Every request goes to /api on this site.
 
@@ -34,10 +36,26 @@ export type Account = { id: string; platform: PlatformId; name: string; handle: 
 export type Asset = {
   id: string; kind: string; name: string; mime: string; bytes: number; duration: number; width: number; height: number;
   status: "uploading" | "checking" | "ready" | "failed"; videoId: string | null; hasAudio: boolean | null; error: string | null; createdAt: number; url: string;
+  /** A video imported from a link that is still being downloaded (it is checked next). */
+  importing?: boolean;
   /** Speech found in an own video or track (null: never looked for), and the language it was heard in. */
   speech?: SpeechStatus | null; speechLanguage?: string | null;
 };
-export type LibraryItem = { id: string; kind: "music" | "clip"; name: string; tags: string[]; duration: number; width: number; height: number; url: string; thumb: string | null };
+/** One of the owner's videos as a source of clips (server/highlights.ts): what was found in it, and its clips. */
+export type Source = Asset & {
+  moments: Moment[]; momentsAt: number | null;
+  /** A search waiting for the video's speech to be found. */
+  wanted: (MomentRequest & { at: number }) | null;
+  momentsError: string | null;
+  /** What transcribing it costs (a long video), or 0. */
+  transcribeCredits: number;
+  clips: number;
+};
+export type LibraryKind = "music" | "clip" | "image";
+/** An item of the shared library (server/library.ts); `ai`: made with AI (videos using it are disclosed as AI-made). */
+export type LibraryItem = {
+  id: string; kind: LibraryKind; name: string; description: string; tags: string[]; duration: number; width: number; height: number; ai: boolean; url: string; thumb: string | null;
+};
 export type { VideoKind };
 
 const NETWORK_ERROR = "We can't reach the server. Check your connection and try again.";
@@ -63,6 +81,21 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
   return data as T;
 }
 export const post = <T = any,>(path: string, data: unknown = {}) => api<T>(path, { method: "POST", body: JSON.stringify(data) });
+
+let voicesRequest: Promise<Voice[]> | null = null;
+/** The narration voices offered (Admin → Voices), loaded once per page; `reloadVoices` after an admin changes them. */
+export function useVoices() {
+  const [voices, setVoices] = useState<Voice[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    voicesRequest ??= api<{ voices: Voice[] }>("/public/voices").then((r) => r.voices).catch((e) => { voicesRequest = null; throw e; });
+    voicesRequest.then((v) => { if (live) setVoices(v); }).catch(() => { if (live) setVoices([]); });
+    return () => { live = false; };
+  }, []);
+  const list = voices || [];
+  return { voices: list, loading: voices === null, byId: (id: string) => list.find((v) => v.id === id), fallback: list.find((v) => v.default)?.id ?? list[0]?.id ?? null };
+}
+export const reloadVoices = () => { voicesRequest = null; };
 export const put = <T = any,>(path: string, data: unknown = {}) => api<T>(path, { method: "PUT", body: JSON.stringify(data) });
 export const patch = <T = any,>(path: string, data: unknown = {}) => api<T>(path, { method: "PATCH", body: JSON.stringify(data) });
 export const del = <T = any,>(path: string, data?: unknown) => api<T>(path, { method: "DELETE", ...(data !== undefined && { body: JSON.stringify(data) }) });

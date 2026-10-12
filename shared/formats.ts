@@ -1,16 +1,21 @@
 import { z } from "zod";
 import { captionStyles, type CaptionStyle } from "./captions";
-import { clipCredits, pictureCredits, speechSeconds, videoCredits, voiceCredits } from "./credits";
+import { clipCredits, highlightCredits, pictureCredits, speechSeconds, videoCredits, voiceCredits } from "./credits";
 import { defaultLook, textLookSchema } from "./overlay";
 import { videoKinds } from "./templates";
+import { HIGHLIGHT_MAX_SECONDS, HIGHLIGHT_MIN_SECONDS, layoutSchema } from "./highlights";
+import { LONG_VIDEO_SECONDS } from "./speech";
+import { trackSchema } from "./track";
 import {
   clipPrompt, narrationKey, narrationSchema, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_SCENES, type StoryStyle,
 } from "./story";
 
-// The editable description ("spec") of a video: a narrated video (shared/story.ts) whose scenes reference media by ID
-// (the owner's uploads, the shared library, AI pictures and clips once made) or ask for AI media with a description.
-// The server owns everything under `generated` (the recorded voice and its word timings): an edit from the browser
-// never sets it.
+// The editable description ("spec") of a video, one of two formats:
+// - "story": a narrated video (shared/story.ts) whose scenes reference media by ID (the owner's uploads, the shared
+//   library, AI pictures and clips once made) or ask for AI media with a description;
+// - "highlight": a clip of one of the owner's long videos (shared/highlights.ts), cut, framed and captioned.
+// The server owns `generated` (a story's recorded voice and its word timings) and `tracked` (where a clip's people
+// are): an edit from the browser never sets them.
 
 const uuid = z.uuid();
 /** A library track or an own upload (audio), at a volume. */
@@ -72,9 +77,52 @@ export const storySpec = z.object({
   /** Short topic label, e.g. "The octopus heart". */
   topic: z.string().trim().max(60).default(""),
 });
-export const specSchema = storySpec;
 export type StorySpec = z.infer<typeof storySpec>;
-export type Spec = StorySpec;
+
+/** A clip: seconds `start` to `end` of one of the owner's (long) videos. */
+export const highlightSourceSchema = z.object({
+  assetId: uuid,
+  start: z.number().min(0).max(LONG_VIDEO_SECONDS),
+  end: z.number().min(0).max(LONG_VIDEO_SECONDS),
+}).refine((s) => s.end - s.start >= HIGHLIGHT_MIN_SECONDS - 0.01 && s.end - s.start <= HIGHLIGHT_MAX_SECONDS + 0.01,
+  `A clip lasts ${HIGHLIGHT_MIN_SECONDS} seconds to ${HIGHLIGHT_MAX_SECONDS / 60} minutes.`);
+export const highlightSpec = z.object({
+  format: z.literal("highlight"),
+  kind: z.literal("highlight").default("highlight"),
+  source: highlightSourceSchema,
+  /** Instant cuts (shared/cuts.ts): long pauses, and filler sounds with `fillers`, are cut out. */
+  cuts: z.object({ enabled: z.boolean().default(true), fillers: z.boolean().default(true) }).default({ enabled: true, fillers: true }),
+  layout: layoutSchema.default({ kind: "follow" }),
+  /** Captions of what is said (the video's transcript), in one of the styles. */
+  captions: z.object({
+    enabled: z.boolean().default(true),
+    style: z.enum(captionStyles).default("bold" satisfies CaptionStyle),
+    position: z.enum(["bottom", "middle", "top"]).default("bottom"),
+  }).default({ enabled: true, style: "bold", position: "bottom" }),
+  /** The hook title over the first seconds (or the whole clip). */
+  headline: headlineSchema.nullable().default(null),
+  music: musicSchema,
+  /** What the writer said of the moment when it was found (shown with the clip; never rendered). */
+  moment: z.object({ score: z.number().int().min(0).max(99), why: z.string().trim().max(200).default("") }).nullable().default(null),
+  /** Server-owned: where the people are in this moment (measured when it is made), for `key` = trackKey. */
+  tracked: z.object({ key: z.string().max(200), track: trackSchema }).optional(),
+  caption: z.string().trim().max(2200).default(""),
+  hashtags: z.array(hashtag).max(15).default([]),
+  title: z.string().trim().max(100).default(""),
+  topic: z.string().trim().max(60).default(""),
+});
+export type HighlightSpec = z.infer<typeof highlightSpec>;
+
+/** Either format; a spec without one is a story (videos saved before clips existed). */
+export const specSchema = z.discriminatedUnion("format", [storySpec, highlightSpec]);
+export type Spec = StorySpec | HighlightSpec;
+export const isHighlight = (spec: Spec): spec is HighlightSpec => spec.format === "highlight";
+/** The moment a clip's people were measured for: a new moment needs a new measurement. */
+export const trackKey = (spec: HighlightSpec) => `${spec.source.assetId}:${spec.source.start}:${spec.source.end}`;
+/** How much of moment `b` lies inside moment `a` (0–1), for re-pricing a moved clip. */
+export function momentOverlap(a: { start: number; end: number }, b: { start: number; end: number }) {
+  return Math.max(0, Math.min(a.end, b.end) - Math.max(a.start, b.start)) / Math.max(0.01, b.end - b.start);
+}
 
 /** The AI voice is recorded for the video's current words and voice (no new recording is paid). */
 export function narrationCurrent(spec: StorySpec) {
@@ -89,8 +137,8 @@ export type PendingMedia = { kind: "image" | "clip"; prompt: string; path: (stri
 /** Every AI picture or clip the video still asks for, pictures first and then the clips made from them. */
 export function pendingMedia(spec: Spec): PendingMedia[] {
   const out: PendingMedia[] = [];
-  // A background clip replaces the pictures of every scene.
-  if (spec.backdrop) return out;
+  // A clip of a long video asks for no AI media; a background clip replaces the pictures of every scene.
+  if (isHighlight(spec) || spec.backdrop) return out;
   spec.scenes.forEach((s, i) => {
     if ((s.source === "image" || s.source === "clip") && !s.imageId)
       out.push({ kind: "image", prompt: scenePrompt(s.description, spec.subject, spec.style), path: ["scenes", i], key: "imageId" });
@@ -103,9 +151,17 @@ export function pendingMedia(spec: Spec): PendingMedia[] {
 /**
  * Credits to make a video ready. A new video costs its length (narration and every picture included, `seconds`: the
  * owner's recording when it narrates); a made one only what an edit asks for again: new narration for changed words,
- * new pictures. AI clips are paid by their length either way.
+ * new pictures. AI clips are paid by their length either way. A clip of a long video costs its moment's length, and
+ * again only when an edit (from `before`, the stored spec) moves it mostly onto other footage.
  */
-export function specCredits(spec: Spec, initial: boolean, seconds?: number) {
+export function specCredits(spec: Spec, initial: boolean, seconds?: number, before?: Spec) {
+  // A clip: its moment's length when it is new, or moved mostly onto other footage of the video; other edits are free.
+  if (isHighlight(spec)) {
+    const length = spec.source.end - spec.source.start;
+    if (initial) return highlightCredits(length);
+    const kept = before && isHighlight(before) && before.source.assetId === spec.source.assetId && momentOverlap(before.source, spec.source) >= 0.5;
+    return kept || !before ? 0 : highlightCredits(length);
+  }
   const pending = pendingMedia(spec);
   const clips = clipCredits(pending.filter((m) => m.kind === "clip").map((m) => m.seconds ?? 5));
   if (initial) return videoCredits(seconds ?? spokenSeconds(spec)) + clips;
@@ -116,15 +172,21 @@ export { voiceCredits, speechSeconds };
 
 /** How long the narration speaks, which a new video is charged by: its recorded words, else the script's estimate. */
 export function spokenSeconds(spec: Spec) {
+  if (isHighlight(spec)) return spec.source.end - spec.source.start;
   return narrationCurrent(spec) && spec.generated?.words.length ? spec.generated.words.at(-1)!.end : speechSeconds(storyScript(spec.scenes));
 }
 /** Rough length of the finished video in seconds (the real one is known after rendering). */
 export function estimatedSeconds(spec: Spec) {
+  if (isHighlight(spec)) return spokenSeconds(spec);
   return spokenSeconds(spec) + (narrationCurrent(spec) && spec.generated?.words.length ? 0.3 : 0.5);
 }
 /** All of the owner's media asset IDs a spec references, for ownership checks. */
 export function referencedAssets(spec: Spec): string[] {
   const ids: (string | undefined)[] = [];
+  if (isHighlight(spec)) {
+    ids.push(spec.source.assetId, spec.music?.assetId);
+    return [...new Set(ids.filter((x): x is string => !!x))];
+  }
   if (spec.narration.kind === "upload") ids.push(spec.narration.assetId);
   for (const s of spec.scenes) ids.push(s.imageId, s.clipId, s.assetId);
   if (spec.music?.assetId) ids.push(spec.music.assetId);
@@ -133,15 +195,21 @@ export function referencedAssets(spec: Spec): string[] {
 }
 /** Library items a spec references. */
 export function referencedLibrary(spec: Spec): string[] {
+  if (isHighlight(spec)) return spec.music?.trackId ? [spec.music.trackId] : [];
   const ids: (string | undefined)[] = [spec.music?.trackId, spec.backdrop?.libraryId, ...spec.scenes.map((s) => s.libraryId)];
   return [...new Set(ids.filter((x): x is string => !!x))];
 }
 /** The hook shown in lists: the first sentence. */
 export function specHook(spec: Spec) {
+  if (isHighlight(spec)) return spec.headline?.text || spec.title || spec.topic || "Clip";
   return storyScript(spec.scenes).split(/(?<=[.!?…])\s/)[0] || spec.topic || "";
 }
-/** The parts of a spec that change the picture or sound; edits elsewhere (caption, hashtags, title) need no new render. */
+/**
+ * The parts of a spec that change the picture or sound; edits elsewhere (caption, hashtags, title, a clip's moment
+ * note) need no new render.
+ */
 export function visualPart(spec: Spec) {
   const { caption: _c, hashtags: _h, title: _t, topic: _o, ...rest } = spec;
+  if ("moment" in rest) delete (rest as Partial<HighlightSpec>).moment;
   return JSON.stringify(rest);
 }

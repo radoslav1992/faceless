@@ -7,17 +7,21 @@ import { dbFailure, json, ownedVideo } from "./db";
 import { rate } from "./security";
 import { allowance, type Allowance } from "./billing";
 import { scheduleEpisode } from "./publishing";
-import { isVoice } from "./voices";
-import { referencedAssets, referencedLibrary, specCredits, specHook, specSchema, visualPart, type Spec } from "../shared/formats";
+import { voiceUsable } from "./voices";
+import { isHighlight, referencedAssets, referencedLibrary, specCredits, specHook, specSchema, visualPart, type HighlightSpec, type Spec } from "../shared/formats";
 import { storyScript, STORY_MAX_CHARS, STORY_MAX_SECONDS } from "../shared/story";
 import { creditsLabel } from "../shared/credits";
 
-// Videos: made from a spec by a run (AI pictures and clips, the voice, the render). A series makes them for its posting
-// slots (server/series.ts); people also make one-off videos and edit any video before it posts.
+// Videos: made from a spec by a run (AI pictures and clips, the voice, the render; for a clip of a long video, where
+// its people are and the render). A series makes them for its posting slots (server/series.ts); people also make
+// one-off videos and clips (server/highlights.ts), and edit any video before it posts.
 export const videos = new Hono<App>();
 
-/** Every file, library item and voice the spec uses exists and is the owner's (or shared). */
-export async function checkReferences(env: Env, userId: string, spec: Spec) {
+/**
+ * Every file, library item and voice the spec uses exists and is the owner's (or shared). The voice must be one that
+ * is offered, or `keptVoice`: the one the video (or its series) already has, which keeps working once hidden.
+ */
+export async function checkReferences(env: Env, userId: string, spec: Spec, keptVoice?: string | null) {
   const assets = referencedAssets(spec);
   if (assets.length) {
     const found = (await env.DB.prepare(`SELECT id FROM media_assets WHERE user_id=? AND status='ready' AND id IN (${assets.map(() => "?").join(",")})`)
@@ -26,19 +30,31 @@ export async function checkReferences(env: Env, userId: string, spec: Spec) {
   }
   const items = referencedLibrary(spec);
   if (items.length) {
-    const found = (await env.DB.prepare(`SELECT id FROM library_items WHERE active=1 AND id IN (${items.map(() => "?").join(",")})`)
-      .bind(...items).all<{ id: string }>()).results;
-    if (found.length !== items.length) throw new HTTPException(400, { message: "A clip or track in this video is no longer in the library. Choose another one." });
+    const found = new Map((await env.DB.prepare(`SELECT id,kind FROM library_items WHERE active=1 AND id IN (${items.map(() => "?").join(",")})`)
+      .bind(...items).all<{ id: string; kind: string }>()).results.map((r) => [r.id, r.kind]));
+    if (found.size !== items.length) throw new HTTPException(400, { message: "A clip, picture or track in this video is no longer in the library. Choose another one." });
+    // Music is a track, the background a clip, a scene a clip or a picture.
+    const wrong = (id: string | undefined, kinds: string[]) => !!id && !kinds.includes(found.get(id)!);
+    if (wrong(spec.music?.trackId, ["music"])) throw new HTTPException(400, { message: "Choose a library track for the music." });
+    if (!isHighlight(spec) && (wrong(spec.backdrop?.libraryId, ["clip"]) || spec.scenes.some((s) => wrong(s.libraryId, ["clip", "image"]))))
+      throw new HTTPException(400, { message: "Choose a library clip for the background, and a clip or picture for each scene." });
   }
+  if (isHighlight(spec)) return checkSource(env, userId, spec);
   // An AI voice reads at most STORY_MAX_CHARS; an own voiceover is a recording with sound, up to the render's three minutes.
   if (spec.narration.kind === "voice") {
-    if (!isVoice(spec.narration.voiceId)) throw new HTTPException(400, { message: "Choose a voice." });
+    if (!(await voiceUsable(env, spec.narration.voiceId, keptVoice))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
     if (storyScript(spec.scenes).length > STORY_MAX_CHARS) throw new HTTPException(400, { message: `The script can be up to ${STORY_MAX_CHARS.toLocaleString("en-US")} characters (about ${Math.round(STORY_MAX_CHARS / 15)} seconds).` });
   } else {
     const a = await env.DB.prepare("SELECT mime,duration,meta FROM media_assets WHERE id=? AND user_id=?").bind(spec.narration.assetId, userId).first<{ mime: string; duration: number; meta: string }>();
     if (!a || !/^(audio|video)\//.test(a.mime) || a.meta.includes('"hasAudio":false')) throw new HTTPException(400, { message: "Choose your voiceover: one of your audio or video files with sound." });
     if (a.duration > STORY_MAX_SECONDS + 0.5) throw new HTTPException(400, { message: "A video can be up to 3 minutes long. Choose a shorter recording." });
   }
+}
+/** A clip's video is one of the owner's own uploads, and its moment lies within it. */
+async function checkSource(env: Env, userId: string, spec: HighlightSpec) {
+  const a = await env.DB.prepare("SELECT kind,mime,duration FROM media_assets WHERE id=? AND user_id=?").bind(spec.source.assetId, userId).first<{ kind: string; mime: string; duration: number }>();
+  if (!a || a.kind !== "upload" || !a.mime.startsWith("video/")) throw new HTTPException(400, { message: "Clips are cut from your own videos. Choose one of them." });
+  if (spec.source.start >= a.duration - 1) throw new HTTPException(400, { message: "This moment starts after the end of the video. Choose it again." });
 }
 /** Starts the run's background work; a failed start is retried by maintenance (the run stays queued). */
 export async function dispatchRun(env: Env, runId: string) {
@@ -67,6 +83,7 @@ export function canCreate(a: Allowance, credits = 1) {
  */
 /** What a new video costs: its length (an owner's recording by its own length). */
 export async function newVideoCredits(env: Env, userId: string, spec: Spec) {
+  if (isHighlight(spec)) return specCredits(spec, true);
   const recording = spec.narration.kind === "upload"
     ? await env.DB.prepare("SELECT duration FROM media_assets WHERE id=? AND user_id=?").bind(spec.narration.assetId, userId).first<{ duration: number }>()
     : null;
@@ -96,13 +113,17 @@ export async function createVideo(
   await dispatchRun(env, runId);
   return { id: videoId, runId, credits };
 }
-/** A new run for an existing video (after an edit, or to retry a failed render). */
-async function rerun(env: Env, user: DbUser, video: any, spec: Spec, key: string) {
+/**
+ * A new run for an existing video (after an edit, or to retry a failed render), priced against `before` (the stored
+ * spec). A clip that was never made (its first run failed and was refunded) costs what a new one does.
+ */
+async function rerun(env: Env, user: DbUser, video: any, spec: Spec, key: string, before: Spec) {
   requireMedia(env);
   const previous = await env.DB.prepare("SELECT video_id FROM runs WHERE user_id=? AND idempotency_key=?").bind(user.id, key).first<{ video_id: string }>();
   if (previous) return { credits: 0 };
   const a = await allowance(env, user);
-  const credits = specCredits(spec, false);
+  const credits = isHighlight(spec) && !video.video_asset ? specCredits(spec, true) : specCredits(spec, false, undefined, before);
+  if (credits > 0) canCreate(a, credits);
   const runId = uid(), t = now();
   try {
     await env.DB.batch([
@@ -140,7 +161,7 @@ const views = {
   all: "1=1",
 } as const;
 /** The video's publications (where and when it posts, and how it went), as a JSON list for list views. */
-const PUBLICATIONS = `(SELECT json_group_array(json_object('id',x.id,'platform',x.platform,'accountName',x.account_name,'scheduledAt',x.scheduled_at,'status',x.status,'url',x.url,'error',x.error,'views',x.views,'likes',x.likes)) FROM publications x WHERE x.video_id=v.id AND x.status<>'canceled') AS publications`;
+export const PUBLICATIONS = `(SELECT json_group_array(json_object('id',x.id,'platform',x.platform,'accountName',x.account_name,'scheduledAt',x.scheduled_at,'status',x.status,'url',x.url,'error',x.error,'views',x.views,'likes',x.likes)) FROM publications x WHERE x.video_id=v.id AND x.status<>'canceled') AS publications`;
 videos.get("/", async (c) => {
   const user = c.get("user");
   const q = z.object({
@@ -176,10 +197,15 @@ videos.post("/", async (c) => {
   canCreate(a, await newVideoCredits(c.env, user.id, spec));
   return c.json(await createVideo(c.env, user, spec, a, d.idempotencyKey), 201);
 });
-/** The browser never sets the recorded voice; it only comes from the server's own runs. */
+/** The browser never sets the recorded voice or a clip's tracking; they only come from the server's own runs. */
 function stripGenerated(spec: Spec): Spec {
-  const { generated: _g, ...rest } = spec;
+  const { generated: _g, tracked: _t, ...rest } = spec as Spec & { generated?: unknown; tracked?: unknown };
   return rest as Spec;
+}
+/** What the server owns of the stored spec (the paid recording, a clip's tracking), carried into an edit. */
+function serverParts(stored: Spec) {
+  const s = stored as Spec & { generated?: unknown; tracked?: unknown };
+  return { ...(s.generated ? { generated: s.generated } : {}), ...(s.tracked ? { tracked: s.tracked } : {}) };
 }
 videos.get("/:id", async (c) => {
   const user = c.get("user");
@@ -195,9 +221,11 @@ videos.put("/:id", async (c) => {
   const v = await ownedVideo(c.env, user.id, c.req.param("id"));
   const d = z.object({ spec: specSchema, idempotencyKey: z.uuid() }).parse(await c.req.json());
   const stored = json<Spec>(v.spec, d.spec);
-  // The paid recording stays with the video while its words and voice do not change.
-  const spec = { ...stripGenerated(d.spec), ...(stored.generated ? { generated: stored.generated } : {}) } as Spec;
-  await checkReferences(c.env, user.id, spec);
+  if ((stored.format || "story") !== d.spec.format) throw new HTTPException(400, { message: "A video can't change its type. Make a new one instead." });
+  // The paid recording stays with the video while its words and voice do not change (and a clip's tracking while its
+  // moment does not).
+  const spec = { ...stripGenerated(d.spec), ...serverParts(stored) } as Spec;
+  await checkReferences(c.env, user.id, spec, !isHighlight(stored) && stored.narration?.kind === "voice" ? stored.narration.voiceId : null);
   if (visualPart(spec) === visualPart(stored) && v.render_status === "ready") {
     await c.env.DB.prepare("UPDATE videos SET spec=?,caption=?,title=?,updated_at=? WHERE id=?").bind(JSON.stringify(spec), spec.caption, spec.title, now(), v.id).run();
     return c.json({ video: videoView({ ...v, spec: JSON.stringify(spec), caption: spec.caption, title: spec.title }, true), rendering: false });
@@ -205,7 +233,7 @@ videos.put("/:id", async (c) => {
   if (["queued", "running"].includes(v.render_status)) throw new HTTPException(409, { message: "This video is still being made. Edit it when it's ready." });
   const live = await c.env.DB.prepare("SELECT 1 FROM publications WHERE video_id=? AND status='publishing'").bind(v.id).first();
   if (live) throw new HTTPException(409, { message: "This video is being published right now. Edit it in a minute." });
-  const { credits } = await rerun(c.env, user, v, spec, d.idempotencyKey);
+  const { credits } = await rerun(c.env, user, v, spec, d.idempotencyKey, stored);
   return c.json({ video: videoView(await ownedVideo(c.env, user.id, v.id), true), rendering: true, credits });
 });
 videos.post("/:id/render", async (c) => {
@@ -213,7 +241,8 @@ videos.post("/:id/render", async (c) => {
   const v = await ownedVideo(c.env, user.id, c.req.param("id"));
   const { idempotencyKey } = z.object({ idempotencyKey: z.uuid() }).parse(await c.req.json());
   if (["queued", "running"].includes(v.render_status)) throw new HTTPException(409, { message: "This video is already being made." });
-  const { credits } = await rerun(c.env, user, v, json<Spec>(v.spec, {} as Spec), idempotencyKey);
+  const spec = json<Spec>(v.spec, {} as Spec);
+  const { credits } = await rerun(c.env, user, v, spec, idempotencyKey, spec);
   return c.json({ ok: true, credits });
 });
 /**

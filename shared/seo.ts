@@ -3,7 +3,7 @@ import { tools } from "./templates";
 
 // Titles and descriptions per public page; the Worker puts them into the HTML for crawlers and link previews, and the
 // app updates them on navigation.
-const UPDATED = "2026-10-10";
+const UPDATED = "2026-10-12";
 const toolPages = Object.fromEntries(tools.map((t) => [`/tools/${t.slug}`, { title: `${t.title} — ${PRODUCT.name}`, description: t.description, updated: UPDATED }]));
 export const publicPages: Record<string, { title: string; description: string; updated: string }> = {
   "/": { title: `${PRODUCT.name} — ${PRODUCT.tagline}`, description: PRODUCT.pitch, updated: UPDATED },

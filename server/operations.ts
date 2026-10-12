@@ -44,13 +44,13 @@ export type ServiceArea = "fal" | "elevenlabs" | "renderer" | "other";
 /** The service a run's failure code points at (its prefix, see server/providers/http.ts failureCode). */
 export function serviceOf(code: string): ServiceArea {
   if (code.startsWith("GENERATION_")) return "fal";
-  if (code.startsWith("VOICE_")) return "elevenlabs";
+  if (code.startsWith("VOICE_") || code.startsWith("SPEECH_")) return "elevenlabs";
   if (code.startsWith("RENDER") || code === "MEDIA_TIMEOUT") return "renderer";
   return "other";
 }
 /** Failures caused by what was asked for (a refused prompt, a deleted file), never a sign of an outage. */
 export const userCaused = (code: string) =>
-  /_REJECTED$|_NOT_FOUND$/.test(code) || ["VIDEO_INVALID", "MEDIA_INPUT", "MEDIA_FORMAT", "MEDIA_TOO_LARGE", "MEDIA_SIZE", "MEDIA_EMPTY"].includes(code);
+  /_REJECTED$|_NOT_FOUND$/.test(code) || ["VIDEO_INVALID", "SPEECH_INVALID", "MEDIA_INPUT", "MEDIA_FORMAT", "MEDIA_TOO_LARGE", "MEDIA_SIZE", "MEDIA_EMPTY"].includes(code);
 
 // Several failures in one hour point at an outage rather than at one person's video.
 export const FAILURE_BURST = 3;

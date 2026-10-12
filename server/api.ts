@@ -6,20 +6,27 @@ import { now, uid } from "./types";
 import { hit, hmac, rate, safeEqual, sha } from "./security";
 import { siteUrl } from "./config";
 import { allowance } from "./billing";
-import { canCreate, createVideo, newVideoCredits, videoView } from "./videos";
+import { canCreate, checkReferences, createVideo, newVideoCredits, videoView } from "./videos";
+import { findClips, findSchema, ownedSource, SOURCE_FIELDS, sourceView } from "./highlights";
+import { importLink } from "./imports";
 import { draftVideo, type DraftRequest } from "./story";
 import { nextSlot, seriesSettings } from "./series";
 import { cancelScheduled } from "./publishing";
 import { serveObject } from "./storage";
 import { templateIds, templates, type TemplateId } from "../shared/templates";
 import { storyStyleIds, storyStyles } from "../shared/story";
-import { voices } from "../shared/voices";
+import { voiceIdSchema } from "../shared/voices";
+import { activeVoices } from "./voices";
 import { languageCodes, languages } from "../shared/series";
 import { PRODUCT } from "../shared/brand";
+import { specSchema } from "../shared/formats";
+import { captionStyles } from "../shared/captions";
+import { layoutChoiceIds, MOMENT_COUNTS, momentLengthIds, momentSpec, type LayoutChoice, type Moment } from "../shared/highlights";
 
 // API access: personal API keys (only a SHA-256 is stored), a small REST API (/api/v1) and an MCP server (/mcp,
-// Streamable HTTP, JSON-RPC 2.0) so AI assistants can make and fetch videos for their owner. Both act as the key's
-// owner with the same credits, limits and checks as the app; nothing here bypasses billing.
+// Streamable HTTP, JSON-RPC 2.0) so AI assistants can make and fetch videos — and clips of the owner's long videos —
+// for their owner. Both act as the key's owner with the same credits, limits and checks as the app; nothing here
+// bypasses billing.
 
 export const apiKeys = new Hono<App>();
 const KEY_PREFIX = "hss_";
@@ -91,7 +98,7 @@ const createSchema = z.object({
   object: z.string().trim().max(60).default(""),
   seconds: z.number().int().min(15).max(160).default(45),
   language: z.enum(languageCodes as [string, ...string[]]).default("en"),
-  voice: z.enum(voices.map((v) => v.id) as [string, ...string[]]).optional(),
+  voice: voiceIdSchema.optional(),
   style: z.enum(storyStyleIds as [string, ...string[]]).optional(),
 });
 /** Writes and makes a video for the key's owner (credits charged as in the app). */
@@ -139,6 +146,68 @@ async function account(env: Env, user: DbUser) {
   const a = await allowance(env, user);
   return { plan: a.plan, credits: { left: Math.max(0, a.limit - a.used), used: a.used, total: a.limit }, renewsAt: a.renewsAt ? new Date(a.renewsAt * 1000).toISOString() : null };
 }
+// Clips of long videos ------------------------------------------------------------------------------------------------
+/** A long video as the API shows it: where it stands, what finding clips in it costs, and the moments found. */
+function sourceOut(s: ReturnType<typeof sourceView>) {
+  return {
+    id: s.id, name: s.name, duration: s.duration, status: s.status, importing: s.importing, error: s.status === "failed" ? s.error : s.momentsError,
+    speech: s.speech, transcribeCredits: s.transcribeCredits,
+    searching: !!s.wanted || s.speech === "pending", clips: s.clips,
+    // score: the moment's virality score; reactions: the times people laughed, applauded or cheered in it.
+    moments: s.moments.map((m, index) => ({
+      index, title: m.title, start: m.start, end: m.end, score: m.score, reactions: m.reactions ?? 0, why: m.why, caption: m.caption, hashtags: m.hashtags,
+    })),
+  };
+}
+async function listSources(env: Env, user: DbUser) {
+  const rows = (await env.DB.prepare(`SELECT ${SOURCE_FIELDS} FROM media_assets a WHERE a.user_id=? AND a.kind='upload' AND a.mime LIKE 'video/%' AND a.status<>'uploading' ORDER BY a.created_at DESC LIMIT 50`)
+    .bind(user.id).all<any>()).results;
+  return rows.map((a) => sourceOut(sourceView(a)));
+}
+const getSource = async (env: Env, user: DbUser, id: string) => sourceOut(sourceView(await ownedSource(env, user.id, id)));
+/** Imports a video from a link (server/imports.ts); it is downloaded and checked in the background. */
+async function importSource(env: Env, user: DbUser, input: any) {
+  const d = z.object({ url: z.string().trim().min(1).max(2000) }).parse(input);
+  return getSource(env, user, await importLink(env, user, d.url));
+}
+async function findIn(env: Env, user: DbUser, id: string, input: any) {
+  const d = findSchema.parse({ ...input, idempotencyKey: input?.idempotencyKey || uid() });
+  const { status, body } = await findClips(env, user, id, d);
+  return { ...sourceOut(body.source), ...("credits" in body && { credits: body.credits }), searching: status === 202 };
+}
+const clipSchema = z.object({
+  source: z.uuid(),
+  /** A moment found in it (its index), or seconds `start` to `end`. */
+  moment: z.number().int().min(0).optional(), start: z.number().min(0).optional(), end: z.number().min(0).optional(),
+  title: z.string().trim().max(100).optional(),
+  layout: z.enum(layoutChoiceIds as [LayoutChoice, ...LayoutChoice[]]).default("follow"),
+  style: z.enum(captionStyles).default("bold"),
+  captions: z.boolean().default(true), hookTitle: z.boolean().default(true), removePauses: z.boolean().default(true),
+});
+/** Makes a clip of a moment of one of the owner's videos (1 credit per started minute). */
+async function makeClip(env: Env, user: DbUser, input: unknown) {
+  const d = clipSchema.parse(input);
+  if ((await hit(env, "api-videos", 3600, user.id)) > 30) throw new HTTPException(429, { message: "That's a lot of videos for one hour. Try again later." });
+  const s = sourceView(await ownedSource(env, user.id, d.source));
+  let m: Moment | undefined = d.moment !== undefined ? s.moments[d.moment] : undefined;
+  if (d.moment !== undefined && !m) throw new HTTPException(404, { message: "Moment not found. Find clips in the video first." });
+  if (!m) {
+    if (d.start === undefined || d.end === undefined) throw new HTTPException(400, { message: "Give a moment's index, or its start and end in seconds." });
+    m = { title: d.title || "Clip", why: "", caption: "", hashtags: [], start: d.start, end: d.end, text: "", score: 0, scores: { hook: 1, payoff: 1, clarity: 1, energy: 1 } };
+  }
+  const moment = { ...m, title: d.title || m.title };
+  const spec = specSchema.parse({
+    ...momentSpec(s.id, moment, { layout: d.layout, style: d.style, captions: d.captions, title: d.hookTitle, cuts: d.removePauses, fillers: d.removePauses }),
+    moment: d.moment !== undefined ? { score: m.score, why: m.why } : null,
+  });
+  await checkReferences(env, user.id, spec);
+  const a = await allowance(env, user);
+  canCreate(a, await newVideoCredits(env, user.id, spec));
+  const made = await createVideo(env, user, spec, a, uid());
+  const v = await env.DB.prepare("SELECT * FROM videos WHERE id=?").bind(made.id).first<any>();
+  return { ...(await videoOut(env, v)), credits: made.credits };
+}
+
 const videoTypes = () => templateIds.map((id) => ({ id, name: templates[id].name, kind: templates[id].kind, about: templates[id].short, example: templates[id].examples[0] }));
 
 /** REST: /api/v1 (bearer key; no session, no Origin check). */
@@ -149,11 +218,19 @@ restApi.use("*", async (c, next) => {
   await next();
 });
 restApi.get("/me", async (c) => c.json(await account(c.env, c.get("user"))));
-restApi.get("/types", (c) => c.json({ types: videoTypes(), styles: storyStyleIds, voices: voices.map((v) => v.id), languages: languages.map((l) => l[0]) }));
+restApi.get("/types", async (c) => c.json({ types: videoTypes(), styles: storyStyleIds, voices: (await activeVoices(c.env)).map((v) => v.id), languages: languages.map((l) => l[0]) }));
 restApi.get("/videos", async (c) => c.json({ videos: await listVideos(c.env, c.get("user"), Number(c.req.query("limit")) || 20) }));
 restApi.post("/videos", async (c) => c.json({ video: await makeVideo(c.env, c.get("user"), await c.req.json()) }, 201));
 restApi.get("/videos/:id", async (c) => c.json({ video: await getVideo(c.env, c.get("user"), c.req.param("id")) }));
 restApi.get("/series", async (c) => c.json({ series: await listSeries(c.env, c.get("user")) }));
+restApi.get("/sources", async (c) => c.json({ sources: await listSources(c.env, c.get("user")) }));
+restApi.post("/sources", async (c) => c.json({ source: await importSource(c.env, c.get("user"), await c.req.json()) }, 202));
+restApi.get("/sources/:id", async (c) => c.json({ source: await getSource(c.env, c.get("user"), c.req.param("id")) }));
+restApi.post("/sources/:id/find", async (c) => {
+  const source = await findIn(c.env, c.get("user"), c.req.param("id"), await c.req.json());
+  return c.json({ source }, source.searching ? 202 : 200);
+});
+restApi.post("/clips", async (c) => c.json({ video: await makeClip(c.env, c.get("user"), await c.req.json()) }, 201));
 restApi.post("/series/:id/:action{pause|resume}", async (c) =>
   c.json({ series: await setSeriesStatus(c.env, c.get("user"), c.req.param("id"), c.req.param("action") === "pause" ? "paused" : "active") }));
 /** A signed download link (made by videoOut): the made video's MP4. */
@@ -189,7 +266,7 @@ const tools = [
         object: { type: "string", description: "For type 'mashup': the object." },
         seconds: { type: "integer", minimum: 15, maximum: 160, description: "Length of narration in seconds (default 45)." },
         language: { type: "string", enum: languageCodes, description: "Narration language (default en)." },
-        voice: { type: "string", enum: voices.map((v) => v.id) },
+        voice: { type: "string", description: "A voice id from list_video_types (default: the type's voice)." },
         style: { type: "string", enum: storyStyleIds, description: "Art style of the pictures." },
       },
     },
@@ -215,6 +292,49 @@ const tools = [
     inputSchema: { type: "object", properties: { id: { type: "string" }, status: { type: "string", enum: ["active", "paused"] } }, required: ["id", "status"], additionalProperties: false },
   },
   {
+    name: "list_long_videos",
+    description: "The owner's uploaded videos (podcasts, interviews, streams) that clips can be cut from: length, whether their speech is known, what transcribing costs (transcribeCredits), and the moments found so far.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "import_video",
+    description: "Imports one of the owner's videos from a link, to find clips in it: a direct link to an MP4, MOV or WebM file, or a Dropbox or Google Drive link anyone can open. A YouTube link works only for a video on the owner's own connected channel, when YouTube import is available on their plan; other video platform pages can't be imported. The video is downloaded and checked in the background: call get_long_video until its status is 'ready' (or 'failed', with the error).",
+    inputSchema: { type: "object", properties: { url: { type: "string", description: "https link to the video file or share link." } }, required: ["url"], additionalProperties: false },
+  },
+  {
+    name: "find_clips",
+    description: "Finds the best stand-alone moments in one of the owner's videos, each with a virality score of 10–99: an AI estimate of how well it works as a short on its own (hook, payoff, clarity, energy, and the laughter or applause heard in it), not a prediction of views. Free when its speech is known or it is up to 10 minutes long; a longer video is transcribed first for transcribeCredits (pass them as credits to agree to the price). When 'searching' is true, call list_long_videos or get_long_video later for the moments.",
+    inputSchema: {
+      type: "object", additionalProperties: false, required: ["source"],
+      properties: {
+        source: { type: "string", description: "The video's id (see list_long_videos)." },
+        count: { type: "integer", enum: [...MOMENT_COUNTS], description: "How many moments (default 5)." },
+        length: { type: "string", enum: momentLengthIds, description: "short 15–30 s, medium 30–60 s (default), long 60–90 s." },
+        focus: { type: "string", description: "Optional: what the moments should be about." },
+        credits: { type: "integer", description: "For a video over 10 minutes not transcribed yet: its transcribeCredits." },
+      },
+    },
+  },
+  {
+    name: "get_long_video",
+    description: "One of the owner's videos with the moments found in it (index, times, title, virality score, reactions heard).",
+    inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"], additionalProperties: false },
+  },
+  {
+    name: "make_clip",
+    description: "Makes a vertical clip of a moment (by its index from find_clips, or start and end in seconds): framed in a layout, with captions and a hook title. Costs 1 credit per started minute. Poll get_video until it is ready.",
+    inputSchema: {
+      type: "object", additionalProperties: false, required: ["source"],
+      properties: {
+        source: { type: "string" }, moment: { type: "integer", minimum: 0 }, start: { type: "number" }, end: { type: "number" },
+        title: { type: "string", description: "Hook title and the clip's name (default: the moment's)." },
+        layout: { type: "string", enum: layoutChoiceIds, description: "follow (default: speaker focus), speakers, screen, crop or fit." },
+        style: { type: "string", enum: captionStyles, description: "Caption style (default bold)." },
+        captions: { type: "boolean" }, hookTitle: { type: "boolean" }, removePauses: { type: "boolean" },
+      },
+    },
+  },
+  {
     name: "get_account",
     description: "The plan and the credits left this month.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -228,12 +348,21 @@ const rpcError = (id: Rpc["id"], code: number, message: string) => ({ jsonrpc: "
 async function callTool(env: Env, user: DbUser, name: string, args: any) {
   switch (name) {
     case "list_video_types":
-      return { types: videoTypes(), styles: storyStyleIds.map((s) => ({ id: s, name: storyStyles[s].name })), voices: voices.map((v) => ({ id: v.id, name: v.name, tone: v.tone, accent: v.accent })), languages: languages.map(([code, n]) => ({ code, name: n })) };
+      return {
+        types: videoTypes(), styles: storyStyleIds.map((s) => ({ id: s, name: storyStyles[s].name })),
+        voices: (await activeVoices(env)).map((v) => ({ id: v.id, name: v.name, description: v.description, tone: v.description, gender: v.gender, accent: v.accent })),
+        languages: languages.map(([code, n]) => ({ code, name: n })),
+      };
     case "create_video": return makeVideo(env, user, args || {});
     case "get_video": return getVideo(env, user, String(args?.id || ""));
     case "list_videos": return { videos: await listVideos(env, user, Number(args?.limit) || 20) };
     case "list_series": return { series: await listSeries(env, user) };
     case "set_series_status": return setSeriesStatus(env, user, String(args?.id || ""), args?.status === "paused" ? "paused" : "active");
+    case "list_long_videos": return { videos: await listSources(env, user) };
+    case "import_video": return importSource(env, user, args || {});
+    case "find_clips": return findIn(env, user, String(args?.source || ""), args || {});
+    case "get_long_video": return getSource(env, user, String(args?.id || ""));
+    case "make_clip": return makeClip(env, user, args || {});
     case "get_account": return account(env, user);
     default: throw new HTTPException(404, { message: `Unknown tool: ${name}` });
   }
@@ -245,7 +374,7 @@ async function handle(env: Env, user: DbUser, m: Rpc) {
         protocolVersion: typeof m.params?.protocolVersion === "string" ? m.params.protocolVersion : MCP_PROTOCOL,
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: PRODUCT.slug, version: "1.0.0" },
-        instructions: `Make faceless short videos with ${PRODUCT.name}: call list_video_types, then create_video, then get_video until it is ready.`,
+        instructions: `Make faceless short videos with ${PRODUCT.name}: call list_video_types, then create_video, then get_video until it is ready. To clip the owner's long videos: list_long_videos (or import_video from a link), find_clips, then make_clip.`,
       });
     case "ping": return result(m.id, {});
     case "tools/list": return result(m.id, { tools });

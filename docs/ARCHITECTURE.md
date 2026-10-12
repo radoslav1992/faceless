@@ -44,21 +44,23 @@ handler runs `maintenance()` every minute.
 
 ## Data model
 
-One migration, `migrations/0001_initial.sql`; D1 always enforces foreign keys.
+`migrations/0001_initial.sql`, `0002_clips.sql` (runs of kind `speech`), `0003_voices.sql` (narration voices) and
+`0004_library.sql` (library pictures, descriptions and the AI mark); D1 always enforces foreign keys.
 
 | Area | Tables |
 | --- | --- |
 | Accounts | `users`, `sessions`, `auth_tokens` (verify/reset), `rate_limits`, `terms_acceptances`, `contact_messages`, `cleanup_tasks` |
 | Billing | `subscriptions` (Stripe subscriptions and `grant_` rows), `stripe_status`, `stripe_reconciled`, `billing_events` (webhook de-duplication), `checkout_intents`, `usage_windows`, `trial_history`, `credit_topups`, `media_limits`, `checkout_consents`, `withdrawals` |
 | Social | `social_accounts` (sealed credentials), `oauth_states` |
-| Making videos | `series`, `videos`, `runs`, `media_assets`, `media_parts`, `library_items` |
+| Making videos | `series`, `videos`, `runs`, `media_assets`, `media_parts`, `library_items`, `voices` |
 | Publishing | `publications` (status, attempts, media-link token, provider ticket, URL, stats) |
 | API | `api_keys` (SHA-256 of the key and a short prefix only) |
 | Operations | `operations_state`, `manual_reviews` |
 
 Triggers keep the rules in the database, so no code path can skip them:
 
-- **Credits**: `run_credit_reserve` refuses a run whose credits do not fit its usage window (`QUOTA_EXCEEDED`),
+- **Credits**: `run_credit_reserve` refuses a run (a video's, or a long video's paid transcription) whose credits do
+  not fit its usage window (`QUOTA_EXCEEDED`),
   `run_credit_charge` adds them to `used` in the same transaction, and `run_refund` gives them back exactly once when
   a queued or running run becomes `failed`. `run_active_limit` allows 20 active runs per person (`RUNS_BUSY`).
 - **Storage**: `media_storage_limit` (the plan's bytes in `media_limits`) and `media_file_limit` (5,000 files) answer
@@ -69,13 +71,15 @@ Triggers keep the rules in the database, so no code path can skip them:
   `evidence_account_deleted` marks terms acceptances and checkout consents of a deleted account.
 
 Unique indexes that carry rules: `videos_series_slot` (one video per series slot), `one_active_run_per_video`,
-`runs(user_id, idempotency_key)` (a retried request or step finds its earlier run), `publication_once` (a video is
+`runs(user_id, idempotency_key)` (a retried request or step finds its earlier run), `one_active_speech_per_asset` (one
+paid transcription of a video at a time), `publication_once` (a video is
 scheduled, publishing or published at most once per account) and `social_accounts(user_id, platform, external_id)`.
 
 ## A video
 
-A video's editable description is its **spec** (`shared/formats.ts`, validated with zod on every write): the video
-type (`kind`: `story`, `pov`, `mashup`, `script`, `backdrop`), the narration (an AI voice by ID, or one of the owner's
+A video's editable description is its **spec** (`shared/formats.ts`, validated with zod on every write), of one of two
+formats: `story` (below) or `highlight`, a clip of one of the owner's long videos (see [Clips](#clips-from-long-videos)).
+A story's spec holds the video type (`kind`: `story`, `pov`, `mashup`, `script`, `backdrop`), the narration (an AI voice by ID, or one of the owner's
 audio/video uploads with an optional exact script), the language, 1–40 scenes (their words, a picture description, key
 words, the picture's source and the transition in), one art style (`shared/story.ts`, 15 prompt suffixes), one
 recurring subject, captions (on/off, one of 21 styles), an optional on-screen headline (`shared/headline.ts`), an
@@ -84,8 +88,8 @@ and the post text (caption, hashtags, title, topic). `generated` (the recorded A
 by the server: the browser never sets it.
 
 A scene's picture is an **AI image** (made once, then shown with a slow zoom or pan), an **AI clip** made from that
-image (5 or 10 s), the owner's **image or video**, or a **library clip**. Scenes hold words, never times: times come
-from the voice's word timings, so an edit only moves words between scenes and keeps the paid recording
+image (5 or 10 s), the owner's **image or video**, or a **library clip or picture**. Scenes hold words, never times:
+times come from the voice's word timings, so an edit only moves words between scenes and keeps the paid recording
 (`narrationKey`: voice, length and a fingerprint of the script).
 
 **Credits** (`specCredits`, `shared/credits.ts`): a new video costs 1 credit per started 30 seconds of its estimated
@@ -93,6 +97,30 @@ length (the owner's recording by its own length), everything included, plus 1 cr
 edit of a made video costs only what it asks for again: new narration when the words or voice changed, 1 credit per
 5 new pictures, and new clips. Changes to the caption, hashtags or title need no new render; other free changes
 (subtitles, music, transitions, timing) re-render for 0 credits.
+
+**Voices** (`server/voices.ts`, `voices` table, Admin → Voices in `src/app/AdminVoices.tsx`). Administrators import a
+voice of the ElevenLabs account (`GET /api/admin/voices/elevenlabs` lists it: `/v2/voices`, 100 at a time; `POST
+/api/admin/voices` reads `/v1/voices/{id}`) with ElevenLabs' details: "George - Warm Storyteller" becomes the name
+George and the description "Warm Storyteller", else the labels (descriptive, use case) or ElevenLabs' description;
+gender, accent and age from the labels; its sample is copied to R2 (`voices/<id>/sample.mp3`, served at
+`/api/public/voices/:id/preview`). Its public ID (made of its name, or chosen) never changes: specs and series keep
+it, and the ElevenLabs voice behind it can be replaced. Administrators rename, describe, order, hide and choose the
+default (`PATCH /api/admin/voices/:id`; the default is always offered); only a voice no series or video uses can be
+deleted. `GET /api/public/voices` lists the offered voices (the app's voice pickers, with a sample to play; the API's
+`/types` and `list_video_types`). A new video or series must use an offered voice; one that already has a voice keeps
+it once hidden (`voiceUsable` with the kept voice), and a template whose voice was hidden gets the default.
+
+**Library** (`server/library.ts`, `library_items`, Admin → Library in `src/app/AdminLibrary.tsx` and
+`server/routes/admin-library.ts`). Music, clips and pictures shared by everyone, with a name, a description and tags.
+Administrators upload them (a picture's size is read from its header on the server; a clip's or track's length and a
+thumbnail come from the browser) or copy one of their own media files (`POST /api/admin/library/from-media`: an upload,
+or an AI picture or clip made for one of their videos, with its name, its prompt as the description and the AI mark;
+`source_asset` keeps it from being added twice), then rename, describe, tag, mark as AI-made, switch off or delete
+them; the list shows how many videos and series use each item. `GET /api/library?kind=clip,image&q=&tag=` searches
+the active items (all of them, folded to lowercase without accents, a plural matching its singular): every word must
+be in the name, description or tags, name matches first, then tags, then descriptions; `?ids=` returns particular
+items (the editor's scenes). Music is a track, a background a clip, a scene a clip or a picture (`checkReferences`).
+An item marked as AI-made makes the video that shows it AI-made (`compose.synthetic`), like the owner's AI pictures.
 
 ## Writing
 
@@ -114,15 +142,48 @@ the answer; fewer than two usable scenes means failure.
   alignment (made once per file and script, kept in `media_assets.meta.alignment`, within the daily free speech
   allowance of 20 files or 30 minutes).
 
-Uploads go to R2 as multipart uploads of 8 MiB parts (images up to 20 MB, videos 500 MB, tracks 50 MB). Images are
-checked from their header; videos and tracks by the renderer (`inspect`: kind, picture size, length up to 10 minutes,
-sound) and, when they may hold speech, transcribed once by ElevenLabs Scribe v2 for free within the same daily
-allowance. A failed transcription only means no subtitles.
+Uploads go to R2 as multipart uploads of 8 MiB parts (images up to 20 MB, tracks 50 MB, videos up to the plan's
+`videoMb`: 500 MB on the free trial, 2,000 MB on paid plans). Images are checked from their header; videos and tracks
+by the renderer (`inspect`: kind, picture size, length up to the plan's `videoMinutes` at upload time — 10 minutes,
+or 2 hours for videos on paid plans — and sound) and, when they may hold speech and last up to 10 minutes, transcribed
+once by ElevenLabs Scribe v2 for free within the same daily allowance. A failed transcription only means no subtitles.
+
+**Imports from links** (`server/imports.ts`, `POST /api/media/imports`, the Clips page's *Import*, `POST
+/api/v1/sources` and the MCP tool `import_video`): a direct link to an MP4, MOV or WebM file, or a Dropbox (`dl=1`) or
+Google Drive (its `drive.usercontent.google.com` download address) share link. Only https on the default port to a
+public host name is fetched: no IP addresses, local or reserved names, credentials or this site — on every redirect
+too (at most five, followed by hand). Links to TikTok, Instagram, Facebook, X, Twitch, Vimeo and Kick, and to YouTube
+unless YouTube import is on (below), are refused before any request, with what to do instead. While the person waits
+the link is opened once: a page, a missing file or a file whose first bytes are not MP4, MOV or WebM is refused at
+once, as is a size over the plan's `videoMb`. The file is then a `checking` upload with `meta.import` (the link and
+the bytes reserved: its size, or the plan's largest video when the link doesn't tell); the workflow (`importId`)
+downloads it into R2 in 5 MiB parts (`storeStream`, never past the reserved size, 40 minutes at most, one more try
+after a minute) and checks it like an upload. Confirmed emails only; 30 links an hour and 3 imports at once per
+person.
+
+**YouTube import (beta, `YOUTUBE_IMPORT=true`, paid plans)** (`server/youtube-import.ts`): only videos of a YouTube
+channel the person connected (the same OAuth connection as posting, with `youtube.readonly`). `GET /api/media/youtube`
+lists each connected channel's 25 latest uploads for the import picker (channels, playlistItems and videos.list: 3
+quota units per channel; 30 listings an hour per person), each with why it can't be imported: private, live or
+upcoming, still processing, age-restricted, under 20 seconds or over the plan's `videoMinutes`. A YouTube link sent to
+the import (any form: watch, youtu.be, shorts, live, embed) is looked up with videos.list; a video whose
+`snippet.channelId` is not one of the person's connected channels is refused, so nobody can import someone else's
+video. The file is reserved at 2 MB a second of the video plus 50 MB (at most the plan's `videoMb`), `meta.import`
+holds `{ youtube, channel, limit }`, and the workflow hands the renderer an operation `youtube` (the video ID, the
+longest length and the reserved size) that runs only on the fourth container, `download-0` (`DOWNLOAD_SLOT`), one
+download at a time, so renders never wait behind one; the workflow waits up to 30 minutes, then moves the MP4 into R2
+(never past the reserved size) and checks it like an upload. The renderer runs yt-dlp (with Deno, its JavaScript
+runtime, both pinned in the Dockerfile) on `https://www.youtube.com/watch?v=<id>` only, at most 1080p (H.264 and AAC
+when YouTube has them), with no proxy, cookies or account; YouTube's refusals come back as `YOUTUBE_BLOCKED` (bot
+checks, 429, 403), `YOUTUBE_RESTRICTED` (members-only, age-restricted, private), `YOUTUBE_UNAVAILABLE` or
+`YOUTUBE_FAILED`, and the video fails with what to do instead (download it in YouTube Studio and upload it). The app's
+CSP allows `https://i.ytimg.com` images for the picker's thumbnails.
 
 ## The content workflow
 
-`ContentGeneration` (`server/content-workflow.ts`) runs three kinds of jobs: a video's run (`runId`), an upload check
-(`inspectId`) and a series episode (`episode`, below). A **run** is created with its video (or for an edit) in one
+`ContentGeneration` (`server/content-workflow.ts`) runs four kinds of jobs: a video's run (`runId`), an upload check
+(`inspectId`), a video imported from a link (`importId`: downloaded, then checked) and a series episode (`episode`,
+below). A **run** is created with its video (or for an edit) in one
 D1 batch, so the credits are reserved by the triggers before any work starts. Its steps:
 
 1. **Load**: the run becomes `running`, gets a capability token and a render job ID.
@@ -165,12 +226,62 @@ seconds; music loops, fades and is lowered under the voice; free-trial videos ge
 name. The cover is taken once the first words (and the headline) are on screen. Output is 1080×1920 at 30 fps, at most
 180 seconds.
 
-**The container** (`renderer/`, Python 3.12 with FFmpeg, libass and the bundled Noto fonts): three instances
-(`max_instances: 3`, `standard-2`), each running one job at a time. A job goes to the container its ID hashes to, or
-the next free one (`429` means busy), and the workflow records the slot that accepted it. Inputs are downloaded only
-from `SITE_URL`'s origin on the capability paths; finished files wait 30 minutes for the Worker. Files with an AI
-voice, picture or clip are marked as AI-made (MP4 tags and an XMP packet with the IPTC digital source type), and the
-saved render carries `{"ai":true}`. The Worker uses the `compose` and `inspect` operations.
+**The container** (`renderer/`, Python 3.12 with FFmpeg, libass and the bundled Noto fonts): three render instances
+and one download instance for YouTube imports (`max_instances: 4`, `standard-2`), each running one job at a time. A
+job goes to the container its ID hashes to, or the next free one (`429` means busy), and the workflow records the slot
+that accepted it. Inputs are downloaded only from `SITE_URL`'s origin on the capability paths; finished files wait 30
+minutes for the Worker. Files with an AI voice, picture or clip are marked as AI-made (MP4 tags and an XMP packet with
+the IPTC digital source type), and the saved render carries `{"ai":true}`. The Worker uses the `compose`, `inspect`
+and `track` operations; a clip's split layout is a `compose` segment with `panes` (windows of the picture cropped in
+whole even pixels, scaled to fill the frame's width and their height, stacked).
+
+## Clips from long videos
+
+The app's Clips (code: "highlights", so they never mix with a scene's AI clip): `shared/highlights.ts`,
+`server/highlights.ts`, the `highlight` spec in `shared/formats.ts`, the editor in `src/app/clip-editor.tsx` and
+`src/app/ClipPreview.tsx`.
+
+- **Sources** are the owner's videos, uploaded or imported from a link (`GET /api/highlights/sources`). Each keeps
+  what was found in it in `media_assets.meta`: the transcript (up to 30,000 words, with who spoke when — Scribe's
+  diarization, speakers numbered — and the sounds it tagged, such as laughter or applause), the last moments found
+  (`moments`), a search waiting for its speech (`wanted`) and the last search's failure (`momentsError`). Lists never
+  carry the transcript; a clip's editor loads the words around its moment (`GET /api/media/:id?from=&to=`).
+- **Finding clips** (`POST /api/highlights/sources/:id/find`: how many, short/medium/long, an optional focus). With
+  the speech known, the text model reads the transcript numbered by sentence, with the sounds heard after each
+  (`[laughter]`, `[applause]`), in parts of 24,000 characters (up to 8, in parallel), as data; it picks
+  non-overlapping sentence ranges of the asked length and rates each 1–10 for hook, payoff, clarity and energy.
+  `acceptMoments` checks them (sentence edges with a little air, the accepted lengths, no overlap) and `viralityScore`
+  weighs the parts into the **virality score** (10–99), plus 3 for each time people laughed, applauded or cheered in
+  the moment or the 2 s after it (`reactionsIn`, 9 at most). It is shown as an estimate, never a promise of views. The
+  best scored are kept. Twenty successful searches per person and day; a failed one gives its search back. A video
+  whose speech is not known yet is transcribed first: free up to 10 minutes (the daily allowance), else as a run of
+  kind `speech` for `speechCredits` (1 per started 30 minutes, the price the person was shown; refunded if it fails).
+  The search waits in `meta.wanted` and runs in the workflow right after the transcription (`momentsAfterSpeech`).
+- **A clip** is a video of format `highlight` (created with `POST /api/videos`): its source and moment (5 s to
+  3 minutes), instant cuts (`shared/cuts.ts`: pauses over 0.6 s shortened, fillers removed, on the 1/30 s grid),
+  a layout, captions (style and position), an optional hook title (`headline`), music, the post text, and the
+  writer's note on the moment (`moment`: score and reason, never rendered). It costs 1 credit per started minute of its
+  moment; an edit is free unless it keeps less than half of the moment it replaces (`specCredits` with the stored spec);
+  a clip whose first run failed (refunded) costs a new one when it is made again.
+- **Layouts**: `follow` (a 9:16 crop on whoever is talking, `shared/track.ts`), `split` with two windows stacked
+  (`speakers`: placed on the two people found unless the owner moved them; `screen`: a camera window over the screen),
+  `crop` (one window) and `fit` (the whole picture over a blur). A window is a centre and a zoom; `paneWindow` turns it
+  into the exact rectangle of the pane's shape inside the picture, the same in the preview and the render plan.
+- **The run**: when the layout needs it (`follow`, or `split` placed automatically) and the moment was not measured
+  yet, the renderer's `track` operation finds the faces in the moment (YuNet, 4 samples a second) and returns the crop
+  path and the two people seen most (`faces`), kept as the server-owned `tracked` with the moment's key; a failure
+  only leaves the picture centred. **Active speaker**: the Worker sends who talks when in the moment (`speechTurns`:
+  Scribe's diarized turns, or stretches of speech when the transcript has no speakers). For every face the renderer
+  compares its mouth with the last sample (a small patch between the mouth's corners, less the change of one on the
+  nose, so a moving head is not talking); each turn of at least a second goes to the face clearly moving its lips
+  most, and a speaker label keeps the face it was matched to most often (so a turn whose lips were not readable still
+  finds its face). The crop cuts at each change of speaker (never more than once a second) and follows that face
+  calmly within the turn; with no speech, or one face, it follows the face seen most. Then `planHighlight` makes one
+  video segment: the moment trimmed, its kept parts, and either the `follow` path, `fit: "contain"` or `panes`; the
+  clip's own sound; captions from the transcript's words cut like the picture; the hook title; music under it all.
+  Nothing in a clip is AI-made, so it is never marked as such.
+- **Posting**: clips post like any video; the Clips page can schedule a batch one a day (or twice a day, weekly) on
+  chosen channels.
 
 ## Series autopilot
 
@@ -292,10 +403,15 @@ checks as the app; making a video through the API is limited to 30 an hour.
 - **REST** (`/api/v1`): `GET /me` (plan and credits), `GET /types` (video types, art styles, voices, languages),
   `GET /videos`, `POST /videos` (writes and makes a video), `GET /videos/:id`, `GET /series`,
   `POST /series/:id/pause|resume`.
+- **Clips** (REST): `GET /sources`, `POST /sources` (import a video from a link, `{ url }`; 202 while it downloads),
+  `GET /sources/:id` (moments with their index), `POST /sources/:id/find` (with `credits` to agree to transcribing a
+  long video) and `POST /clips` (a moment by index, or `start`/`end`; layout, caption style, captions, hook title,
+  pause removal).
 - **MCP** (`/mcp`, Streamable HTTP, JSON-RPC 2.0, protocol `2025-06-18`): `POST` with one message or a batch of up to
   20; notifications get 202; `GET` and `DELETE` answer 405 (no server stream, no session). Tools: `list_video_types`,
-  `create_video`, `get_video`, `list_videos`, `list_series`, `set_series_status`, `get_account`. A tool's failure is
-  returned as its result with `isError`, in plain words. 300 requests an hour per person.
+  `create_video`, `get_video`, `list_videos`, `list_series`, `set_series_status`, `list_long_videos`, `import_video`,
+  `find_clips`, `get_long_video`, `make_clip`, `get_account`. A tool's failure is returned as its result with
+  `isError`, in plain words. 300 requests an hour per person.
 - **Signed download links**: a ready video's `download` is
   `/api/v1/files/:video?exp=&sig=`, an HMAC-SHA256 (keyed with `TOKEN_ENCRYPTION_KEY`) of the video, its render and the
   expiry, valid for one hour, served as an attachment without a session.

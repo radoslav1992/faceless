@@ -6,8 +6,10 @@ The payloads and the HTTP API are described in shared/render.ts:
   GET    /jobs/:id/file/:n  -> the n-th output file (video/mp4 or image/jpeg)
   DELETE /jobs/:id          -> forgets the job (stops it if running)
 Operations: 'compose' (segments + voice + music + burned ASS -> MP4, optional JPEG cover), 'stills' (one JPEG per
-slide; carousel slides place a picture in a rounded box on a page colour and a logo over it), 'inspect' (what an uploaded file is) and 'track' (where the speaker is in a part of a video, for clips).
-One job runs at a time; inputs are downloaded only from SOURCE_ORIGIN.
+slide; carousel slides place a picture in a rounded box on a page colour and a logo over it), 'inspect' (what an
+uploaded file is), 'track' (where the speaker is in a part of a video, and the two people seen most, for clips) and
+'youtube' (one video of the person's own YouTube channel, by its ID, with yt-dlp: only on the download container).
+One job runs at a time; inputs are downloaded only from SOURCE_ORIGIN (a YouTube video only from YouTube, by its ID).
 """
 import bisect, json, math, os, re, shutil, struct, subprocess, tempfile, threading, time, urllib.error, urllib.request
 from http.client import HTTPException
@@ -17,7 +19,7 @@ from xml.sax.saxutils import escape, quoteattr
 
 JOBS = {}
 LOCK = threading.Lock()
-OPERATIONS = ('compose', 'stills', 'inspect', 'track')
+OPERATIONS = ('compose', 'stills', 'inspect', 'track', 'youtube')
 MAX_BODY = 2 * 1024 * 1024          # bytes of a POST /jobs payload
 MAX_BYTES = 2 * 1024 * 1024 * 1024  # bytes of one downloaded input (long videos for clips, ~1.9 GB uploads)
 MAX_SIDE = 4096                     # pixels on either side of an input picture
@@ -35,6 +37,8 @@ SAMPLES_PER_FRAME = RATE // FPS     # 1600: segment sound is cut on the same gri
 FRAME_SIZES = ((1080, 1920), (720, 1280), (1080, 1350), (1080, 1080))  # 9:16 video; 4:5 and 1:1 carousel slides
 FINISHED_TTL = 1800                 # seconds a finished job's files wait for the Worker
 DOWNLOAD_DEADLINE = 1200
+YOUTUBE_VIDEO = re.compile(r'[A-Za-z0-9_-]{11}')
+YOUTUBE_DEADLINE = 1500             # seconds of one YouTube download (the Worker waits up to 30 minutes)
 FADE_IN, FADE_OUT = 1.0, 1.5        # music fades (seconds)
 DUCK, DUCK_RAMP = 0.7, 0.3          # music is lowered by 70% under speech, with 0.3 s ramps
 MAX_KEEP = 300                      # parts kept of one video segment (instant cuts, shared/cuts.ts)
@@ -45,13 +49,22 @@ MAX_TRANSITION = 2.0                # seconds
 # opencv_zoo; the Dockerfile downloads and checks it) become the crop path of shared/track.ts.
 YUNET_MODEL = os.environ.get('YUNET_MODEL', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'face_detection_yunet_2023mar.onnx'))
 TRACK_FPS = 4           # face samples per second: enough to follow a speaker, cheap next to decoding
-TRACK_WIDTH = 320       # pixels the samples are scaled to: a face a twentieth of the picture wide is still found
+TRACK_WIDTH = 480       # pixels the samples are scaled to: a face a twentieth of the picture wide is found, its lips are
+                        # a dozen pixels wide
 TRACK_DEADLINE = 1200   # seconds for up to 10 minutes of video, decoded once on one thread
 TRACK_WINDOW = 600      # seconds measured at most in one job (a clip's moment is far shorter)
 FACE_SCORE = 0.7
 CUT_SCORE = 0.35        # FFmpeg scene score of a hard cut
 NARROWEST = 9 / 16      # the frame the crop makes: the part of a wide video it keeps sets how still the crop holds
 MAX_TRACK_POINTS = 400
+# "Who is talking" (active speaker): each turn of speech goes to the face whose lips move most during it. Lips are
+# compared as small normalised patches between samples; the nose patch beside them takes out head movement.
+PATCH = (16, 10)        # pixels of a mouth or nose patch
+MIN_TURN = 1.0          # seconds: a shorter turn (a "yeah", a laugh) never moves the crop
+MIN_HOLD = 1.0          # seconds the crop stays on a speaker before it cuts to another
+CLEAR = 1.25            # how much more a face's lips must move than the next face's for a turn to be its own
+MAX_TURNS = 4000
+MAX_PANES = 2           # windows of a clip's picture stacked in the frame (two speakers; a screen and a camera)
 # The caption fonts (renderer/fonts, the same files the browser preview uses); libass loads them before system fonts.
 FONTS_DIR = os.environ.get('FONTS_DIR', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts'))
 CURRENT = threading.local()  # the job this worker thread processes, so a cancel can stop its FFmpeg
@@ -117,8 +130,9 @@ def cancelled():
     job = getattr(CURRENT, 'job', None)
     return bool(job and job.get('cancelled'))
 
-def command(args, timeout=90):
-    """Runs FFmpeg/ffprobe with a deadline; a cancel (DELETE) kills it. Returns its standard output."""
+def command(args, timeout=90, explain=None):
+    """Runs FFmpeg/ffprobe (or yt-dlp) with a deadline; a cancel (DELETE) kills it. Returns its standard output. A
+    failure raises 'Media processing failed', or what `explain` makes of the program's error output."""
     job = getattr(CURRENT, 'job', None)
     p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if job is not None:
@@ -134,7 +148,7 @@ def command(args, timeout=90):
     if p.returncode or cancelled():
         if p.returncode and not cancelled():
             log(f'{os.path.basename(args[0])} exited with {p.returncode}: {err.decode("utf-8", "replace").strip()[-600:]}')
-        raise ValueError('Media processing failed')
+        raise ValueError(explain(err.decode('utf-8', 'replace')) if explain and not cancelled() else 'Media processing failed')
     return out
 
 def filter_path(path):
@@ -206,11 +220,18 @@ def input_url(url, origin):
         raise ValueError('Invalid input URL')
     return url
 
+def user_agent():
+    """How downloads introduce themselves: as this site's renderer. The site's own edge (Cloudflare's Browser Integrity
+    Check) refuses Python's default user agent with a 403, so every input would fail to load."""
+    origin = (os.environ.get('SOURCE_ORIGIN') or '').rstrip('/')
+    return f'Mozilla/5.0 (compatible; MediaRenderer/1.0{f"; +{origin}" if origin else ""})'
+
 def download(url, path):
     deadline = time.time() + DOWNLOAD_DEADLINE
     # Never through a proxy from the environment, never following a redirect.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect)
-    with opener.open(url, timeout=90) as response, open(path, 'wb') as out:
+    request = urllib.request.Request(url, headers={'User-Agent': user_agent(), 'Accept': '*/*'})
+    with opener.open(request, timeout=90) as response, open(path, 'wb') as out:
         length = response.headers.get('Content-Length') or ''
         if length.isdigit() and int(length) > MAX_BYTES: raise ValueError('Input file too large')
         total = 0
@@ -398,11 +419,44 @@ def segment_plan(s, count, width, height):
     if loop and keep: raise ValueError('Invalid loop: with cuts')
     # The crop filter is built (and so the path checked) now; the path is on the segment's own clock.
     follow = follow_crop(s['follow'], width, height) if video and s.get('follow') is not None else None
+    panes = panes_plan(s['panes'], width, height) if video and s.get('panes') is not None else None
+    if follow and panes: raise ValueError('Invalid panes: with a speaker path')
     # Fields that do not apply to the kind are checked above but ignored.
     return {'kind': kind, 'input': index(s.get('input'), count), 'frames': frames, 'fit': mode,
             'motion': motion if kind == 'image' else None, 'trim': trim if video else 0.0,
-            'audio': audio if video else 0.0, 'keep': keep, 'follow': follow, 'transition': transition,
+            'audio': audio if video else 0.0, 'keep': keep, 'follow': follow, 'panes': panes, 'transition': transition,
             'loop': loop and video}
+
+def panes_plan(panes, width, height):
+    """A clip's layout (shared/highlights.ts): 1-2 windows of the picture (x, y, w, h: shares of it) stacked from the
+    top, each scaled to fill the frame's width and its `height` (even pixels); the heights add up to the frame's."""
+    if not isinstance(panes, list) or not 1 <= len(panes) <= MAX_PANES: raise ValueError('Invalid panes')
+    plan, total = [], 0
+    for p in panes:
+        if not isinstance(p, dict): raise ValueError('Invalid pane')
+        x, y, w, h = number(p['x'], 0, 1), number(p['y'], 0, 1), number(p['w'], 0.02, 1), number(p['h'], 0.02, 1)
+        if x + w > 1.0005 or y + h > 1.0005: raise ValueError('Invalid pane: outside the picture')
+        tall = number(p['height'], 16, height)
+        if tall != int(tall) or int(tall) % 2: raise ValueError('Invalid pane height')
+        plan.append({'x': x, 'y': y, 'w': w, 'h': h, 'height': int(tall)})
+        total += int(tall)
+    if total != height: raise ValueError('Invalid panes: heights')
+    return plan
+
+def panes_filter(graph, source, label, panes, width):
+    """Crops each window of the picture `source` (whole even pixels, inside the picture), fills its pane with it and
+    stacks the panes from the top; returns the result's label."""
+    n = len(panes)
+    parts = [f'{label}s{k}' for k in range(n)]
+    if n > 1: graph.append(f'{source}split={n}{"".join(f"[{p}]" for p in parts)}')
+    for k, p in enumerate(panes):
+        crop = (f"crop=w='max(2,trunc(iw*{p['w']:.5f}/2)*2)':h='max(2,trunc(ih*{p['h']:.5f}/2)*2)'"
+                f":x='min(iw-ow,trunc(iw*{p['x']:.5f}))':y='min(ih-oh,trunc(ih*{p['y']:.5f}))'")
+        graph.append(f'{source if n == 1 else f"[{parts[k]}]"}{crop},{cover_filter(width, p["height"])}[{label}p{k}]')
+    if n == 1: return f'[{label}p0]'
+    graph.append(f'{"".join(f"[{label}p{k}]" for k in range(n))}vstack=inputs={n}[{label}]')
+    return f'[{label}]'
+
 
 def transition_plan(t):
     """A segment's transition in: its first frames blend over the last ones of what comes before (xfade), for a whole
@@ -555,7 +609,8 @@ def compose(job, payload, origin):
                 cut = '+'.join(f'gte(t,{a - 0.001:.6f})*lt(t,{b - 0.001:.6f})' for a, b in s['keep'])
                 graph.append(f"{picture}select='{cut}',setpts=N/{FPS}/TB[c{i}]")
                 picture = f'[c{i}]'
-            picture = fit(graph, picture, f'f{i}', s['fit'], width, height, blur)
+            # A clip's layout stacks windows of the picture; anything else is fitted to the frame.
+            picture = panes_filter(graph, picture, f'f{i}', s['panes'], width) if s['panes'] else fit(graph, picture, f'f{i}', s['fit'], width, height, blur)
             # A source shorter than the segment holds its last frame.
             graph.append(f'{picture}format=yuv420p,tpad=stop_mode=clone:stop_duration={length:.3f},trim=end_frame={n},'
                          f'setpts=N/{FPS}/TB[v{i}]')
@@ -755,9 +810,10 @@ def stream_frames(args, size, on_frame, timeout):
     if p.returncode or cancelled(): raise ValueError('Media processing failed')
 
 def face_samples(source, width, height, directory, start=0.0, length=None):
-    """Faces in TRACK_FPS frames a second of [start, start + length), scaled down, as (cx, cy, w, h) shares of the
-    frame; in the same decoding pass FFmpeg notes the hard cuts at full frame rate (scene score on a tiny copy), so the
-    crop can jump exactly there. Times are on the part's own clock."""
+    """Faces in TRACK_FPS frames a second of [start, start + length), scaled down, as (cx, cy, w, h, lips) — the centre
+    and size as shares of the frame, and the normalised mouth and nose patches that show whether the lips move (None when
+    the landmarks fall outside the picture). In the same decoding pass FFmpeg notes the hard cuts at full frame rate
+    (scene score on a tiny copy), so the crop can jump exactly there. Times are on the part's own clock."""
     import cv2, numpy  # only face tracking needs them; the other operations (and their tests) run without
     cv2.setNumThreads(1)
     w, h = TRACK_WIDTH, max(2, round(TRACK_WIDTH * height / width / 2) * 2)
@@ -766,10 +822,26 @@ def face_samples(source, width, height, directory, start=0.0, length=None):
     graph = (f'[0:v:0]split=2[a][b];[a]fps={TRACK_FPS}:start_time=0,scale={w}:{h},format=bgr24[f];'
              f"[b]scale=64:36:flags=fast_bilinear,format=gray,select='gt(scene\\,{CUT_SCORE})',metadata=print:file={cuts_file}[c]")
     samples = []
+    def patch(gray, cx, cy, half_w, half_h):
+        x0, x1, y0, y1 = int(round(cx - half_w)), int(round(cx + half_w)), int(round(cy - half_h)), int(round(cy + half_h))
+        if x0 < 0 or y0 < 0 or x1 > w or y1 > h or x1 - x0 < 4 or y1 - y0 < 3: return None
+        p = cv2.resize(gray[y0:y1, x0:x1], PATCH, interpolation=cv2.INTER_AREA).astype(numpy.float32)
+        spread = float(p.std())
+        return (p - float(p.mean())) / spread if spread > 1 else None
+    def lips(gray, face):
+        # YuNet's landmarks: eyes, nose tip, right and left mouth corners.
+        nx, ny, rx, ry, lx, ly = face[8:14]
+        span = math.hypot(lx - rx, ly - ry)
+        if span < 4: return None
+        mouth = patch(gray, (rx + lx) / 2, (ry + ly) / 2 + 0.15 * span, 0.8 * span, 0.6 * span)
+        nose = patch(gray, nx, ny - 0.2 * span, 0.8 * span, 0.6 * span)
+        return (mouth, nose) if mouth is not None and nose is not None else None
     def detect(data):
         if len(samples) > (TRACK_WINDOW + 10) * TRACK_FPS: raise ValueError('Video too long')
-        _, faces = detector.detect(numpy.frombuffer(data, numpy.uint8).reshape(h, w, 3))
-        samples.append([] if faces is None else [((x + fw / 2) / w, (y + fh / 2) / h, fw / w, fh / h) for x, y, fw, fh, *_ in faces.tolist()])
+        frame = numpy.frombuffer(data, numpy.uint8).reshape(h, w, 3)
+        _, faces = detector.detect(frame)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if faces is not None else None
+        samples.append([] if faces is None else [((f[0] + f[2] / 2) / w, (f[1] + f[3] / 2) / h, f[2] / w, f[3] / h, lips(gray, f)) for f in faces.tolist()])
     window = (['-ss', f'{start:.3f}'] if start else []) + (['-t', f'{length:.3f}'] if length else [])
     stream_frames(['ffmpeg','-nostdin','-v','error','-threads','1','-protocol_whitelist','file,pipe',*window,'-i',source,'-filter_complex',graph,
                    '-filter_threads','1','-map','[f]','-f','rawvideo','pipe:1','-map','[c]','-f','null','-'], w * h * 3, detect, TRACK_DEADLINE)
@@ -778,15 +850,15 @@ def face_samples(source, width, height, directory, start=0.0, length=None):
     except OSError: cuts = []
     return samples, cuts
 
-def main_subject(frames, fps=TRACK_FPS):
-    """Per sample of one shot, the horizontal centre of its main face, or None. A face continues the track it is near
-    (seen within the last 2 s); a track weighs its faces' summed width, so a big and persistent face wins over a
-    passer-by or a face on a poster. At each moment the heaviest track on screen is followed, but the one followed
-    stays until another is twice as heavy (no flicking between two people)."""
+def face_tracks(frames, fps=TRACK_FPS):
+    """The people of one shot: a face continues the track it is near (seen within the last 2 s); a track weighs its
+    faces' summed width, so big and persistent faces count and a passer-by or a face on a poster does not. Each track
+    keeps its centre and lips per sample (`seen`, `lips`) and the samples it was seen in (`times`)."""
     tracks = []
     for i, faces in enumerate(frames):
         taken = set()
-        for cx, cy, w, h in sorted(faces, key=lambda f: -f[2]):
+        for face in sorted(faces, key=lambda f: -f[2]):
+            cx, cy, w, h = face[:4]
             best, distance = None, None
             for k, tr in enumerate(tracks):
                 if k in taken or i - tr['last'] > 2 * fps: continue
@@ -794,22 +866,34 @@ def main_subject(frames, fps=TRACK_FPS):
                 if dx > max(0.06, 0.8 * tr['w']) or dy > max(0.1, 0.8 * tr['h']): continue
                 if distance is None or dx + dy < distance: best, distance = k, dx + dy
             if best is None:
-                tracks.append({'seen': {}, 'weight': 0.0})
+                tracks.append({'seen': {}, 'lips': {}, 'weight': 0.0})
                 best = len(tracks) - 1
             tr = tracks[best]
             taken.add(best)
             tr['seen'][i] = cx
+            tr['lips'][i] = face[4] if len(face) > 4 else None
             tr['weight'] += w
             tr.update(last=i, x=cx, y=cy, w=w, h=h)
     tracks = [t for t in tracks if len(t['seen']) >= 3]
     heaviest = max((t['weight'] for t in tracks), default=0)
     tracks = [t for t in tracks if t['weight'] >= 0.15 * heaviest]
     for t in tracks: t['times'] = sorted(t['seen'])
-    def position(t, i):
-        if i in t['seen']: return t['seen'][i]
-        k = bisect.bisect(t['times'], i)
-        a, b = t['times'][k - 1], t['times'][k]
-        return t['seen'][a] + (t['seen'][b] - t['seen'][a]) * (i - a) / (b - a)
+    return tracks
+
+def position(t, i):
+    """A track's centre at sample i: where it was seen, between sightings in a straight line, held before and after."""
+    if i in t['seen']: return t['seen'][i]
+    times = t['times']
+    if i < times[0]: return t['seen'][times[0]]
+    if i > times[-1]: return t['seen'][times[-1]]
+    k = bisect.bisect(times, i)
+    a, b = times[k - 1], times[k]
+    return t['seen'][a] + (t['seen'][b] - t['seen'][a]) * (i - a) / (b - a)
+
+def main_subject(frames, fps=TRACK_FPS):
+    """Per sample of one shot, the horizontal centre of its main face, or None: the heaviest track on screen is followed,
+    but the one followed stays until another is twice as heavy (no flicking between two people)."""
+    tracks = face_tracks(frames, fps)
     out, current = [], None
     for i in range(len(frames)):
         live = [t for t in tracks if t['times'][0] <= i <= t['times'][-1]]
@@ -817,6 +901,58 @@ def main_subject(frames, fps=TRACK_FPS):
         heavy = max(live, key=lambda t: t['weight'], default=None)
         if heavy is not None and (current is None or heavy['weight'] >= 2 * current['weight']): current = heavy
         out.append(position(current, i) if current else None)
+    return out
+
+def lip_motion(a, b):
+    """How much the lips moved between two samples of one face: the change of the mouth patch beyond the change of the
+    nose patch (head movement and camera noise change both). Made-up faces in tests carry a plain number instead."""
+    if a is None or b is None: return None
+    if isinstance(a, (int, float)): return abs(a - b)
+    (mouth_a, nose_a), (mouth_b, nose_b) = a, b
+    return max(0.0, float(abs(mouth_a - mouth_b).mean()) - float(abs(nose_a - nose_b).mean()))
+
+def speakers(tracks, turns, count, fps=TRACK_FPS):
+    """Per sample of one shot, the index of the track that is talking, or None when that is never clear. `turns` are
+    stretches of speech on the shot's clock as (start, end, speaker): the transcript's speaker label, or -1 without one.
+    Each turn goes to the face on screen whose lips move most during it, clearly more than any other's. A label
+    sticks to the face its clear turns were matched with most, so a turn whose lips are hidden (a hand, a profile)
+    still finds its speaker. Turns shorter than MIN_TURN, unclear ones and silences keep the last speaker, and the crop
+    stays at least MIN_HOLD on someone before it moves on."""
+    motion = []
+    for t in tracks:
+        moved = {}
+        for a, b in zip(t['times'], t['times'][1:]):
+            if b == a + 1:
+                v = lip_motion(t['lips'].get(a), t['lips'].get(b))
+                if v is not None: moved[b] = v
+        motion.append(moved)
+    calls, votes = [], {}
+    for start, end, label in sorted(turns):
+        a, b = max(0, math.floor(start * fps)), min(count, math.ceil(end * fps))
+        if b <= a: continue
+        scores, on_screen = {}, set()
+        for k, t in enumerate(tracks):
+            visible = [i for i in range(a, b) if i in t['seen']]
+            if len(visible) < max(1, 0.4 * (b - a)): continue
+            on_screen.add(k)
+            moves = [motion[k][i] for i in visible if i in motion[k]]
+            if moves: scores[k] = sum(moves) / len(moves)
+        ranked = sorted(scores.items(), key=lambda kv: -kv[1])
+        clear = ranked[0][0] if ranked and ranked[0][1] > 0 and (len(ranked) == 1 or ranked[0][1] >= CLEAR * ranked[1][1]) else None
+        if clear is not None and label >= 0: votes.setdefault(label, {}).setdefault(clear, 0.0); votes[label][clear] += end - start
+        calls.append((a, end - start, label, clear, on_screen))
+    face_of = {label: max(v.items(), key=lambda kv: kv[1])[0] for label, v in votes.items()}
+    switches, current, last = [], None, -10 ** 9
+    for a, length, label, clear, on_screen in calls:
+        pick = face_of[label] if label in face_of and face_of[label] in on_screen else clear
+        if pick is None or pick == current or length < MIN_TURN or (current is not None and a - last < MIN_HOLD * fps): continue
+        switches.append((a, pick))
+        current, last = pick, a
+    if not switches: return None
+    out, k = [], 0
+    for i in range(count):
+        while k + 1 < len(switches) and switches[k + 1][0] <= i: k += 1
+        out.append(switches[k][1])
     return out
 
 def camera(targets, crop, fps=TRACK_FPS):
@@ -850,26 +986,44 @@ def simplify(points, eps):
             stack += [(a, at), (at, b)]
     return [p for p, k in zip(points, keep) if k]
 
-def shot_cameras(samples, cuts, crop, fps):
-    """The camera of each shot between cuts, as (start, [(t, x)]), and whether any shot showed a face."""
+def shot_cameras(samples, cuts, crop, fps, turns=None):
+    """The camera of each shot between cuts, as (start, [(t, x)]), and whether any shot showed a face. With `turns`
+    (speech, see speakers) a shot with several people becomes runs, one per speaker: the crop cuts to whoever is talking
+    (a jump in keyframes) and follows them calmly within their run. Otherwise the main face is followed."""
     bounds, shots, found = [0.0, *cuts, len(samples) / fps + 1], [], False
     def near_cut(t):
         k = bisect.bisect(cuts, t)
         return any(abs(t - c) < 0.15 for c in cuts[max(0, k - 1):k + 1])
+    def smooth(xs):
+        held, filled = next(x for x in xs if x is not None), []
+        for x in xs:  # before the first face: where it appears; after one is lost: where it was last
+            held = held if x is None else x
+            filled.append(held)
+        # A median over 5 samples (±0.5 s) drops single misdetections and keeps real moves sharp.
+        windows = [sorted(filled[max(0, j - 2):j + 3]) for j in range(len(filled))]
+        return camera([w[len(w) // 2] for w in windows], crop, fps)
     for a, b in zip(bounds, bounds[1:]):
         indexes = range(math.ceil(a * fps - 1e-9), min(len(samples), math.ceil(b * fps - 1e-9)))
         if not indexes: continue
         # Samples right at a cut may show either shot (the sampling picks the nearest frame): their faces are left out.
-        xs = main_subject([[] if near_cut(i / fps) else samples[i] for i in indexes], fps)
-        known = [x for x in xs if x is not None]
-        if known:
-            found, held, filled = True, known[0], []
-            for x in xs:  # before the first face: where it appears; after one is lost: where it was last
-                held = held if x is None else x
-                filled.append(held)
-            # A median over 5 samples (±0.5 s) drops single misdetections and keeps real moves sharp.
-            windows = [sorted(filled[max(0, j - 2):j + 3]) for j in range(len(filled))]
-            cams = camera([w[len(w) // 2] for w in windows], crop, fps)
+        frames = [[] if near_cut(i / fps) else samples[i] for i in indexes]
+        first = indexes[0]
+        tracks = face_tracks(frames, fps) if turns else []
+        talking = speakers(tracks, [(s - first / fps, e - first / fps, label) for s, e, label in turns if e > first / fps and s < (indexes[-1] + 1) / fps], len(frames), fps) if len(tracks) > 1 else None
+        if talking:
+            found, k = True, 0
+            while k < len(frames):
+                end = k
+                while end < len(frames) and talking[end] == talking[k]: end += 1
+                cams = smooth([position(tracks[talking[k]], j) for j in range(k, end)])
+                begin = max(a, (first + k) / fps)
+                shots.append((begin, [(begin, cams[0])] + [((first + j) / fps, c) for j, c in zip(range(k, end), cams) if (first + j) / fps > begin]))
+                k = end
+            continue
+        xs = main_subject(frames, fps)
+        if any(x is not None for x in xs):
+            found = True
+            cams = smooth(xs)
         else:
             cams = [0.5] * len(indexes)  # a shot without a face stays centred
         shots.append((a, [(a, cams[0])] + [(i / fps, c) for i, c in zip(indexes, cams) if i / fps > a]))
@@ -890,32 +1044,69 @@ def keyframes(shots, eps):
     if len(points) > 1 and points[-1][1] == points[-2][1]: points.pop()
     return points, jumps
 
-def track_path(samples, cuts, aspect, fps=TRACK_FPS):
+def track_path(samples, cuts, aspect, fps=TRACK_FPS, turns=None):
     """The crop path of shared/track.ts from face detections, without OpenCV (tests feed it made-up faces).
-    samples[i]: faces at i / fps seconds as (cx, cy, w, h) shares of the frame; cuts: hard cuts (seconds);
-    aspect: width / height of the video as shown. No face anywhere: no points (the picture stays centred)."""
+    samples[i]: faces at i / fps seconds as (cx, cy, w, h[, lips]) shares of the frame; cuts: hard cuts (seconds);
+    aspect: width / height of the video as shown; turns: speech as (start, end, speaker) seconds, to follow whoever
+    is talking. No face anywhere: no points (the picture stays centred)."""
     crop = min(1.0, NARROWEST / aspect)
     if crop >= 1 or not any(samples): return {'v': 1, 'points': []}
     end = len(samples) / fps
     # Floored to 0.01 s: the first frame of the new shot is at or after the jump, the last of the old one before it.
     cuts = sorted({math.floor(float(c) * 100) / 100 for c in cuts if 0.2 < float(c) < end - 0.1})
-    shots, found = shot_cameras(samples, cuts, crop, fps)
+    shots, found = shot_cameras(samples, cuts, crop, fps, turns)
     if not found: return {'v': 1, 'points': []}
     for eps in (0.004, 0.008, 0.016, 0.03, 0.06):
         points, jumps = keyframes(shots, eps)
         if len(points) <= MAX_TRACK_POINTS: return {'v': 1, 'points': points}
     # Too many cuts for the point budget: only the cuts that move the crop most stay cuts.
     kept = sorted(start for _, start in sorted(zip(jumps, [s for s, _ in shots[1:]]), reverse=True)[:(MAX_TRACK_POINTS - 2) // 4])
-    return {'v': 1, 'points': keyframes(shot_cameras(samples, kept, crop, fps)[0], 0.06)[0][:MAX_TRACK_POINTS]}
+    return {'v': 1, 'points': keyframes(shot_cameras(samples, kept, crop, fps, turns)[0], 0.06)[0][:MAX_TRACK_POINTS]}
+
+def face_pair(samples):
+    """The two people seen most over a part of a video, as [[x, y], [x, y]] centres of their faces (shares of the
+    picture), the left one first; None when fewer than two people were found. A face joins the group whose centre is
+    nearest across the picture (within 0.15 of its width); a group weighs its faces' summed width, so the people on
+    screen longest and largest win. The second must weigh at least a fifth of the first and sit apart from it."""
+    groups = []
+    for faces in samples:
+        for cx, cy, w, *_ in faces:
+            near = min(groups, key=lambda g: abs(g['x'] - cx), default=None)
+            if near is not None and abs(near['x'] - cx) < 0.15:
+                total = near['weight'] + w
+                near.update(x=(near['x'] * near['weight'] + cx * w) / total, y=(near['y'] * near['weight'] + cy * w) / total, weight=total)
+            else:
+                groups.append({'x': cx, 'y': cy, 'weight': w})
+    groups.sort(key=lambda g: -g['weight'])
+    if len(groups) < 2 or groups[1]['weight'] < 0.2 * groups[0]['weight']: return None
+    left, right = sorted(groups[:2], key=lambda g: g['x'])
+    if right['x'] - left['x'] < 0.2: return None
+    return [[round(min(1, max(0, g['x'])), 3), round(min(1, max(0, g['y'])), 3)] for g in (left, right)]
+
+def turns_plan(turns):
+    """Speech on the video's clock as [start, end, speaker] (speaker: the transcript's label, or -1), at most
+    MAX_TURNS."""
+    if turns is None: return []
+    if not isinstance(turns, list) or len(turns) > MAX_TURNS: raise ValueError('Invalid turns')
+    out = []
+    for turn in turns:
+        if not isinstance(turn, list) or len(turn) != 3: raise ValueError('Invalid turn')
+        a, b = number(turn[0], 0, LONG_LENGTH + 60), number(turn[1], 0, LONG_LENGTH + 60)
+        label = turn[2]
+        if b <= a or isinstance(label, bool) or not isinstance(label, int) or not -1 <= label <= 64: raise ValueError('Invalid turn')
+        out.append((a, b, label))
+    return out
 
 def track_plan(payload, origin):
     """Validates a track payload completely, before anything is downloaded."""
     return {'url': input_url(payload.get('url'), origin), 'start': number(payload['start'], 0, LONG_LENGTH),
-            'length': number(payload['length'], 1, TRACK_WINDOW)}
+            'length': number(payload['length'], 1, TRACK_WINDOW), 'turns': turns_plan(payload.get('turns'))}
 
 def track(job, payload, origin):
-    """Where the main face is in a part of a video (the path of shared/track.ts, on the video's own clock). No file
-    comes back: the path is in the job's status. A video no wider than 9:16 is never cropped, so it needs none."""
+    """Where the person talking is in a part of a video (the path of shared/track.ts, on the video's own clock: with
+    `turns` of speech the crop cuts to whoever talks, else it follows the main face), and the two people seen most in it
+    (`faces`, for the two-speaker layout). No file comes back: both are in the job's status. A video no wider than 9:16
+    is never cropped, so it needs neither."""
     plan = checked(track_plan, payload, origin)
     source = os.path.join(job['dir'], 'input0')
     download(plan['url'], source)
@@ -926,14 +1117,60 @@ def track(job, payload, origin):
     path = {'v': 1, 'points': []}
     if media['width'] / media['height'] > NARROWEST * 1.01:
         samples, cuts = face_samples(source, media['width'], media['height'], job['dir'], start, length)
-        path = track_path(samples, cuts, media['width'] / media['height'])
+        turns = [(a - start, b - start, label) for a, b, label in plan['turns'] if b > start and a < start + length]
+        path = track_path(samples, cuts, media['width'] / media['height'], turns=turns)
         # From the part's clock to the video's.
         path['points'] = [[round(t + start, 2), x] for t, x in path['points']]
+        pair = face_pair(samples)
+        if pair: path['faces'] = pair
     job.update(status='completed', duration=round(length, 3), files=0, outputs=[], track=path)
+
+def youtube_plan(payload):
+    """Validates a youtube payload: the video's ID (11 characters), its longest length and largest size."""
+    video = payload.get('video')
+    if not isinstance(video, str) or not YOUTUBE_VIDEO.fullmatch(video): raise ValueError('Invalid video')
+    return {'video': video, 'maxSeconds': number(payload.get('maxSeconds'), 20, LONG_LENGTH), 'maxBytes': int(number(payload.get('maxBytes'), 1, MAX_BYTES))}
+
+def youtube_failure(err):
+    """Why YouTube refused a download, from yt-dlp's error output, as one of the reasons failure_code knows."""
+    m = err.lower()
+    # Bot checks, rate limits and refused media requests (YouTube answers a download it doesn't trust with 403).
+    if 'not a bot' in m or 'http error 429' in m or 'http error 403' in m or 'too many requests' in m or 'rate-limit' in m or 'rate limit' in m:
+        return 'YouTube blocked'
+    if 'members' in m or 'confirm your age' in m or 'age-restricted' in m or 'inappropriate' in m or 'private video' in m or 'sign in' in m:
+        return 'YouTube restricted'
+    if 'unavailable' in m or 'removed' in m or 'not available' in m or 'terminated' in m: return 'YouTube unavailable'
+    return 'YouTube download failed'
+
+def youtube(job, payload, origin):
+    """Downloads one YouTube video as an MP4 of at most 1080p (H.264 and AAC when YouTube has them) with yt-dlp, which
+    asks YouTube by the video's ID only (the Worker checked it is on the person's own channel). No proxy, cookies or
+    account: when YouTube refuses the download, the job fails with the reason."""
+    plan = checked(youtube_plan, payload)
+    out = command([
+        'yt-dlp', '--ignore-config', '--no-playlist', '--no-cache-dir', '--no-progress', '--no-mtime', '--no-colors',
+        '--socket-timeout', '30', '--retries', '3', '--fragment-retries', '5',
+        '--match-filter', f'duration <= {int(plan["maxSeconds"])} & live_status != is_live & live_status != is_upcoming',
+        '--max-filesize', str(plan['maxBytes']),
+        '-f', 'bv*[height<=1080][vcodec^=avc1]+ba[acodec^=mp4a]/bv*[height<=1080]+ba/b[height<=1080]/b',
+        '--merge-output-format', 'mp4', '--remux-video', 'mp4',
+        '-P', job['dir'], '-o', 'video.%(ext)s', '--', f'https://www.youtube.com/watch?v={plan["video"]}',
+    ], timeout=YOUTUBE_DEADLINE, explain=youtube_failure).decode('utf-8', 'replace').lower()
+    path = os.path.join(job['dir'], 'video.mp4')
+    if not os.path.isfile(path):
+        # yt-dlp skips (without failing) a video over the size or one its filter refuses.
+        if 'max-filesize' in out: raise ValueError('Input file too large')
+        if 'does not pass filter' in out: raise ValueError('Media too long')
+        raise ValueError('YouTube download failed')
+    if os.path.getsize(path) > plan['maxBytes']: raise ValueError('Input file too large')
+    job.update(status='completed', files=1, outputs=[path])
 
 def failure_code(e):
     """A short reason the Worker can explain to the user (never the raw message)."""
     m = str(e).lower()
+    youtube_codes = {'youtube blocked': 'YOUTUBE_BLOCKED', 'youtube restricted': 'YOUTUBE_RESTRICTED', 'youtube unavailable': 'YOUTUBE_UNAVAILABLE',
+                     'youtube download failed': 'YOUTUBE_FAILED'}
+    if m in youtube_codes: return youtube_codes[m]
     if isinstance(e, (subprocess.TimeoutExpired, TimeoutError)) or 'timed out' in m: return 'MEDIA_TIMEOUT'
     if isinstance(e, (OSError, HTTPException)): return 'MEDIA_INPUT'  # urllib errors, refused connections, broken reads
     if 'invalid' in m: return 'MEDIA_INVALID'
@@ -953,6 +1190,7 @@ def process(job, payload, id=None):
         elif operation == 'stills': stills(job, payload, origin)
         elif operation == 'inspect': inspect(job, payload, origin)
         elif operation == 'track': track(job, payload, origin)
+        elif operation == 'youtube': youtube(job, payload, origin)
         else: raise ValueError('Invalid operation')
     except Exception as e:
         job.update(status='failed', error=failure_code(e))

@@ -9,8 +9,9 @@ import { hit, rate, sha } from "./security";
 import { spendSpeech, speechView, storedTranscript } from "./speech";
 import { forcedAlignment } from "./providers/elevenlabs";
 import { ProviderError } from "./providers/http";
-import { narrationCurrent, specSchema, type StorySpec } from "../shared/formats";
-import { voices } from "../shared/voices";
+import { narrationCurrent, storySpec, type StorySpec } from "../shared/formats";
+import { voiceIdSchema } from "../shared/voices";
+import { offeredVoice, voiceUsable } from "./voices";
 import { SPEECH_CHARS_PER_SECOND } from "../shared/credits";
 import { languageCodes, languageName, type LanguageCode } from "../shared/series";
 import { templateIds, templateOf, type TemplateId, type VideoKind } from "../shared/templates";
@@ -117,7 +118,7 @@ export type WriteRequest = {
   /** Titles of recent videos of the series, never to be repeated. */
   recent: string[];
   /** Music the model may pick from (by code). */
-  music?: { ref: string; name: string; tags?: string }[];
+  music?: { ref: string; name: string; tags?: string; description?: string }[];
 };
 /** How each video type is written, on top of the template's brief. */
 const kindRules: Record<Exclude<VideoKind, "script">, (r: WriteRequest) => string[]> = {
@@ -173,7 +174,7 @@ export async function writeVideo(env: Env, r: WriteRequest): Promise<StoryConcep
     template: { name: t.name, brief: t.brief },
     ownerRequest: r.prompt || "",
     ...(r.subject && { subject: r.subject }),
-    music: (r.music || []).map((m) => ({ code: m.ref, name: m.name, tags: m.tags })),
+    music: (r.music || []).map((m) => ({ code: m.ref, name: m.name, tags: m.tags, ...(m.description && { description: m.description }) })),
     recentTitles: r.recent.slice(0, 40),
   };
   return acceptStory(await aiJson(env, instructions, input, storyJson, Math.min(12000, 1500 + count * 220), 90000));
@@ -190,7 +191,7 @@ export type SpecChoices = {
 export function conceptToSpec(k: StoryConcept, c: SpecChoices): StorySpec | null {
   const hashtags = [...(c.hashtags || []), ...k.hashtags].map((h) => h.replace(/[^\p{L}\p{N}_#]/gu, "")).filter((h) => /^#?[\p{L}\p{N}_]{1,60}$/u.test(h)).slice(0, 15);
   const animate = Math.min(c.animate || 0, k.scenes.length);
-  const parsed = specSchema.safeParse({
+  const parsed = storySpec.safeParse({
     format: "story", kind: c.kind, language: c.language,
     narration: { kind: "voice", voiceId: c.voiceId },
     scenes: k.scenes.map((s, i) => ({ text: s.text, description: s.picture, keys: s.keys, source: !c.backdropId && i < animate ? "clip" : "image" })),
@@ -272,9 +273,10 @@ story.post("/plan", async (c) => {
 /** Library music for the writer to choose from: of a mood (any when none has it), numbered by code. */
 export async function musicCatalog(env: Env, mood: string) {
   if (mood === "none") return [];
-  const all = (await env.DB.prepare("SELECT id,name,tags FROM library_items WHERE kind='music' AND active=1 ORDER BY created_at DESC LIMIT 60").all<{ id: string; name: string; tags: string }>()).results;
+  const all = (await env.DB.prepare("SELECT id,name,tags,description FROM library_items WHERE kind='music' AND active=1 ORDER BY created_at DESC LIMIT 60")
+    .all<{ id: string; name: string; tags: string; description: string }>()).results;
   const fitting = mood === "auto" ? all : all.filter((m) => m.tags.toLowerCase().split(/[,\s]+/).includes(mood));
-  return (fitting.length ? fitting : all).slice(0, 30).map((m, i) => ({ ref: `music${i + 1}`, id: m.id, name: m.name, tags: m.tags }));
+  return (fitting.length ? fitting : all).slice(0, 30).map((m, i) => ({ ref: `music${i + 1}`, id: m.id, name: m.name, tags: m.tags, description: m.description.slice(0, 160) }));
 }
 /** A background clip for storytime: the chosen one, else a random active library clip (null: none in the library). */
 export async function backdropFor(env: Env, chosen: string | null | undefined) {
@@ -292,7 +294,7 @@ const draftSchema = z.object({
   mashup: z.object({ animal: z.string().trim().max(60).default(""), object: z.string().trim().max(60).default("") }).optional(),
   seconds: z.number().int().min(15).max(160).default(60),
   language: z.enum(languageCodes as [LanguageCode, ...LanguageCode[]]).default("en"),
-  voiceId: z.enum(voices.map((v) => v.id) as [string, ...string[]]).optional(),
+  voiceId: voiceIdSchema.optional(),
   style: styleEnum.optional(),
   subject: z.string().trim().max(300).default(""),
   captions: z.object({ enabled: z.boolean(), style: z.enum(captionStyles) }).optional(),
@@ -307,7 +309,9 @@ export type DraftRequest = z.input<typeof draftSchema>;
 export async function draftVideo(env: Env, input: DraftRequest, recent: string[] = []): Promise<StorySpec> {
   const d = draftSchema.parse(input);
   const t = templateOf(d.template);
-  const style = d.style || t.style, voiceId = d.voiceId || t.voice;
+  // A voice asked for must be offered; the template's own is replaced by the default voice when it was hidden.
+  if (d.voiceId && !(await voiceUsable(env, d.voiceId))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
+  const style = d.style || t.style, voiceId = d.voiceId || (await offeredVoice(env, t.voice));
   const catalog = await musicCatalog(env, d.music === "auto" ? t.music : d.music);
   const backdropId = t.kind === "backdrop" ? await backdropFor(env, null) : null;
   let concept: StoryConcept | null;

@@ -10,8 +10,8 @@
   // Switches, secrets and anything private (ADMIN_EMAILS) stay in the dashboard. See docs/DEPLOYMENT.md.
   "vars": {
     "SITE_URL": "https://hookstreak.app",
-    // Mail goes out from Hookstreak's verified sender on hookstreak.com until hookstreak.app has Email Sending set up.
-    "CONTACT_EMAIL": "hello@hookstreak.com",
+    // hookstreak.app has Email Sending (and Email Routing for replies) set up in Cloudflare.
+    "CONTACT_EMAIL": "hello@hookstreak.app",
   },
   // hookstreak.app is the public address; www redirects there (canonicalUrl in server/config.ts). Both were custom
   // domains of the ad-app Worker (hookstreak.com): deploy ad-app without them first, a domain belongs to one Worker.
@@ -26,7 +26,8 @@
     "run_worker_first": true,
   },
   "ai": { "binding": "AI" },
-  "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["hello@hookstreak.com"] }],
+  // hello@hookstreak.com stays allowed while a dashboard EMAIL_FROM may still name it.
+  "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["hello@hookstreak.app", "hello@hookstreak.com"] }],
   "d1_databases": [
     {
       "binding": "DB",
@@ -37,8 +38,9 @@
     },
   ],
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "faceless-media" }],
+  // Three renderers and one container that only downloads YouTube videos (imports from people's own channels).
   "containers": [
-    { "class_name": "MediaRenderer", "image": "./renderer/Dockerfile", "max_instances": 3, "instance_type": "standard-2" },
+    { "class_name": "MediaRenderer", "image": "./renderer/Dockerfile", "max_instances": 4, "instance_type": "standard-2" },
   ],
   "durable_objects": { "bindings": [{ "name": "MEDIA_RENDERER", "class_name": "MediaRenderer" }] },
   "migrations": [{ "tag": "renderer-v1", "new_sqlite_classes": ["MediaRenderer"] }],

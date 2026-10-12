@@ -2,7 +2,7 @@ import { z } from "zod";
 import { captionStyles, type CaptionStyle } from "./captions";
 import { scheduleSchema } from "./schedule";
 import { storyStyleIds, type StoryStyle } from "./story";
-import { voices } from "./voices";
+import { FALLBACK_VOICE, voiceIdSchema } from "./voices";
 import { videoCredits } from "./credits";
 import { templates, type TemplateId } from "./templates";
 
@@ -31,12 +31,12 @@ export const episodeLengths = [30, 45, 60, 90] as const;
 export type EpisodeLength = (typeof episodeLengths)[number];
 export const lengthName = (s: number) => (s < 60 ? `${s} seconds` : s === 60 ? "1 minute" : `${s / 60} minutes`.replace("1.5 minutes", "1½ minutes"));
 
-const voiceIds = voices.map((v) => v.id) as [string, ...string[]];
 export const seriesSettingsSchema = z.object({
   /** The owner's topic and direction (required for "Your own topic", optional extra guidance for the others). */
   prompt: z.string().trim().max(600).default(""),
   language: z.enum(languageCodes as [LanguageCode, ...LanguageCode[]]).default("en"),
-  voiceId: z.enum(voiceIds).default("george"),
+  /** One of the voices offered (server/voices.ts checks it is, or that the series already had it). */
+  voiceId: voiceIdSchema.default(FALLBACK_VOICE),
   style: z.enum(storyStyleIds as [StoryStyle, ...StoryStyle[]]).default("doodle"),
   seconds: z.union(episodeLengths.map((n) => z.literal(n)) as unknown as [z.ZodLiteral<30>, z.ZodLiteral<45>, z.ZodLiteral<60>, z.ZodLiteral<90>]).default(45),
   /** A recurring character described once and drawn the same way in every picture (empty: the writer decides). */

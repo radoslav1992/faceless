@@ -13,19 +13,27 @@ import { forcedAlignment, speak } from "./providers/elevenlabs";
 import { releaseRender, renderFailures, renderFile, renderStatus, submitRender } from "./renderer";
 import { planRender, type Media, type Plan, type PlanContext } from "./render-plan";
 import { failAsset } from "./media";
-import { claimSpeech, mayHaveSpeech, transcribe } from "./speech";
+import { claimSpeech, mayHaveSpeech, storedTranscript, transcribe } from "./speech";
+import { momentsAfterSpeech } from "./highlights";
+import { downloadImport, importFailure } from "./imports";
+import { storeYoutube, youtubeJob } from "./youtube-import";
 import { narrationContext } from "./story";
 import { runEpisode, videoReady, videoFailed } from "./series";
-import { SPEECH_MAX_SECONDS } from "../shared/speech";
-import { narrationCurrent, pendingMedia, referencedAssets, referencedLibrary, specSchema, type PendingMedia, type Spec, type StorySpec } from "../shared/formats";
+import { LONG_VIDEO_SECONDS, SPEECH_MAX_SECONDS, speechTurns } from "../shared/speech";
+import {
+  isHighlight, narrationCurrent, pendingMedia, referencedAssets, referencedLibrary, specSchema, trackKey, type HighlightSpec, type PendingMedia, type Spec, type StorySpec,
+} from "../shared/formats";
+import { trackSchema, type Track } from "../shared/track";
 import { narrationKey, storyScript, textWords } from "../shared/story";
 import { PRODUCT } from "../shared/brand";
 import type { RenderPayload, RenderStatus } from "../shared/render";
 
-// A run makes a video ready: the AI pictures and clips it asks for, its AI voice, then the render (the video and its
-// cover). Paid provider calls are made once: a claim is stored before each call and its ticket right after, so a
-// retried step polls the existing job instead of paying again; a claim without a ticket (the answer was lost) fails
-// the run and refunds the credits. The same workflow checks uploads (`inspectId`) and finds the speech in them.
+// A run makes a video ready: the AI pictures and clips it asks for, its AI voice (a clip of a long video: where its
+// people are), then the render (the video and its cover). A run of kind "speech" transcribes a long video for credits.
+// Paid provider calls are made once: a claim is stored before each call and its ticket right after, so a retried step
+// polls the existing job instead of paying again; a claim without a ticket (the answer was lost) fails the run and
+// refunds the credits. The same workflow checks uploads (`inspectId`; videos imported from a link are downloaded first,
+// `importId`) and finds the speech in them, and the moments for clips asked for before it was found.
 
 type RunState = {
   token?: string;
@@ -76,12 +84,15 @@ export async function failRun(e: Env, id: string, code = "INTERNAL") {
 
 const once = { retries: { limit: 0, delay: "1 second" as const }, timeout: "10 minutes" as const };
 const safe = { retries: { limit: 2, delay: "10 seconds" as const }, timeout: "5 minutes" as const };
+/** Finding moments reads a long transcript in parallel parts (a minute or two); one more try if it fails outright. */
+const momentsStep = { retries: { limit: 1, delay: "30 seconds" as const }, timeout: "6 minutes" as const };
 
-type Job = { runId?: string; inspectId?: string; episode?: { seriesId: string; slot: number; first?: boolean } };
+type Job = { runId?: string; inspectId?: string; importId?: string; episode?: { seriesId: string; slot: number; first?: boolean } };
 export class ContentGeneration extends WorkflowEntrypoint<Env, Job> {
   async run(event: WorkflowEvent<Job>, step: WorkflowStep) {
     const e = withDefaults(this.env);
     if (event.payload.inspectId) return inspectUpload(e, step, event.payload.inspectId);
+    if (event.payload.importId) return importVideo(e, step, event.payload.importId);
     // A series' episode: written (the text model, slow) and created once; the video's own run makes it.
     if (event.payload.episode) {
       const { seriesId, slot } = event.payload.episode;
@@ -97,17 +108,20 @@ export class ContentGeneration extends WorkflowEntrypoint<Env, Job> {
         ...(r.video_id ? [e.DB.prepare("UPDATE videos SET render_status='running',updated_at=? WHERE id=? AND render_status='queued'").bind(now(), r.video_id)] : []),
       ]);
       await patchState(e, id, (s) => { s.token ||= token(); s.jobs ||= { compose: uid() }; });
-      return { id: r.id as string, user_id: r.user_id as string, video_id: r.video_id as string, payload: json<any>(r.payload, {}) };
+      return { id: r.id as string, user_id: r.user_id as string, video_id: r.video_id as string, kind: r.kind as string, payload: json<any>(r.payload, {}) };
     });
     if (!run) return;
     const phase = (value: string) => e.DB.prepare("UPDATE runs SET phase=?,updated_at=? WHERE id=?").bind(value, now(), id).run();
     try {
-      await makeVideo(e, step, run, phase);
+      if (run.kind === "speech") await findSpeech(e, step, String(run.payload.assetId), true);
+      else await makeVideo(e, step, run, phase);
       await step.do("complete", async () => {
         await e.DB.prepare("UPDATE runs SET status='completed',phase='done',updated_at=? WHERE id=? AND status='running'").bind(now(), id).run();
       });
+      // The clips asked for once the speech was found (free; never a reason to fail the paid transcription).
+      if (run.kind === "speech") await step.do("moments", momentsStep, () => momentsAfterSpeech(e, String(run.payload.assetId)));
       // Scheduling on the series' channels and the "it's ready" e-mail: never a reason to fail the made video.
-      await step.do("ready", safe, () => videoReady(e, run.video_id));
+      else await step.do("ready", safe, () => videoReady(e, run.video_id));
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       const code = /^[A-Z][A-Z_]{2,40}$/.test(message) ? message : "INTERNAL";
@@ -122,7 +136,7 @@ export class ContentGeneration extends WorkflowEntrypoint<Env, Job> {
 }
 
 type Phase = (value: string) => Promise<unknown>;
-type RunInfo = { id: string; user_id: string; video_id: string; payload: any };
+type RunInfo = { id: string; user_id: string; video_id: string; kind: string; payload: any };
 
 /**
  * One AI picture or clip, paid once; returns the stored asset's ID. A clip `from` a picture gets that picture's
@@ -192,6 +206,11 @@ async function loadSpec(e: Env, videoId: string): Promise<Spec> {
 async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase) {
   const videoId = run.video_id;
   const first = await step.do("spec", () => loadSpec(e, videoId));
+  // A clip of a long video: where its people are (once per moment), then the render.
+  if (isHighlight(first)) {
+    if (needsTracking(first)) await trackMoment(e, step, run, first, phase);
+    return renderAndSave(e, step, run, phase);
+  }
   // AI pictures and clips the video asks for (clips are made from their pictures, made first).
   const pending = pendingMedia(first);
   for (let i = 0; i < pending.length; i++) {
@@ -205,7 +224,12 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
   }
   // The AI voice, after the pictures (a refused picture stops the run before the voice is paid for).
   if (first.narration.kind === "voice" && !narrationCurrent(first)) await makeNarration(e, step, run, first, phase);
-  // The render.
+  await renderAndSave(e, step, run, phase);
+}
+
+/** The render of the video's final spec, then its files saved and the ones it no longer uses deleted. */
+async function renderAndSave(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase) {
+  const videoId = run.video_id;
   const spec = await step.do("spec-final", () => loadSpec(e, videoId));
   const ctx = await step.do("resolve", () => resolveContext(e, run, spec));
   const plan = planRender(spec, ctx);
@@ -231,7 +255,7 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
     const cover = (output.files || 1) > 1 ? await store("cover", 1, "image/jpeg", "cover", "Cover") : null;
     // Files of earlier versions of this video that the new one no longer uses are deleted (R2 cleanup follows).
     const current = await loadSpec(e, videoId);
-    const keep = new Set([video, cover, ...referencedAssets(current), current.generated?.voiceAssetId].filter(Boolean) as string[]);
+    const keep = new Set([video, cover, ...referencedAssets(current), isHighlight(current) ? null : current.generated?.voiceAssetId].filter(Boolean) as string[]);
     const owned = (await e.DB.prepare("SELECT id FROM media_assets WHERE video_id=?").bind(videoId).all<{ id: string }>()).results;
     const stale = owned.map((r) => r.id).filter((x) => !keep.has(x));
     await e.DB.batch([
@@ -244,6 +268,47 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
     const s = await readState(e, run.id);
     await releaseRender(e, s.slots!.compose, s.jobs!.compose);
   });
+}
+
+/** Whether a clip's layout needs to know where its people are, and they were not measured for its moment yet. */
+const needsTracking = (spec: HighlightSpec) =>
+  (spec.layout.kind === "follow" || (spec.layout.kind === "split" && spec.layout.auto)) && spec.tracked?.key !== trackKey(spec);
+/**
+ * Where a clip's people are in its moment: the renderer follows whoever is talking (the path of "Speaker focus": the
+ * transcript says when someone speaks, the lips say who) and finds the two people seen most (for "Two speakers"), for
+ * free. Kept with the clip (`tracked`); a failure only leaves the picture centred (and the speakers where the layout
+ * put them), and the next render tries again.
+ */
+async function trackMoment(e: Env, step: WorkflowStep, run: RunInfo, spec: HighlightSpec, phase: Phase) {
+  const source = await step.do("track-source", async () =>
+    e.DB.prepare("SELECT object_key,width,height,duration FROM media_assets WHERE id=? AND user_id=? AND status='ready'").bind(spec.source.assetId, run.user_id).first<any>());
+  if (!source) throw new Error("MEDIA_INPUT");
+  let track: Track | null = { v: 1, points: [] };
+  // A video no wider than the 9:16 frame is never cropped: there is nobody to follow.
+  if (source.width > (source.height * 9) / 16 * 1.01) {
+    const payload = await step.do("track-payload", async (): Promise<RenderPayload> => {
+      const start = Math.min(spec.source.start, Math.max(0, source.duration - 1)), length = Math.max(1, Math.min(spec.source.end, source.duration) - start);
+      // Who talks when in the moment (speakers told apart by the transcription, or just when someone talks): the crop
+      // cuts to the face whose lips move with it.
+      const meta = await e.DB.prepare("SELECT meta FROM media_assets WHERE id=? AND user_id=?").bind(spec.source.assetId, run.user_id).first<{ meta: string | null }>();
+      const turns = speechTurns(storedTranscript(meta?.meta ?? null, start, start + length), start, start + length);
+      return { id: uid(), operation: "track", url: await inputUrl(e, run.id, source.object_key), start, length, ...(turns.length && { turns }) };
+    });
+    try {
+      await phase("tracking");
+      const { slot, result } = await rendererJob(e, step, "track", payload, 150, "8 seconds");
+      await step.do("track-release", () => releaseRender(e, slot, payload.id));
+      const parsed = trackSchema.safeParse(result.track);
+      track = parsed.success ? parsed.data : null;
+    } catch (error) {
+      console.warn("Speaker not tracked", { runId: run.id, code: error instanceof Error && /^[A-Z_]{3,40}$/.test(error.message) ? error.message : "INTERNAL" });
+      track = null;
+    }
+  }
+  if (track) {
+    const measured = track;
+    await step.do("track-apply", () => updateSpec(e, run.video_id, (s) => { s.tracked = { key: trackKey(spec), track: measured }; }));
+  }
 }
 
 /** The capability link of the picture a clip is made from: the asset in field `from` of the same scene. */
@@ -301,17 +366,24 @@ async function makeNarration(e: Env, step: WorkflowStep, run: RunInfo, spec: Sto
 async function resolveContext(e: Env, run: RunInfo, spec: Spec): Promise<PlanContext> {
   const media: Record<string, Media> = {};
   const assets = referencedAssets(spec);
+  // A clip's video brings the words said in its moment (captions and cuts) — only those: a long video's whole
+  // transcript would not fit in a step's result.
+  const moment = isHighlight(spec) ? spec.source : null;
   if (assets.length)
-    for (const a of (await e.DB.prepare(`SELECT id,object_key,mime,duration,width,height,kind FROM media_assets WHERE user_id=? AND status='ready' AND id IN (${assets.map(() => "?").join(",")})`)
+    for (const a of (await e.DB.prepare(`SELECT id,object_key,mime,duration,width,height,kind,meta FROM media_assets WHERE user_id=? AND status='ready' AND id IN (${assets.map(() => "?").join(",")})`)
       .bind(run.user_id, ...assets).all<any>()).results)
-      media[a.id] = { key: a.object_key, kind: a.mime.split("/")[0], duration: a.duration, width: a.width, height: a.height, ai: ["ai_image", "ai_clip"].includes(a.kind) };
+      media[a.id] = {
+        key: a.object_key, kind: a.mime.split("/")[0], duration: a.duration, width: a.width, height: a.height, ai: ["ai_image", "ai_clip"].includes(a.kind),
+        ...(moment && moment.assetId === a.id && { words: storedTranscript(a.meta, Math.max(0, moment.start - 2), moment.end + 2)?.words || [] }),
+      };
   const items = referencedLibrary(spec);
   if (items.length)
-    for (const l of (await e.DB.prepare(`SELECT id,object_key,mime,duration FROM library_items WHERE id IN (${items.map(() => "?").join(",")})`).bind(...items).all<any>()).results)
-      media[l.id] = { key: l.object_key, kind: l.mime.split("/")[0], duration: l.duration };
+    for (const l of (await e.DB.prepare(`SELECT id,object_key,mime,duration,ai FROM library_items WHERE id IN (${items.map(() => "?").join(",")})`).bind(...items).all<any>()).results)
+      // A library item made with AI is disclosed like the owner's AI pictures.
+      media[l.id] = { key: l.object_key, kind: l.mime.split("/")[0], duration: l.duration, ai: !!l.ai };
   for (const id of [...assets, ...items]) if (!media[id]) throw new Error("MEDIA_INPUT");
   // Free-trial videos carry a small mark with the product's name.
-  return { media, narration: await narrationContext(e, run.user_id, spec), watermark: run.payload.watermark ? PRODUCT.name : "" };
+  return { media, narration: isHighlight(spec) ? undefined : await narrationContext(e, run.user_id, spec), watermark: run.payload.watermark ? PRODUCT.name : "" };
 }
 
 /** Submits the render (to a free container), waits for it and returns its final status. */
@@ -343,7 +415,7 @@ async function renderJob(e: Env, step: WorkflowStep, run: RunInfo, part: Plan["c
 }
 
 /** Waits for a renderer job (on a free container) and returns its final status and the slot that holds it. */
-async function rendererJob(e: Env, step: WorkflowStep, name: string, payload: RenderPayload, rounds: number, wait: "4 seconds" | "8 seconds") {
+async function rendererJob(e: Env, step: WorkflowStep, name: string, payload: RenderPayload, rounds: number, wait: "4 seconds" | "8 seconds" | "15 seconds") {
   let slot: number | null = null, result: RenderStatus | null = null;
   for (let i = 0; i < rounds && !result; i++) {
     const r = await step.do(`${name}-${i}`, { retries: { limit: 2, delay: "10 seconds" }, timeout: "2 minutes" }, async () => {
@@ -372,7 +444,9 @@ async function inspectUpload(e: Env, step: WorkflowStep, assetId: string) {
   if (!asset) return;
   if (asset.status === "ready") return findSpeech(e, step, asset.id);
   const meta = json<any>(asset.meta, {});
-  const payload: RenderPayload = { id: asset.id, operation: "inspect", url: `${siteUrl(e)}/api/upload-inputs/${asset.id}?token=${meta.token}`, maxSeconds: SPEECH_MAX_SECONDS };
+  // Videos as long as the plan allowed when they were uploaded (long videos on paid plans), tracks up to 10 minutes.
+  const longest = asset.mime.startsWith("video/") && Number(meta.maxSeconds) > SPEECH_MAX_SECONDS ? Math.min(Number(meta.maxSeconds), LONG_VIDEO_SECONDS) : SPEECH_MAX_SECONDS;
+  const payload: RenderPayload = { id: asset.id, operation: "inspect", url: `${siteUrl(e)}/api/upload-inputs/${asset.id}?token=${meta.token}`, maxSeconds: longest };
   let speech = false;
   try {
     const { slot, result } = await rendererJob(e, step, "inspect", payload, 90, "4 seconds");
@@ -393,12 +467,37 @@ async function inspectUpload(e: Env, step: WorkflowStep, assetId: string) {
     const code = error instanceof Error ? error.message : "";
     await step.do("failed", () => failAsset(e, asset.id, ({
       MEDIA_TOO_LARGE: "This video is too large (over 4096 pixels or 9 megapixels per frame).",
-      MEDIA_TOO_LONG: "Videos and tracks can be up to 10 minutes long.",
+      MEDIA_TOO_LONG: longest > SPEECH_MAX_SECONDS ? `Videos can be up to ${Math.round(longest / 3600)} hours long.` : asset.mime.startsWith("video/") ? "Videos can be up to 10 minutes long on the free trial; paid plans take videos up to 2 hours." : "Tracks can be up to 10 minutes long.",
       MEDIA_FORMAT: "This file can't be read. Use MP4, MOV or WebM videos and MP3, WAV, M4A or OGG tracks.",
       MEDIA_TIMEOUT: "Checking this file took too long. Try uploading it again.",
     } as Record<string, string>)[code] || "This file couldn't be checked. Try uploading it again."));
   }
   if (speech) await findSpeech(e, step, asset.id);
+}
+
+/** Downloading an imported video: one more try after a minute (a dropped connection), 40 minutes each at most. */
+const importOnce = { retries: { limit: 1, delay: "1 minute" as const }, timeout: "45 minutes" as const };
+/**
+ * A video imported from a link (server/imports.ts): downloaded into storage, then checked and transcribed like an
+ * upload. A video of the person's own YouTube channel (server/youtube-import.ts) is downloaded by the renderer's
+ * download container first (up to 30 minutes, waiting its turn). A failed download fails the file with the reason;
+ * nothing is charged.
+ */
+async function importVideo(e: Env, step: WorkflowStep, assetId: string) {
+  let youtube: RenderPayload | null = null;
+  try {
+    youtube = await step.do("import-youtube", safe, () => youtubeJob(e, assetId));
+    if (youtube) {
+      const job = youtube;
+      const { slot } = await rendererJob(e, step, "youtube", job, 120, "15 seconds");
+      if (!(await step.do("youtube-store", importOnce, () => storeYoutube(e, assetId, slot, job.id)))) return;
+    } else if (!(await step.do("import", importOnce, () => downloadImport(e, assetId)))) return;
+  } catch (error) {
+    console.warn("Import failed", { assetId, code: error instanceof Error && /^[A-Z_]{3,40}$/.test(error.message) ? error.message : error instanceof Error ? error.name : "INTERNAL" });
+    await step.do("import-failed", () => failAsset(e, assetId, importFailure(error, !!youtube)));
+    return;
+  }
+  await inspectUpload(e, step, assetId);
 }
 
 /** Changes a file's meta (read fresh, so other changes are kept). */
@@ -409,20 +508,25 @@ async function patchMeta(e: Env, assetId: string, change: (meta: any) => void) {
   change(meta);
   await e.DB.prepare("UPDATE media_assets SET meta=?,updated_at=? WHERE id=?").bind(JSON.stringify(meta), now(), assetId).run();
 }
-/** Calls to Scribe: once (each is billed), and long enough for ten minutes of sound. */
-const scribeOnce = { retries: { limit: 0, delay: "1 second" as const }, timeout: "20 minutes" as const };
+/** Calls to Scribe: once (each is billed), and long enough for two hours of sound. */
+const scribeOnce = { retries: { limit: 0, delay: "1 second" as const }, timeout: "50 minutes" as const };
 /**
- * Transcribes a ready file whose speech is pending: ElevenLabs Scribe reads it through its capability link. A
- * transcription that fails leaves the file usable, without subtitles ("failed"; it can be tried again).
+ * Transcribes a ready file whose speech is pending: ElevenLabs Scribe reads it through its capability link. A free
+ * transcription that fails leaves the file usable, without subtitles ("failed"; it can be tried again); a paid one
+ * (`paid`: a run of kind "speech") also fails its run, which refunds the credits. A free one then finds the moments
+ * asked for meanwhile (a paid run does that after it completes).
  */
-async function findSpeech(e: Env, step: WorkflowStep, assetId: string) {
+async function findSpeech(e: Env, step: WorkflowStep, assetId: string, paid = false) {
   const job = await step.do("speech-start", async () => {
     const a = await e.DB.prepare("SELECT meta,status,duration FROM media_assets WHERE id=?").bind(assetId).first<any>();
     const meta = json<any>(a?.meta, {});
     if (a?.status !== "ready" || meta.speech?.status !== "pending" || typeof meta.listen?.token !== "string") return null;
     return { url: `${siteUrl(e)}/api/upload-inputs/${assetId}?token=${meta.listen.token}`, duration: Number(a.duration) || 0, claim: uid() };
   });
-  if (!job) return;
+  if (!job) {
+    if (paid) throw new Error("SPEECH_INVALID");
+    return;
+  }
   try {
     await step.do("speech-transcribe", scribeOnce, async () => {
       // Paid once: the claim is stored before the call, so a step that runs again after it (its answer lost) stops.
@@ -445,7 +549,12 @@ async function findSpeech(e: Env, step: WorkflowStep, assetId: string) {
       meta.speech = { status: "failed", at: now() };
       delete meta.listen;
     }));
+    if (paid) {
+      await step.do("speech-failed-moments", () => momentsAfterSpeech(e, assetId));
+      throw error;
+    }
   }
+  if (!paid) await step.do("moments", momentsStep, () => momentsAfterSpeech(e, assetId));
 }
 
 /** Files a run's renderer and providers read: capability links, valid while the run works (and 6 hours at most). */

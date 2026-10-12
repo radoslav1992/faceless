@@ -4,10 +4,10 @@ import type { StoryStyle } from "../../shared/story";
 import type { VideoKind } from "../../shared/templates";
 
 // A phone showing a drawn sample of a video: the style's picture (moving slowly), its on-screen title and the
-// subtitles a few words at a time with a key word in green. Drawings and words only: never a fake result.
+// subtitles a few words at a time with a key word in lime. Drawings and words only: never a fake result.
 
 const reduced = () => typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-/** Words of `text` in groups of three, a key word (*between stars*) in green. */
+/** Words of `text` in groups of three, a key word (*between stars*) in lime. */
 function groups(text: string) {
   const words = text.split(/\s+/).filter(Boolean), out: string[][] = [];
   for (let i = 0; i < words.length; i += 3) out.push(words.slice(i, i + 3));

@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, ArrowRight, Check, Plus, X } from "lucide-react";
-import { errorText, post, useApi, useAuth, type Account, type LibraryItem, type Series } from "../lib";
+import { errorText, post, useApi, useAuth, useVoices, type Account, type LibraryItem, type Series } from "../lib";
 import { Switch, useToast } from "../ui";
 import { StyleArt } from "../art";
 import { StoryStylePicker } from "./StoryStyles";
 import { CaptionStylePicker } from "./CaptionPickers";
 import { PlatformBadge } from "./video-ui";
 import { connectPlatform, useConnectOutcome } from "./Channels";
+import { useOfferedVoice, VoiceSelect } from "./pickers";
 import { isTemplate, seriesTemplates, templates, type TemplateId } from "../../shared/templates";
 import { defaultSeriesSettings, episodeCredits, episodeLengths, languages, lengthName, musicMoods, type SeriesSettings } from "../../shared/series";
 import { videosPerMonth } from "../../shared/schedule";
 import { storyStyles } from "../../shared/story";
-import { voices } from "../../shared/voices";
 import { platforms, type PlatformId } from "../../shared/social";
 import { planById } from "../../shared/plans";
 import { creditsLabel } from "../../shared/credits";
@@ -53,7 +53,7 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
             <select className="select" value={settings.language} onChange={(e) => set({ language: e.target.value as SeriesSettings["language"] })}>{languages.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</select>
           </label>
           <label className="field"><span className="small">Voice</span>
-            <select className="select" value={settings.voiceId} onChange={(e) => set({ voiceId: e.target.value })}>{voices.map((v) => <option key={v.id} value={v.id}>{v.name} — {v.tone} ({v.accent})</option>)}</select>
+            <VoiceSelect value={settings.voiceId} onChange={(voiceId) => set({ voiceId })} />
           </label>
         </div>
         <div className="field"><span className="small">Length of each video</span>
@@ -183,6 +183,10 @@ export function SeriesWizard() {
     return s;
   });
   const [name, setName] = useState(draft?.name ?? (template ? templates[template].name : ""));
+  const { byId } = useVoices();
+  const voiceName = (id: string) => byId(id)?.name ?? id;
+  // A template's voice that is no longer offered gives way to the default voice.
+  useOfferedVoice(settings.voiceId, (voiceId) => setSettings((s) => ({ ...s, voiceId })), !!template);
   useEffect(() => {
     try {
       if (template) sessionStorage.setItem(DRAFT, JSON.stringify({ template, step, settings, name } satisfies Draft));
@@ -242,7 +246,7 @@ export function SeriesWizard() {
             <h3>Summary</h3>
             <ul className="stack" style={{ margin: 0, paddingLeft: 18, gap: 6 }}>
               <li>{templates[template].name}{settings.prompt ? `: ${settings.prompt}` : ""}</li>
-              <li>{lengthName(settings.seconds)} videos in {languages.find((l) => l[0] === settings.language)?.[1]}, narrated by {voices.find((v) => v.id === settings.voiceId)?.name}{templates[template].kind !== "backdrop" ? `, ${storyStyles[settings.style].name.toLowerCase()} pictures` : ""}</li>
+              <li>{lengthName(settings.seconds)} videos in {languages.find((l) => l[0] === settings.language)?.[1]}, narrated by {voiceName(settings.voiceId)}{templates[template].kind !== "backdrop" ? `, ${storyStyles[settings.style].name.toLowerCase()} pictures` : ""}</li>
               <li>{videosPerMonth(settings.schedule)} videos a month at {settings.schedule.times.join(", ")} ({settings.schedule.timezone})</li>
               <li>{settings.accounts.length ? `Posts to ${settings.accounts.length} channel${settings.accounts.length > 1 ? "s" : ""}${settings.private ? ", privately" : ""}${settings.review ? " after your review" : ""}` : "Not posted: videos are only made"}</li>
               <li>{creditsLabel(episodeCredits(settings))} per video · about {creditsLabel(perMonth)} a month</li>

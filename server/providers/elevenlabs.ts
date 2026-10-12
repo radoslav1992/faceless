@@ -28,7 +28,7 @@ export function wav(pcm: Uint8Array, rate: number) {
  * are counted in the words as written).
  */
 export async function speak(e: Env, voiceId: string, text: string, language = "en", timing: "normalized" | "original" = "normalized"): Promise<{ audio: Uint8Array; seconds: number; words: CaptionWord[] }> {
-  const voice = providerVoiceId(e, voiceId);
+  const voice = await providerVoiceId(e, voiceId);
   if (!e.ELEVENLABS_API_KEY?.trim() || !voice) throw new ProviderError("VOICE_UNAVAILABLE");
   const client = new ElevenLabsClient({ apiKey: e.ELEVENLABS_API_KEY.trim() });
   let result;

@@ -3,7 +3,7 @@ import worker from "../server/index";
 import { ContentGeneration } from "../server/content-workflow";
 import { claimSpeech, scribeWords, SCRIBE_MODEL, SCRIBE_URL, spendSpeech, SPEECH_FILES_PER_DAY, SPEECH_MINUTES_PER_DAY, storedTranscript, transcribe } from "../server/speech";
 import { ProviderError } from "../server/providers/http";
-import { SPEECH_MAX_SECONDS } from "../shared/speech";
+import { SPEECH_MAX_SECONDS, speechTurns } from "../shared/speech";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 
 // Speech to text with ElevenLabs Scribe v2 (as rech-bg): the request and its answer, and the free transcription of
@@ -39,9 +39,39 @@ describe("Scribe answers", () => {
     expect(scribeWords(answer, 10)).toEqual({
       language: "eng",
       words: [{ text: "Hello", start: 0.5, end: 0.9 }, { text: "bworld/b.", start: 0.9, end: 1.4 }, { text: "ab", start: 3, end: 3.33 }, { text: "end", start: 9.5, end: 10 }],
+      events: [{ text: "laughs", start: 1, end: 2 }],
     });
     expect(scribeWords({ detail: "x" }, 10)).toEqual({ language: "", words: [] });
     expect(scribeWords(null, 10)).toEqual({ language: "", words: [] });
+  });
+
+  it("tells speakers apart (numbered as they first speak) and keeps the sounds that are not speech", () => {
+    const word = (text: string, start: number, end: number, speaker_id?: unknown) => ({ text, start, end, type: "word", speaker_id });
+    const answer = {
+      language_code: "eng",
+      words: [
+        word("So", 0, 0.3, "speaker_3"), word("tell", 0.4, 0.7, "speaker_3"), word("me.", 0.8, 1, "speaker_3"),
+        word("Well,", 1.2, 1.5, "speaker_1"), word("it", 1.6, 1.8, "speaker_1"),
+        { text: "(LAUGHTER)", start: 1.8, end: 3.1, type: "audio_event", speaker_id: "speaker_1" },
+        // The same speaker after a long pause starts a new turn; a word without a speaker belongs to none.
+        word("started", 4, 4.5, "speaker_1"), word("hm", 4.6, 4.8), word("small.", 4.9, 5.3, "speaker_1"),
+        word("Right.", 5.5, 5.9, "speaker_3"),
+        { text: "[applause]", start: 6, end: 9, type: "audio_event" }, { text: "...", start: 9, end: 9.5, type: "audio_event" },
+      ],
+    };
+    expect(scribeWords(answer, 30)).toMatchObject({
+      turns: [[0, 1, 0], [1.2, 1.8, 1], [4, 5.3, 1], [5.5, 5.9, 0]],
+      events: [{ text: "laughter", start: 1.8, end: 3.1 }, { text: "applause", start: 6, end: 9 }],
+    });
+    expect(scribeWords(answer, 30).words).toHaveLength(9);
+    // Who talks when, for the renderer: the turns of a moment, cut to it; without speakers, the stretches of speech.
+    const t = scribeWords(answer, 30);
+    expect(speechTurns(t, 0.5, 5)).toEqual([[0.5, 1, 0], [1.2, 1.8, 1], [4, 5, 1]]);
+    expect(speechTurns({ words: t.words }, 0.5, 5)).toEqual([[0.5, 1.8, -1], [4, 5, -1]]);
+    expect(speechTurns(null, 0, 10)).toEqual([]);
+    const stored = JSON.stringify({ transcript: t });
+    expect(storedTranscript(stored, 4.2, 6.5)).toMatchObject({ turns: [[4, 5.3, 1], [5.5, 5.9, 0]], events: [{ text: "applause" }] });
+    expect(storedTranscript(JSON.stringify({ transcript: { language: "eng", words: t.words } }))).toEqual({ language: "eng", words: t.words });
   });
 
   it("sends the file's link (no upload, no language) and reads the words", async () => {
@@ -51,10 +81,12 @@ describe("Scribe answers", () => {
       return Response.json(scribe([["Here's", 1, 1.4], ["how.", 1.4, 1.7]], "bul"));
     });
     const env: any = { ELEVENLABS_API_KEY: " el-key " };
-    expect(await transcribe(env, "https://app.test/api/upload-inputs/x?token=t", 30)).toEqual({ language: "bul", words: [{ text: "Here's", start: 1, end: 1.4 }, { text: "how.", start: 1.4, end: 1.7 }] });
+    expect(await transcribe(env, "https://app.test/api/upload-inputs/x?token=t", 30)).toEqual({
+      language: "bul", words: [{ text: "Here's", start: 1, end: 1.4 }, { text: "how.", start: 1.4, end: 1.7 }], turns: [[1, 1.7, 0]],
+    });
     expect(seen).toEqual([{
       url: SCRIBE_URL, method: "POST", key: "el-key", redirect: "manual",
-      fields: { model_id: SCRIBE_MODEL, source_url: "https://app.test/api/upload-inputs/x?token=t", timestamps_granularity: "word", tag_audio_events: "false" },
+      fields: { model_id: SCRIBE_MODEL, source_url: "https://app.test/api/upload-inputs/x?token=t", timestamps_granularity: "word", diarize: "true", tag_audio_events: "true" },
     }]);
     expect(SCRIBE_MODEL).toBe("scribe_v2");
   });
@@ -141,6 +173,7 @@ describe("speech in uploads (free, up to 10 minutes)", () => {
     expect(one.data.asset.transcript).toEqual({
       language: "eng",
       words: [{ text: "Here's", start: 1, end: 1.4 }, { text: "how", start: 1.4, end: 1.7 }, { text: "it", start: 123, end: 123.2 }, { text: "works.", start: 123.2, end: 123.8 }],
+      turns: [[1, 1.7, 0], [123, 123.8, 0]],
     });
     // The words of one moment, from what is kept with the file.
     const stored = (sqlite.prepare("SELECT meta FROM media_assets WHERE id=?").get(id) as any).meta;
@@ -221,37 +254,47 @@ describe("speech in uploads (free, up to 10 minutes)", () => {
     expect(await claimSpeech(env, "u4", {}, 29 * 60)).not.toBeNull();
   });
 
-  it("never transcribes a file over 10 minutes for free, on any plan", async () => {
-    // The renderer is asked to refuse files over 10 minutes: such an upload fails, unheard.
+  it("never transcribes a file over 10 minutes for free; long videos only on paid plans", async () => {
+    // On the free trial the renderer is asked to refuse files over 10 minutes: such an upload fails, unheard.
     const refused = setup(3000, "MEDIA_TOO_LONG");
-    subscribe(refused.sqlite, refused.user.id, "studio");
     let calls = scribeService(refused.env, () => [["x", 0, 1]]);
     const long = await upload(refused.env, refused.sqlite, refused.user);
     await run(refused.env, { inspectId: long });
     expect(refused.log[0]).toMatchObject({ operation: "inspect", maxSeconds: SPEECH_MAX_SECONDS });
     expect(calls).toHaveLength(0);
     expect((await call(worker, refused.env, "GET", `/api/media/${long}`, undefined, refused.user.cookie)).data.asset)
-      .toMatchObject({ status: "failed", bytes: 0, error: "Videos and tracks can be up to 10 minutes long.", speech: null });
+      .toMatchObject({ status: "failed", bytes: 0, error: "Videos can be up to 10 minutes long on the free trial; paid plans take videos up to 2 hours.", speech: null });
 
-    // A longer file that got through anyway is kept, but never sent to Scribe (nor on request).
-    const { env, sqlite, user } = setup(3000);
+    // A long video uploaded on a paid plan is checked up to 2 hours and kept, but never sent to Scribe for free (nor on
+    // "Find speech": clips are found in it for credits, server/highlights.ts).
+    const { env, sqlite, user, log } = setup(3000);
     calls = scribeService(env, () => [["x", 0, 1]]);
     const id = await upload(env, sqlite, user);
+    sqlite.prepare("UPDATE media_assets SET meta=? WHERE id=?").run(JSON.stringify({ token: "t".repeat(64), maxSeconds: 7200 }), id);
     await run(env, { inspectId: id });
+    expect(log[0]).toMatchObject({ operation: "inspect", maxSeconds: 7200 });
     expect(calls).toHaveLength(0);
     expect((await call(worker, env, "GET", `/api/media/${id}`, undefined, user.cookie)).data.asset).toMatchObject({ status: "ready", duration: 3000, speech: null });
     const asked = await call(worker, env, "POST", `/api/media/${id}/speech`, {}, user.cookie);
     expect(asked.status).toBe(400);
-    expect(asked.data.error).toMatch(/up to 10 minutes long/);
+    expect(asked.data.error).toMatch(/longer than 10 minutes: find clips in it on the Clips page/);
     expect(meta(sqlite, id).listen).toBeUndefined();
 
-    // Uploads are bounded the same for everyone: a paid plan takes no larger videos.
+    // Uploads: 500 MB and 10 minutes on the free trial, 2,000 MB and 2 hours on a paid plan.
+    const free = await call(worker, env, "POST", "/api/media/uploads", { name: "Podcast.mp4", mime: "video/mp4", bytes: 800 * 1024 * 1024 }, user.cookie);
+    expect(free.status).toBe(413);
+    expect(free.data.error).toBe("Videos can be up to 500 MB on the free trial; paid plans take videos up to 2 hours.");
+    const short = await call(worker, env, "POST", "/api/media/uploads", { name: "Clip.mp4", mime: "video/mp4", bytes: 1000 }, user.cookie);
+    expect(meta(sqlite, short.data.id)).toEqual({ token: expect.stringMatching(/^[0-9a-f]{64}$/), maxSeconds: 600 });
     subscribe(sqlite, user.id, "studio");
-    const big = await call(worker, env, "POST", "/api/media/uploads", { name: "Podcast.mp4", mime: "video/mp4", bytes: 800 * 1024 * 1024 }, user.cookie);
-    expect(big.status).toBe(413);
-    expect(big.data.error).toBe("Videos can be up to 500 MB.");
-    const small = await call(worker, env, "POST", "/api/media/uploads", { name: "Clip.mp4", mime: "video/mp4", bytes: 1000 }, user.cookie);
-    expect(small.status).toBe(201);
-    expect(Object.keys(meta(sqlite, small.data.id))).toEqual(["token"]);
+    const paid = await call(worker, env, "POST", "/api/media/uploads", { name: "Podcast.mp4", mime: "video/mp4", bytes: 800 * 1024 * 1024 }, user.cookie);
+    expect(paid.status).toBe(201);
+    expect(meta(sqlite, paid.data.id).maxSeconds).toBe(7200);
+    const huge = await call(worker, env, "POST", "/api/media/uploads", { name: "Stream.mp4", mime: "video/mp4", bytes: 2100 * 1024 * 1024 }, user.cookie);
+    expect(huge.status).toBe(413);
+    expect(huge.data.error).toBe("Videos can be up to 2,000 MB.");
+    // Tracks keep their own limit whatever the plan.
+    const track = await call(worker, env, "POST", "/api/media/uploads", { name: "Song.mp3", mime: "audio/mpeg", bytes: 60 * 1024 * 1024 }, user.cookie);
+    expect(track.data.error).toBe("Tracks can be up to 50 MB.");
   });
 });

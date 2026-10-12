@@ -6,17 +6,25 @@ import { MB, now, uid } from "./types";
 import { dbFailure, json } from "./db";
 import { rate, safeEqual, token } from "./security";
 import { extOf, head, imageFits, imageInfo, mediaKey, serveObject } from "./storage";
-import { claimSpeech, mayHaveSpeech, speechView, storedTranscript } from "./speech";
+import { claimSpeech, mayHaveSpeech, mayTranscribe, speechView, storedTranscript } from "./speech";
+import { allowance } from "./billing";
+import { importLink } from "./imports";
+import { ownVideos } from "./youtube-import";
+import { planById } from "../shared/plans";
 
-// The owner's media: uploads (images, videos, audio) in authenticated 8 MiB parts and everything generated for videos.
-// Videos and audio are checked by the renderer (length up to 10 minutes, size, sound) before they can be used, then
-// their speech is transcribed for free (server/speech.ts), so an own voiceover times its scenes and subtitles.
+// The owner's media: uploads (images, videos, audio) in authenticated 8 MiB parts, videos imported from a link
+// (server/imports.ts) and everything generated for videos.
+// Videos and audio are checked by the renderer (length, size, sound) before they can be used, then their speech is
+// transcribed (server/speech.ts), so an own voiceover times its scenes and subtitles and a long video can be clipped:
+// for free up to 10 minutes, on request (for credits, server/highlights.ts) for the long videos of paid plans (up to
+// 2 hours).
 export const media = new Hono<App>();
 export const PART_SIZE = 8 * MB;
 const accepted: Record<string, { kind: "image" | "video" | "audio"; max: number }> = {
   "image/jpeg": { kind: "image", max: 20 * MB },
   "image/png": { kind: "image", max: 20 * MB },
   "image/webp": { kind: "image", max: 20 * MB },
+  // Videos: up to the plan's `videoMb` (shared/plans.ts).
   "video/mp4": { kind: "video", max: 500 * MB },
   "video/quicktime": { kind: "video", max: 500 * MB },
   "video/webm": { kind: "video", max: 500 * MB },
@@ -33,6 +41,8 @@ export function assetView(a: any) {
   return {
     id: a.id, kind: a.kind, name: a.name, mime: a.mime, bytes: a.bytes, duration: a.duration, width: a.width, height: a.height,
     status: a.status, videoId: a.video_id ?? null, hasAudio: meta.hasAudio ?? null, error: a.status === "failed" ? meta.error || "This file can't be used." : null,
+    // A video imported from a link that is still being downloaded (then it is checked like an upload).
+    importing: a.status === "checking" && !!meta.import,
     createdAt: a.created_at, url: `/api/media/${a.id}/file`,
     // Speech found in an upload: "found", "none", "pending", "failed", or null when it was never looked for.
     ...speechView(a),
@@ -75,14 +85,18 @@ media.post("/uploads", async (c) => {
   }).parse(await c.req.json());
   const type = accepted[d.mime.toLowerCase()];
   if (!type) throw new HTTPException(415, { message: "Upload a JPG, PNG or WebP image, an MP4, MOV or WebM video, or an MP3, WAV, M4A or OGG track." });
-  if (d.bytes > type.max)
-    throw new HTTPException(413, { message: `${type.kind === "image" ? "Images" : type.kind === "video" ? "Videos" : "Tracks"} can be up to ${type.max / MB} MB.` });
+  // Long videos (podcasts, interviews, streams: clips are cut from them) on paid plans.
+  const plan = type.kind === "video" ? planById((await allowance(c.env, user)).plan) : null;
+  const max = plan ? plan.videoMb * MB : type.max;
+  if (d.bytes > max)
+    throw new HTTPException(413, { message: `${type.kind === "image" ? "Images" : type.kind === "video" ? "Videos" : "Tracks"} can be up to ${(max / MB).toLocaleString("en-US")} MB${plan?.id === "free" ? " on the free trial; paid plans take videos up to 2 hours" : ""}.` });
   const id = uid(), key = mediaKey(user.id, id, extOf(d.mime.toLowerCase()));
-  // The full size is reserved now, so many parallel uploads cannot overfill the storage.
+  // The full size is reserved now, so many parallel uploads cannot overfill the storage. The check allows the length
+  // of the plan the file was uploaded on.
   try {
     await c.env.DB.prepare(
       "INSERT INTO media_assets(id,user_id,kind,name,object_key,mime,bytes,status,meta,created_at,updated_at) VALUES (?,?,'upload',?,?,?,?,'uploading',?,?,?)",
-    ).bind(id, user.id, d.name, key, d.mime.toLowerCase(), d.bytes, JSON.stringify({ token: token() }), now(), now()).run();
+    ).bind(id, user.id, d.name, key, d.mime.toLowerCase(), d.bytes, JSON.stringify({ token: token(), maxSeconds: (plan?.videoMinutes || 10) * 60 }), now(), now()).run();
   } catch (e) {
     dbFailure(e);
   }
@@ -136,6 +150,17 @@ media.post("/uploads/:id/complete", async (c) => {
   }
   return c.json({ asset: assetView(await ownedAsset(c.env, user.id, a.id)) });
 });
+/** Imports a video from a link (a video file, or a Dropbox or Google Drive share link); it is downloaded, then checked. */
+media.post("/imports", async (c) => {
+  const d = z.object({ url: z.string().trim().min(1).max(2000) }).parse(await c.req.json());
+  const id = await importLink(c.env, c.get("user"), d.url);
+  return c.json({ asset: assetView(await ownedAsset(c.env, c.get("user").id, id)) }, 202);
+});
+/**
+ * The latest videos of the person's connected YouTube channels, to import one for clips (a beta: `enabled` false when
+ * it is off or not on their plan, `reason` says why).
+ */
+media.get("/youtube", async (c) => c.json(await ownVideos(c.env, c.get("user"))));
 /** Marks an upload unusable; its storage reservation is released (the file itself is deleted by maintenance). */
 export async function failAsset(env: Env, id: string, error: string) {
   const a = await env.DB.prepare("SELECT meta FROM media_assets WHERE id=?").bind(id).first<{ meta: string }>();
@@ -144,8 +169,10 @@ export async function failAsset(env: Env, id: string, error: string) {
 }
 media.get("/:id", async (c) => {
   const a = await ownedAsset(c.env, c.get("user").id, c.req.param("id"));
-  // One file also brings its transcript (word timings for the preview); lists do not.
-  return c.json({ asset: { ...assetView(a), transcript: speechView(a).speech === "found" ? storedTranscript(a.meta) : null } });
+  // One file also brings its transcript (word timings for the preview); lists do not. A clip of a long video asks only
+  // for the words of its moment (?from=&to=, seconds).
+  const q = z.object({ from: z.coerce.number().min(0).optional(), to: z.coerce.number().min(0).optional() }).parse(c.req.query());
+  return c.json({ asset: { ...assetView(a), transcript: speechView(a).speech === "found" ? storedTranscript(a.meta, q.from, q.to) : null } });
 });
 /** "Find speech": transcribes an older upload (or one that failed before), free but limited per hour and day. */
 media.post("/:id/speech", async (c) => {
@@ -154,7 +181,7 @@ media.post("/:id/speech", async (c) => {
   const meta = json<any>(a.meta, {}), status = speechView(a).speech;
   if (status === "found" || status === "pending") return c.json({ asset: assetView(a) });
   if (a.status !== "ready" || !mayHaveSpeech(a, meta.hasAudio))
-    throw new HTTPException(400, { message: meta.hasAudio === false ? "This file has no sound." : "Speech can be found in your own videos and tracks up to 10 minutes long." });
+    throw new HTTPException(400, { message: meta.hasAudio === false ? "This file has no sound." : mayTranscribe(a, meta.hasAudio) ? "This video is longer than 10 minutes: find clips in it on the Clips page." : "Speech can be found in your own videos and tracks up to 10 minutes long." });
   if (status === "none") throw new HTTPException(409, { message: "We listened to this file already and heard no speech." });
   if (!c.env.CONTENT || !c.env.MEDIA_RENDERER) throw new HTTPException(503, { message: "Finding speech isn't available right now. Please try again later." });
   await rate(c, "speech", 10, 3600, user.id);

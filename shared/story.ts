@@ -4,7 +4,7 @@ import { SPEECH_CHARS_PER_SECOND } from "./credits";
 
 // A narrated video ("story"): a voiceover (an AI voice reading a script, or the owner's own recording) laid out on its own
 // clock and split into scenes of one or two sentences; each scene shows a picture in one shared style (an AI image
-// that moves slowly, an AI clip made from that image, the owner's media or a library clip), with a transition at every
+// that moves slowly, an AI clip made from that image, the owner's media or a library clip or picture), with a transition at every
 // scene boundary and word-by-word subtitles over the whole voice. Scenes hold their words, never times: times come from
 // the voice's word timings (ElevenLabs, forced alignment or the transcript), so a scene edge is always on a word
 // boundary. The script writer and the scene splitter are ported from rech-bg (server/studio-writer.ts, "Студио").
@@ -144,12 +144,12 @@ export const storySceneSchema = z
     clipSeconds: z.union([z.literal(5), z.literal(10)]).default(5),
     /** Own media (an image or a video). */
     assetId: uuid.optional(),
-    /** A clip from the shared library. */
+    /** A clip or picture from the shared library. */
     libraryId: uuid.optional(),
     transition: z.enum(storyTransitions).default("auto"),
   })
   .refine((s) => s.source !== "own" || !!s.assetId, "Choose a picture or video for each scene with your own media.")
-  .refine((s) => s.source !== "library" || !!s.libraryId, "Choose a library clip for each scene that uses one.")
+  .refine((s) => s.source !== "library" || !!s.libraryId, "Choose a library clip or picture for each scene that uses one.")
   .refine((s) => !["image", "clip"].includes(s.source) || s.description.length >= 3 || !!s.imageId, "Describe the picture of each AI scene.");
 export type StoryScene = z.infer<typeof storySceneSchema>;
 /** The voiceover: an AI voice reading the scenes, or the owner's recording (audio or video) and, optionally, its exact script. */

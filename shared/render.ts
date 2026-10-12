@@ -41,6 +41,12 @@ export type ComposeSegment = {
    */
   follow?: [number, number][] | null;
   /**
+   * Video only, a clip's layout (shared/highlights.ts), instead of `fit` and never with `follow`: windows of the
+   * picture stacked from the top, each `x`, `y`, `w`, `h` (shares of the picture: the window cropped) scaled to fill
+   * the frame's width and `height` pixels (even). The heights add up to the frame's.
+   */
+  panes?: { x: number; y: number; w: number; h: number; height: number }[] | null;
+  /**
    * The way in from the segment before (not on the first): its first `duration` seconds (a whole number of frames)
    * blend over the last ones before it, so the output is shorter by that overlap. Absent: a hard cut.
    */
@@ -98,11 +104,21 @@ export type StillsPayload = {
  */
 export type InspectPayload = { id: string; operation: "inspect"; url: string; maxSeconds?: number };
 /**
- * Where the main face is in seconds `start` to `start + length` (at most 10 minutes) of a video: the speaker path of
- * shared/track.ts on the video's own clock, in the status (`track`). No file comes back.
+ * Where the speaker is in seconds `start` to `start + length` (at most 10 minutes) of a video: the speaker path of
+ * shared/track.ts on the video's own clock, and the two people seen most (`faces`), in the status (`track`). With
+ * `turns` (shared/speech.ts speechTurns: [start, end, speaker] on the video's clock), the path cuts to the face whose
+ * lips move while someone talks; without them it follows the face seen most. No file comes back.
  */
-export type TrackPayload = { id: string; operation: "track"; url: string; start: number; length: number };
-export type RenderPayload = ComposePayload | StillsPayload | InspectPayload | TrackPayload;
+export type TrackPayload = { id: string; operation: "track"; url: string; start: number; length: number; turns?: [number, number, number][] };
+/**
+ * Downloads one YouTube video by its ID (a video of the person's own connected channel, checked by the Worker,
+ * server/youtube-import.ts) as an MP4 of at most 1080p, at most `maxSeconds` long and `maxBytes` large: one file comes
+ * back. Runs only on the renderer's download container (DOWNLOAD_SLOT, server/renderer.ts). A refusal by YouTube is
+ * reported as YOUTUBE_BLOCKED (bot checks, rate limits), YOUTUBE_RESTRICTED (members-only, age-restricted, private),
+ * YOUTUBE_UNAVAILABLE (removed, region-blocked) or YOUTUBE_FAILED.
+ */
+export type YoutubePayload = { id: string; operation: "youtube"; video: string; maxSeconds: number; maxBytes: number };
+export type RenderPayload = ComposePayload | StillsPayload | InspectPayload | TrackPayload | YoutubePayload;
 
 export type RenderStatus = {
   status: "running" | "completed" | "failed";
@@ -114,6 +130,6 @@ export type RenderStatus = {
   files?: number;
   /** inspect: what the file is. */
   meta?: { kind: "video" | "audio" | "image"; width: number; height: number; hasAudio: boolean };
-  /** track: the speaker path (checked against shared/track.ts by the Worker). */
-  track?: { v: number; points: [number, number][] };
+  /** track: the speaker path and the two people seen most (checked against shared/track.ts by the Worker). */
+  track?: { v: number; points: [number, number][]; faces?: [number, number][] };
 };

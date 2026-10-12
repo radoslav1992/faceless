@@ -10,9 +10,10 @@
  *       unmount it in onPick (onClose is not called).
  *     onClose() — Cancel, Escape or a click on the backdrop.
  * - <LibraryPicker kind title? onPick onClose />
- *     kind: "clip" | "music" — the shared library (GET /api/library?kind=).
- *     Tag filter chips (every chosen tag must match), 12 items a page, clips preview on hover/focus (poster =
- *     item.thumb), music has a play button. onPick(item: LibraryItem) / onClose() as for MediaPicker.
+ *     kind: "clip" | "music" | "image" | "scene" (a clip or a picture) — the shared library (GET /api/library?kind=&q=).
+ *     A search over names, descriptions and tags (on the server), tag filter chips (every chosen tag must match), 12
+ *     items a page, clips preview on hover/focus (poster = item.thumb), music has a play button, items made with AI
+ *     say so. onPick(item: LibraryItem) / onClose() as for MediaPicker.
  * - <ConfirmDialog title confirmLabel? danger? onConfirm onClose>body</ConfirmDialog>
  *     A confirmation for destructive actions. onConfirm may return a promise: the dialog shows a spinner, toasts
  *     the error if it rejects (and stays open), and calls onClose when it resolves.
@@ -43,7 +44,8 @@ import {
 import { Link } from "react-router-dom";
 import { AlertCircle, Check, CheckCircle2, ChevronLeft, ChevronRight, Music, Pause, Play, Search, Upload, UploadCloud } from "lucide-react";
 import { Modal, Spinner, useToast } from "../ui";
-import { errorText, newKey, seconds, uploadFile, useApi, useAuth, bytes as formatBytes, type Asset, type LibraryItem, type User } from "../lib";
+import { errorText, newKey, seconds, uploadFile, useApi, useAuth, useVoices, bytes as formatBytes, type Asset, type LibraryItem, type LibraryKind, type User } from "../lib";
+import { voiceLabel } from "../../shared/voices";
 import { planById } from "../../shared/plans";
 import "./pages.css";
 
@@ -250,6 +252,35 @@ export function PlayButton({ playing, onClick, label }: { playing: boolean; onCl
   );
 }
 
+/* ------------------------------------------------------------------------------------------------ voices */
+
+/**
+ * The narration voice: the voices offered (Admin → Voices) and the current one when it no longer is (a video or
+ * series keeps a voice hidden since), with a play button for the chosen voice's sample.
+ */
+export function VoiceSelect({ value, onChange, id }: { value: string; onChange: (id: string) => void; id?: string }) {
+  const { voices, loading, byId } = useVoices();
+  const audio = usePreviewAudio();
+  const current = byId(value);
+  return (
+    <span className="voice-select">
+      <select id={id} className="select" value={value} onChange={(e) => { audio.stop(); onChange(e.target.value); }}>
+        {!current && <option value={value}>{loading ? "Loading voices…" : `${value[0]?.toUpperCase()}${value.slice(1)} (no longer offered)`}</option>}
+        {voices.map((v) => <option key={v.id} value={v.id}>{voiceLabel(v)}</option>)}
+      </select>
+      {current?.preview && <PlayButton playing={audio.playing === current.id} onClick={() => audio.toggle(current.id, current.preview!)} label={`a sample of ${current.name}`} />}
+    </span>
+  );
+}
+/** For something new: when `value` is not an offered voice (a template's voice hidden since), the default voice. */
+export function useOfferedVoice(value: string, onChange: (id: string) => void, enabled = true) {
+  const { voices, loading, fallback } = useVoices();
+  const change = useStableCallback(onChange);
+  useEffect(() => {
+    if (enabled && !loading && fallback && !voices.some((v) => v.id === value)) change(fallback);
+  }, [enabled, loading, fallback, voices, value, change]);
+}
+
 /* ------------------------------------------------------------------------------------------------ uploads */
 
 const MB = 1024 * 1024;
@@ -258,9 +289,9 @@ const types: Record<string, MediaType> = {
   "video/mp4": "video", "video/quicktime": "video", "video/webm": "video",
   "audio/mpeg": "audio", "audio/wav": "audio", "audio/x-wav": "audio", "audio/mp4": "audio", "audio/x-m4a": "audio", "audio/aac": "audio", "audio/ogg": "audio",
 };
-/** The server's limits per type (server/media.ts). */
+/** The server's limits per type (server/media.ts): videos up to the plan's (long videos for clips on paid plans). */
 const limits: Record<MediaType, number> = { image: 20 * MB, video: 500 * MB, audio: 50 * MB };
-const limitFor = (type: MediaType, _plan?: string) => limits[type];
+const limitFor = (type: MediaType, plan?: string) => (type === "video" ? planById(plan).videoMb * MB : limits[type]);
 export const ACCEPT: Record<MediaType | "any", string> = {
   image: "image/jpeg,image/png,image/webp",
   video: "video/mp4,video/quicktime,video/webm,.mov",
@@ -323,7 +354,7 @@ export function useUploads(options: { only?: MediaType; onDone?: (asset: Asset) 
         ? only ? `Choose ${typeWords[only].one} file.` : "This file type isn't supported. Upload JPG, PNG or WebP images, MP4, MOV or WebM videos, or MP3, WAV, M4A or OGG tracks."
         : only && type !== only ? `Choose ${typeWords[only].one} file.`
         : file.size > limitFor(type, settings.current.plan)
-          ? `${typeWords[type].many} can be up to ${limitFor(type, settings.current.plan) / MB} MB${type === "video" && planById(settings.current.plan).id === "free" ? " on the free trial (paid plans take videos up to 2 hours)" : ""}.`
+          ? `${typeWords[type].many} can be up to ${(limitFor(type, settings.current.plan) / MB).toLocaleString("en-US")} MB${type === "video" && planById(settings.current.plan).id === "free" ? " on the free trial (paid plans take videos up to 2 hours)" : ""}.`
         : file.size < 24 ? "This file is empty." : null;
       const key = newKey();
       fresh.push({ key, name: file.name, bytes: file.size, type, progress: 0, status: problem ? "failed" : "queued", error: problem, asset: null });
@@ -564,15 +595,32 @@ function PickTile({ asset, selected, onSelect, onPick }: { asset: Asset; selecte
 
 /* ------------------------------------------------------------------------------------------------ LibraryPicker */
 
-export type LibraryPickerProps = { kind: "clip" | "music"; title?: string; onPick: (item: LibraryItem) => void; onClose: () => void };
-const libraryTitles = { clip: "Choose a clip", music: "Choose music" } as const;
+/** "scene": a clip or a picture, for a scene. */
+export type LibraryPickerKind = LibraryKind | "scene";
+export type LibraryPickerProps = { kind: LibraryPickerKind; title?: string; onPick: (item: LibraryItem) => void; onClose: () => void };
+const libraryTitles: Record<LibraryPickerKind, string> = { clip: "Choose a clip", music: "Choose music", image: "Choose a picture", scene: "Choose a clip or picture" };
+const libraryWords: Record<LibraryPickerKind, string> = { clip: "clips", music: "tracks", image: "pictures", scene: "clips and pictures" };
 const PAGE = 12;
+/** A value that follows `value` once it has stopped changing for `ms`. */
+function useSettled<T>(value: T, ms: number) {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return settled;
+}
 
 export function LibraryPicker({ kind, title, onPick, onClose }: LibraryPickerProps) {
-  const { data, loading, error, reload } = useApi<{ items: LibraryItem[]; tags: string[] }>(`/library?kind=${kind}`);
+  const [query, setQuery] = useState("");
+  const [only, setOnly] = useState<"all" | "clip" | "image">("all");
+  const search = useSettled(query.trim(), 300);
+  const kinds = kind === "scene" ? (only === "all" ? "clip,image" : only) : kind;
+  // The library is searched on the server (names, descriptions and tags); tags then narrow what was found.
+  const { data, loading, error, reload } = useApi<{ items: LibraryItem[]; tags: string[] }>(`/library?${new URLSearchParams({ kind: kinds, ...(search && { q: search }) })}`);
   const [tags, setTags] = useState<string[]>([]);
   const [page, setPage] = useState(0);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [chosen, setChosen] = useState<LibraryItem | null>(null);
   const audio = usePreviewAudio();
   const close = useStableCallback(onClose);
   const all = data?.items || [];
@@ -580,22 +628,41 @@ export function LibraryPicker({ kind, title, onPick, onClose }: LibraryPickerPro
   const pages = Math.max(1, Math.ceil(items.length / PAGE));
   const current = Math.min(page, pages - 1);
   const shown = items.slice(current * PAGE, current * PAGE + PAGE);
-  const chosen = all.find((i) => i.id === selected) || null;
+  useEffect(() => setPage(0), [search, only]);
   const toggleTag = (t: string) => {
     setTags((list) => (list.includes(t) ? list.filter((x) => x !== t) : [...list, t]));
     setPage(0);
   };
   const pick = (item: LibraryItem) => { audio.stop(); onPick(item); };
   const music = kind === "music";
+  const filtered = !!search || only !== "all";
+  const useLabel = !chosen ? (music ? "Use this track" : kind === "image" ? "Use this picture" : "Use this clip")
+    : chosen.kind === "music" ? "Use this track" : chosen.kind === "image" ? "Use this picture" : "Use this clip";
   return (
     <Modal title={title || libraryTitles[kind]} onClose={close} wide footer={
       <>
         <button type="button" className="btn" onClick={close}>Cancel</button>
         <button type="button" className="btn primary" disabled={!chosen} onClick={() => chosen && pick(chosen)}>
-          <Check size={16} aria-hidden="true" />{music ? "Use this track" : "Use this clip"}
+          <Check size={16} aria-hidden="true" />{useLabel}
         </button>
       </>
     }>
+      <div className="pick-toolbar">
+        <label className="search">
+          <Search size={16} aria-hidden="true" />
+          <span className="sr-only">Search the library</span>
+          <input className="input" type="search" placeholder={music ? "Search tracks: calm, upbeat, piano…" : "Search: ocean, city at night, cat…"} value={query}
+            onChange={(e) => setQuery(e.target.value)} maxLength={100} />
+        </label>
+        {loading && data && <Spinner label="Searching" />}
+        {kind === "scene" && (
+          <div className="seg small-seg" role="group" aria-label="Show">
+            {(["all", "clip", "image"] as const).map((k) => (
+              <button key={k} type="button" aria-pressed={only === k} onClick={() => setOnly(k)}>{k === "all" ? "All" : k === "clip" ? "Clips" : "Pictures"}</button>
+            ))}
+          </div>
+        )}
+      </div>
       {!!data?.tags.length && (
         <div className="tag-filter" role="group" aria-label="Filter by tag">
           <button type="button" className="chip button" aria-pressed={!tags.length} onClick={() => { setTags([]); setPage(0); }}>All</button>
@@ -604,16 +671,22 @@ export function LibraryPicker({ kind, title, onPick, onClose }: LibraryPickerPro
           ))}
         </div>
       )}
-      {loading ? (
+      {loading && !data ? (
         music ? <div className="stack">{Array.from({ length: 6 }, (_, i) => <div key={i} className="skeleton" style={{ height: 58 }} />)}</div>
-          : <GridSkeleton count={8} tall className="pick-grid" />
+          : <GridSkeleton count={8} tall={kind !== "image"} className="pick-grid" />
       ) : error ? (
         <div className="notice bad" role="alert">{error} <button type="button" className="link" onClick={() => void reload()}>Try again</button></div>
-      ) : !all.length ? (
+      ) : !all.length && !filtered ? (
         <div className="empty">
           <span className="empty-icon" aria-hidden="true">{music ? <Music size={24} /> : <UploadCloud size={24} />}</span>
           <h3>The library is empty for now</h3>
-          <p>We're adding {music ? "tracks" : "clips"} soon. You can use your own uploads meanwhile.</p>
+          <p>We're adding {libraryWords[kind]} soon. You can use your own uploads meanwhile.</p>
+        </div>
+      ) : !all.length ? (
+        <div className="empty">
+          <h3>Nothing matches{search ? ` “${search}”` : ""}</h3>
+          <p>Try other words, or fewer of them.</p>
+          {search && <button type="button" className="btn" onClick={() => setQuery("")}>Clear the search</button>}
         </div>
       ) : !items.length ? (
         <div className="empty">
@@ -623,22 +696,28 @@ export function LibraryPicker({ kind, title, onPick, onClose }: LibraryPickerPro
       ) : music ? (
         <ul className="pick-rows list-plain">
           {shown.map((t) => (
-            <li key={t.id} className={`pick-row${t.id === selected ? " selected" : ""}`}>
+            <li key={t.id} className={`pick-row${t.id === chosen?.id ? " selected" : ""}`}>
               <PlayButton playing={audio.playing === t.id} onClick={() => audio.toggle(t.id, t.url)} label={t.name} />
-              <button type="button" className="choose" aria-pressed={t.id === selected} onClick={() => setSelected(t.id)} onDoubleClick={() => pick(t)}>
-                <span className="grow">
-                  <span className="name" style={{ display: "block" }}>{t.name}</span>
+              <button type="button" className="choose" aria-pressed={t.id === chosen?.id} onClick={() => setChosen(t)} onDoubleClick={() => pick(t)}>
+                <span className="grow" style={{ minWidth: 0 }}>
+                  <span className="name" style={{ display: "block" }}>{t.name}{t.ai && <span className="chip pick-ai">AI</span>}</span>
+                  {t.description && <span className="small pick-description">{t.description}</span>}
                   <span className="small muted">{seconds(t.duration)}{t.tags.length ? ` · ${t.tags.join(", ")}` : ""}</span>
                 </span>
-                {t.id === selected && <Check size={18} aria-hidden="true" />}
+                {t.id === chosen?.id && <Check size={18} aria-hidden="true" />}
               </button>
             </li>
           ))}
         </ul>
       ) : (
         <div className="pick-grid">
-          {shown.map((c) => <ClipTile key={c.id} item={c} selected={c.id === selected} onSelect={() => setSelected(c.id)} onPick={() => pick(c)} />)}
+          {shown.map((c) => <LibraryTile key={c.id} item={c} tall={kind !== "image"} selected={c.id === chosen?.id} onSelect={() => setChosen(c)} onPick={() => pick(c)} />)}
         </div>
+      )}
+      {chosen && !music && (chosen.description || chosen.tags.length > 0) && (
+        <p className="pick-detail small" aria-live="polite">
+          <strong>{chosen.name}</strong>{chosen.description && <> · {chosen.description}</>}{chosen.tags.length > 0 && <span className="muted"> · {chosen.tags.join(", ")}</span>}
+        </p>
       )}
       {pages > 1 && (
         <nav className="pager" aria-label="Pages">
@@ -650,13 +729,21 @@ export function LibraryPicker({ kind, title, onPick, onClose }: LibraryPickerPro
     </Modal>
   );
 }
-function ClipTile({ item, selected, onSelect, onPick }: { item: LibraryItem; selected: boolean; onSelect: () => void; onPick: () => void }) {
+/** A library clip (plays on hover or focus) or picture. */
+function LibraryTile({ item, tall, selected, onSelect, onPick }: { item: LibraryItem; tall: boolean; selected: boolean; onSelect: () => void; onPick: () => void }) {
   const { videoRef, handlers } = useHoverPlay();
+  const video = item.kind === "clip";
+  const about = [item.name, video ? seconds(item.duration) : "picture", item.description, item.tags.join(", "), item.ai ? "made with AI" : ""].filter(Boolean).join(", ");
   return (
-    <button type="button" className="pick-item tall" aria-pressed={selected} onClick={onSelect} onDoubleClick={onPick} {...handlers}
-      aria-label={`${item.name}, ${seconds(item.duration)}${item.tags.length ? `, ${item.tags.join(", ")}` : ""}`}>
-      <video ref={videoRef} src={item.thumb ? item.url : firstFrame(item.url)} poster={item.thumb || undefined} muted loop playsInline preload={item.thumb ? "none" : "metadata"} aria-hidden="true" />
-      <span className="chip dark pick-duration">{seconds(item.duration)}</span>
+    <button type="button" className={`pick-item${tall ? " tall" : ""}`} aria-pressed={selected} onClick={onSelect} onDoubleClick={onPick} {...(video ? handlers : {})}
+      aria-label={about} title={item.description || item.name}>
+      {video
+        ? <video ref={videoRef} src={item.thumb ? item.url : firstFrame(item.url)} poster={item.thumb || undefined} muted loop playsInline preload={item.thumb ? "none" : "metadata"} aria-hidden="true" />
+        : <img src={item.thumb || item.url} alt="" loading="lazy" decoding="async" />}
+      <span className="pick-badges" aria-hidden="true">
+        {video && <span className="chip dark">{seconds(item.duration)}</span>}
+        {item.ai && <span className="chip dark">AI</span>}
+      </span>
       {selected && <span className="pick-check" aria-hidden="true"><Check size={15} /></span>}
       <span className="pick-name" aria-hidden="true">{item.name}</span>
     </button>

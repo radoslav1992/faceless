@@ -14,13 +14,17 @@ and `npx wrangler deploy` as the deploy command (a full deploy, so the container
 | D1 database `faceless` | `DB` | Created (Western Europe); its `database_id` is in `wrangler.jsonc` and `0001_initial.sql` is applied. On another account: `npx wrangler d1 create faceless` and put the printed ID there |
 | R2 bucket `faceless-media` (private) | `MEDIA` | Created (location: Eastern North America). On another account: `npx wrangler r2 bucket create faceless-media --location weur` |
 | Workflows `faceless-content` (`ContentGeneration`) and `faceless-publish` (`Publication`) | `CONTENT`, `PUBLISH` | Created by `wrangler deploy` |
-| Container `MediaRenderer` (`renderer/Dockerfile`, up to 3 instances of `standard-2`) | `MEDIA_RENDERER` (Durable Object, migration `renderer-v1`) | Enable Containers on the account; `wrangler deploy` builds and pushes the image. The first rollout takes a few minutes |
+| Container `MediaRenderer` (`renderer/Dockerfile`, up to 4 instances of `standard-2`: three render, one downloads YouTube imports) | `MEDIA_RENDERER` (Durable Object, migration `renderer-v1`) | Enable Containers on the account; `wrangler deploy` builds and pushes the image. The first rollout takes a few minutes |
 | Workers AI | `AI` | Nothing to create; scripts and picture descriptions run on `TEXT_MODEL` (default `openai/gpt-6-luna`) |
 | Email Sending | `EMAIL` | Onboard the domain in Cloudflare Email, then add `"allowed_sender_addresses": ["hello@your-domain"]` to the `send_email` entry in `wrangler.jsonc` |
 | Cron `* * * * *` | – | Set by `wrangler deploy` (`triggers` in `wrangler.jsonc`) |
 | Turnstile widget | – | Create one for the domain; set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` |
 
-Apply the schema once, and again whenever a file lands in `migrations/`:
+Apply the schema once, and again whenever a file lands in `migrations/` — before the code that needs it is deployed
+(`0002_clips.sql` lets a long video be transcribed for credits, a run of kind `speech`, and indexes clips by their
+video; `0003_voices.sql` creates the narration voices managed in Admin → Voices, with the twelve voices offered
+before; `0004_library.sql` rebuilds `library_items` with its rows to add pictures, descriptions and the AI mark; the
+code already running keeps working on all three):
 
 ```sh
 npm run db:remote     # wrangler d1 migrations apply faceless --remote
@@ -34,14 +38,23 @@ npx wrangler d1 migrations list faceless --remote   # nothing left to apply
   SHA-256, so the build needs network access to `media.githubusercontent.com`. Each `standard-2` instance runs one
   render at a time.
 - **Domain**: `hookstreak.app` (and `www.hookstreak.app`, which redirects to it) are custom domains in `routes`, with
-  `SITE_URL=https://hookstreak.app` and `CONTACT_EMAIL=hello@hookstreak.com` in `vars`. Both domains used to belong to
+  `SITE_URL=https://hookstreak.app` and `CONTACT_EMAIL=hello@hookstreak.app` in `vars`. Both domains used to belong to
   the ad-app Worker (hookstreak.com): deploy ad-app without them first (a domain belongs to one Worker at a time), and if
-  they still show under ad-app's Domains & Routes, remove them there. Mail goes out from `hello@hookstreak.com`, the
-  sender already verified for hookstreak.com; to send from `hookstreak.app` instead, set up Email Sending for that zone
-  and change `CONTACT_EMAIL` and `allowed_sender_addresses` together. The Worker sends every other host
-  (except `*.workers.dev` and localhost) to the same path on `SITE_URL` (308). `SITE_URL` must be the public `https`
+  they still show under ad-app's Domains & Routes, remove them there. hookstreak.app has Email Sending onboarded in
+  Cloudflare (mail goes out from `hello@hookstreak.app`), and Email Routing forwards mail sent to that address
+  (replies, and the contact address on the legal pages) to the operator's inbox. `allowed_sender_addresses` also keeps
+  `hello@hookstreak.com` for a dashboard `EMAIL_FROM` that still names it; change `CONTACT_EMAIL`, `EMAIL_FROM` and the
+  allowed senders together. The Worker sends every other host (except `*.workers.dev` and localhost) to the same path
+  on `SITE_URL` (308). `SITE_URL` must be the public `https`
   origin: the renderer downloads only from it, and OAuth redirect URIs and the providers' input links are built from
   it.
+- **The domain's security settings** must let machines read the capability links: the renderer, fal, ElevenLabs,
+  TikTok and Instagram download `/api/render-inputs/`, `/api/upload-inputs/` and `/api/publish-media/` (each link
+  carries its own token). A challenge there fails every video with "A file in this post couldn't be loaded". Keep Bot
+  Fight Mode off (it can't be skipped per path on the Free plan), and add a WAF custom rule *URI Path starts with*
+  those three paths → *Skip* Browser Integrity Check and Security Level. The renderer introduces itself as
+  `MediaRenderer/1.0` (Python's default user agent is refused by Browser Integrity Check). Security → Events shows
+  any request the zone blocked or challenged.
 - `keep_vars` is on: variables and secrets set in the dashboard survive deploys. Keep switches, secrets and private
   values (`ADMIN_EMAILS`) in the dashboard.
 
@@ -59,6 +72,7 @@ the Worker reads (`Env` in `server/types.ts`); `.dev.vars.example` lists them fo
 | `REGISTRATION_ENABLED` | text | `true` opens sign-ups |
 | `BILLING_ENABLED` | text | `true` opens checkout and credit packs, and turns on reconciliation and contract e-mails |
 | `MEDIA_ENABLED` | text | `true` turns on making videos (AI generation and rendering) and the series autopilot |
+| `YOUTUBE_IMPORT` | text | `true` lets paid plans import videos of their own connected YouTube channel for clips (beta, off by default; read "YouTube import" under Known limits first) |
 | `APP_ENV` | text | `development` lets sign-ups work without Turnstile. Local only |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | text / secret | Bot checks on sign-up, the contact form and repeated failed sign-ins. Sign-ups refuse without the secret outside development |
 | `TRIAL_HASH_SECRET` | secret | Long random string: keys the HMAC that makes the free trial once per mailbox |
@@ -70,8 +84,7 @@ the Worker reads (`Env` in `server/types.ts`); `.dev.vars.example` lists them fo
 | `FAL_KEY` | secret | AI pictures (`openai/gpt-image-2.5/flare/text-to-image`) and clips (`fal-ai/kling-video/v2.5-turbo/pro/image-to-video`) |
 | `FAL_IMAGE_MODEL` | text | Optional picture model: `openai/gpt-image-2.5/sunburst/text-to-image`, `fal-ai/nano-banana-2` or `fal-ai/flux/schnell` (cheapest); anything else uses the default |
 | `FAL_IMAGE_QUALITY` | text | Optional GPT Image 2.5 quality: `low`, `medium`, `high` (default), `xhigh` or `max`. Each step up costs more per picture |
-| `ELEVENLABS_API_KEY` | secret | Narration (`eleven_v4` with timestamps), forced alignment, and Scribe v2 transcription of uploads (Scribe and forced alignment read files through links on `SITE_URL`) |
-| `ELEVENLABS_VOICES` | text | Optional JSON `{"george":"<voice id>", …}` replacing the ElevenLabs voice behind any of the 12 public voices (`server/voices.ts`) |
+| `ELEVENLABS_API_KEY` | secret | Narration (`eleven_v4` with timestamps), forced alignment, and Scribe v2 transcription of uploads (Scribe and forced alignment read files through links on `SITE_URL`). Admin → Voices lists the account's voices to import, so the key needs the Voices read permission (and Text to Speech, Speech to Text, Forced Alignment) |
 | `TOKEN_ENCRYPTION_KEY` | secret | `openssl rand -base64 32`. Seals OAuth tokens (AES-256-GCM) and signs API download links. Never change it once accounts are connected |
 | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` | secret | TikTok app (section 4) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | secret | Google OAuth client for YouTube (section 4) |
@@ -136,15 +149,21 @@ bound to the person who started it. Review and audit steps per network: [SOCIAL.
 ## 5. Content library (as an admin)
 
 Sign in with an address in `ADMIN_EMAILS` (confirmed), open **Admin → Library** and upload (each file up to 50 MB,
-half a second to 10 minutes, at most 4096 px a side; length, size and a thumbnail are measured in the browser):
+pictures up to 20 MB; clips and tracks half a second to 10 minutes; at most 4096 px a side; length, size and a
+thumbnail are made in the browser), or **Add from my media**: your own uploads, and the AI pictures and clips made for
+your videos, copied with their name, their prompt as the description and the AI mark. Give each item a description
+and tags: people search the library by name, description and tag. Mark what was made with AI (videos using it are
+then disclosed as AI-made when they're posted).
 
 - **Music**: tracks licensed for commercial use, tagged with the moods series choose from: `calm`, `upbeat`,
   `inspiring`, `dark`, `epic`, `mysterious`, `playful`, `ambient`. The writer picks a track whose tags include the
   series' mood (any track for "auto", and any when no track has that mood). Without music in the library, videos have
   none.
-- **Background clips**: short vertical clips (tags such as `satisfying`, `gameplay-style`, `parkour`, `cooking`,
-  `nature`, `city`). Storytime loops one behind the whole video, and any scene can use one. Without an active clip,
-  storytime videos get AI pictures instead.
+- **Clips**: short vertical clips (tags such as `satisfying`, `gameplay-style`, `parkour`, `cooking`, `nature`,
+  `city`). Storytime loops one behind the whole video, and any scene can use one. Without an active clip, storytime
+  videos get AI pictures instead.
+- **Pictures**: vertical stills any scene can show (with the same slow zoom or pan as AI pictures), for example the
+  best AI pictures of your own videos, so people can reuse them instead of paying for new ones.
 
 Switching an item off removes it from new videos; videos already made keep their render. You need the rights to
 everything you upload, including permission for every person shown.
@@ -158,7 +177,7 @@ everything you upload, including permission for every person shown.
 3. Deploy, then check `GET /api/health` (`{"ok":true}`) and point an uptime monitor at it.
 4. Check e-mail deliverability (SPF, DKIM, DMARC; [OPERATIONS.md](OPERATIONS.md)).
 5. Set `FAL_KEY` and `ELEVENLABS_API_KEY`, wait for the renderer image to roll out, then set `MEDIA_ENABLED=true`.
-6. Fill the library: music for every mood and a few background clips (section 5).
+6. Fill the library: music for every mood, a few clips and pictures, each with a description (section 5).
 7. Configure Stripe (section 3) and set `BILLING_ENABLED=true`.
 8. Configure the social apps (section 4) and start their reviews.
 9. Set `REGISTRATION_ENABLED=true`, last.
@@ -173,6 +192,12 @@ everything you upload, including permission for every person shown.
     7. Withdraw a plan from Admin → Billing (the refund shows in Stripe) and give yourself a free month.
     8. Create an API key, call `GET /api/v1/me`, make a video through `/api/v1/videos` or the MCP server, and download
        it from the signed link.
+    9. On a paid plan, upload a podcast over 10 minutes on the Clips page, find clips in it (check the credits charged
+       for its transcription), make one clip of two people talking with "Speaker focus" (check the crop cuts to
+       whoever talks) and one with "Two speakers", and post one. Import a video from a Dropbox and a Google Drive
+       link, and check that a YouTube link is refused with its explanation. If you switch on `YOUTUBE_IMPORT`,
+       connect a YouTube channel, import one of its videos from the picker, and check a video of another channel is
+       refused.
 
 ## Known limits
 
@@ -183,6 +208,25 @@ everything you upload, including permission for every person shown.
   private accounts.
 - **Credit estimates**: a new video is charged by its script's estimated length (about 15 characters a second) before
   it is spoken; an owner's recording by its real length.
+- **Clips of long videos**: each clip's tracking and render download the whole source video into a container (up to
+  2 GB); a batch of clips of a two-hour stream moves that file once per clip. Faces are found with OpenCV's YuNet and
+  the speaker is the face whose lips move while the transcript says someone talks: a speaker turned away from the
+  camera, off screen or very small is not followed (the crop stays where it was), and videos transcribed before
+  speakers were told apart only know when someone talks, not who.
+- **Imports from links**: a video can be imported from a direct link to the file or a Dropbox or Google Drive share
+  link (`server/imports.ts`). Links to other video platforms are refused with what to do instead, as are YouTube links
+  while `YOUTUBE_IMPORT` is off. Google Drive may answer large files with a page instead of the file for some
+  accounts; such imports fail with a clear message and the file can still be uploaded.
+- **YouTube import (beta)**: with `YOUTUBE_IMPORT=true`, paid plans can import videos of a YouTube channel they
+  connected, and only those (`server/youtube-import.ts`). It is a business decision, not a technical one: YouTube's
+  terms, and the YouTube API Services policies that the app's YouTube posting depends on, don't allow downloading
+  YouTube videos without YouTube's permission, so Google could object and, at worst, withdraw the app's YouTube API
+  access, which would also stop posting to YouTube. Limiting imports to people's own channels keeps copyright risk
+  low, not the terms risk; have it reviewed before switching it on, and set `YOUTUBE_IMPORT=false` at once (no deploy)
+  if Google raises it. YouTube also blocks downloads from cloud servers at times: those imports fail with
+  `YOUTUBE_BLOCKED` and people are told to upload the file; nothing works around YouTube's checks (no proxies, cookies
+  or accounts). yt-dlp must be updated every few weeks (the version in `renderer/Dockerfile`, then a deploy) as
+  YouTube changes. Videos of other people's channels are never imported.
 - **Legal pages**: the terms and privacy policy are a starting point; have them reviewed for your business and
   markets, in particular the withdrawal section (14 days, refund less the used share of the period's credits) and the
   retention periods ([PRIVACY.md](PRIVACY.md)).
