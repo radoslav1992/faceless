@@ -46,6 +46,13 @@ npx wrangler d1 migrations list faceless --remote   # nothing left to apply
   (except `*.workers.dev` and localhost) to the same path on `SITE_URL` (308). `SITE_URL` must be the public `https`
   origin: the renderer downloads only from it, and OAuth redirect URIs and the providers' input links are built from
   it.
+- **The domain's security settings** must let machines read the capability links: the renderer, fal, ElevenLabs,
+  TikTok and Instagram download `/api/render-inputs/`, `/api/upload-inputs/` and `/api/publish-media/` (each link
+  carries its own token). A challenge there fails every video with "A file in this post couldn't be loaded". Keep Bot
+  Fight Mode off (it can't be skipped per path on the Free plan), and add a WAF custom rule *URI Path starts with*
+  those three paths → *Skip* Browser Integrity Check and Security Level. The renderer introduces itself as
+  `MediaRenderer/1.0` (Python's default user agent is refused by Browser Integrity Check). Security → Events shows
+  any request the zone blocked or challenged.
 - `keep_vars` is on: variables and secrets set in the dashboard survive deploys. Keep switches, secrets and private
   values (`ADMIN_EMAILS`) in the dashboard.
 

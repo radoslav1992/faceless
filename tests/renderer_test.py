@@ -45,12 +45,13 @@ class Site:
     """Serves fixture files on the input paths and counts the requests (path and query) it gets."""
     def __init__(self):
         self.dir = Path(tempfile.mkdtemp(prefix='renderer-fixtures-'))
-        self.names, self.requests = [], []
+        self.names, self.requests, self.agents = [], [], []
         site = self
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args): pass
             def do_GET(self):
                 site.requests.append(self.path)
+                site.agents.append(self.headers.get('User-Agent', ''))
                 path = self.path.split('?', 1)[0]
                 if path == f'/api/render-inputs/{JOB}/98':
                     self.send_response(302); self.send_header('Location', site.url('photo.jpg')); self.end_headers(); return
@@ -270,6 +271,8 @@ class ComposeTest(RendererTest):
         clip_path = clip.split(FIXTURES.origin, 1)[1]
         self.assertEqual(FIXTURES.requests[self.requests:].count(clip_path), 1, 'the same URL is downloaded once')
         self.assertIn(f'?token={TOKEN}', FIXTURES.requests[-1])
+        # Downloads say they are this site's renderer (the site's edge refuses Python's default user agent).
+        self.assertEqual(FIXTURES.agents[-1], f'Mozilla/5.0 (compatible; MediaRenderer/1.0; +{FIXTURES.origin})')
         mp4 = job['outputs'][0]
         self.assertGreater(loudness(mp4, 0.1, 0.8), -35)
         self.assertLess(loudness(mp4, 1.1, 0.8), -80)

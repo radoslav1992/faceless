@@ -220,11 +220,18 @@ def input_url(url, origin):
         raise ValueError('Invalid input URL')
     return url
 
+def user_agent():
+    """How downloads introduce themselves: as this site's renderer. The site's own edge (Cloudflare's Browser Integrity
+    Check) refuses Python's default user agent with a 403, so every input would fail to load."""
+    origin = (os.environ.get('SOURCE_ORIGIN') or '').rstrip('/')
+    return f'Mozilla/5.0 (compatible; MediaRenderer/1.0{f"; +{origin}" if origin else ""})'
+
 def download(url, path):
     deadline = time.time() + DOWNLOAD_DEADLINE
     # Never through a proxy from the environment, never following a redirect.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect)
-    with opener.open(url, timeout=90) as response, open(path, 'wb') as out:
+    request = urllib.request.Request(url, headers={'User-Agent': user_agent(), 'Accept': '*/*'})
+    with opener.open(request, timeout=90) as response, open(path, 'wb') as out:
         length = response.headers.get('Content-Length') or ''
         if length.isdigit() and int(length) > MAX_BYTES: raise ValueError('Input file too large')
         total = 0
