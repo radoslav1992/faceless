@@ -17,19 +17,26 @@ export class MediaRenderer extends Container<Env> {
 // and moves to a free one when that one is busy; the caller records the slot that accepted it, so status checks,
 // the download and a stop reach the same container.
 export const RENDERERS = 3;
+/**
+ * A fourth container only downloads YouTube videos (operation 'youtube': imports from the person's own channel), one
+ * at a time, so a long download never holds up a render (wrangler.jsonc allows 4 instances).
+ */
+export const DOWNLOAD_SLOT = RENDERERS;
 export const hashSlot = (id: string) => (parseInt(id.replace(/[^0-9a-f]/gi, "").slice(0, 8), 16) || 0) % RENDERERS;
-const container = (e: Env, slot: number) => e.MEDIA_RENDERER!.get(e.MEDIA_RENDERER!.idFromName(`render-${slot}`));
+const container = (e: Env, slot: number) => e.MEDIA_RENDERER!.get(e.MEDIA_RENDERER!.idFromName(slot === DOWNLOAD_SLOT ? "download-0" : `render-${slot}`));
 
 /**
- * Hands a job to a container: the recorded one, else the hash slot, else the next free one. A container answers 200
- * for a job it already has and 429 only when it does not have it, so trying the next one never starts a job twice.
- * Returns the slot that holds the job, or null when all are busy (try again later).
+ * Hands a job to a container: the recorded one, else the hash slot, else the next free one (a YouTube download: only
+ * the download container). A container answers 200 for a job it already has and 429 only when it does not have it, so
+ * trying the next one never starts a job twice. Returns the slot that holds the job, or null when all are busy (try
+ * again later).
  */
 export async function submitRender(e: Env, payload: RenderPayload, recorded: number | null, record: (slot: number) => Promise<void>) {
   if (!e.MEDIA_RENDERER) throw new Error("RENDERER_UNAVAILABLE");
-  const first = recorded ?? hashSlot(payload.id);
-  for (let n = 0; n < RENDERERS; n++) {
-    const slot = (first + n) % RENDERERS;
+  const download = payload.operation === "youtube";
+  const first = download ? DOWNLOAD_SLOT : recorded ?? hashSlot(payload.id);
+  for (let n = 0; n < (download ? 1 : RENDERERS); n++) {
+    const slot = download ? DOWNLOAD_SLOT : (first + n) % RENDERERS;
     await record(slot);
     const r = await container(e, slot).fetch("http://renderer/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     if (r.status === 429) continue;

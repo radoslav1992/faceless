@@ -9,6 +9,7 @@ import { extOf, head, imageFits, imageInfo, mediaKey, serveObject } from "./stor
 import { claimSpeech, mayHaveSpeech, mayTranscribe, speechView, storedTranscript } from "./speech";
 import { allowance } from "./billing";
 import { importLink } from "./imports";
+import { ownVideos } from "./youtube-import";
 import { planById } from "../shared/plans";
 
 // The owner's media: uploads (images, videos, audio) in authenticated 8 MiB parts, videos imported from a link
@@ -155,6 +156,11 @@ media.post("/imports", async (c) => {
   const id = await importLink(c.env, c.get("user"), d.url);
   return c.json({ asset: assetView(await ownedAsset(c.env, c.get("user").id, id)) }, 202);
 });
+/**
+ * The latest videos of the person's connected YouTube channels, to import one for clips (a beta: `enabled` false when
+ * it is off or not on their plan, `reason` says why).
+ */
+media.get("/youtube", async (c) => c.json(await ownVideos(c.env, c.get("user"))));
 /** Marks an upload unusable; its storage reservation is released (the file itself is deleted by maintenance). */
 export async function failAsset(env: Env, id: string, error: string) {
   const a = await env.DB.prepare("SELECT meta FROM media_assets WHERE id=?").bind(id).first<{ meta: string }>();

@@ -297,7 +297,7 @@ const tools = [
   },
   {
     name: "import_video",
-    description: "Imports one of the owner's videos from a link, to find clips in it: a direct link to an MP4, MOV or WebM file, or a Dropbox or Google Drive link anyone can open. YouTube and other video platform pages can't be imported. The video is downloaded and checked in the background: call get_long_video until its status is 'ready' (or 'failed', with the error).",
+    description: "Imports one of the owner's videos from a link, to find clips in it: a direct link to an MP4, MOV or WebM file, or a Dropbox or Google Drive link anyone can open. A YouTube link works only for a video on the owner's own connected channel, when YouTube import is available on their plan; other video platform pages can't be imported. The video is downloaded and checked in the background: call get_long_video until its status is 'ready' (or 'failed', with the error).",
     inputSchema: { type: "object", properties: { url: { type: "string", description: "https link to the video file or share link." } }, required: ["url"], additionalProperties: false },
   },
   {

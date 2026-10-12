@@ -256,6 +256,10 @@ function terms(op: Operator): Section[] {
             </li>
             <li>On TikTok and YouTube you can choose to post privately, so that only the account can see the video.</li>
             <li>You can cancel or move a scheduled post until it starts publishing.</li>
+            <li>
+              Where importing from YouTube is available on your plan, we also use your YouTube connection to list your channel's latest videos and, when
+              you choose one, download it from YouTube to make clips of it. Only videos of a channel you connected can be imported.
+            </li>
             <li>The access tokens the platforms give us are stored encrypted and used only to provide the service.</li>
             <li>
               You can disconnect an account at any time in the app or in the platform's own settings. Disconnecting it in the app cancels the posts still
@@ -443,7 +447,7 @@ function privacy(op: Operator): Section[] {
           </li>
           <li>
             <strong>Uploads:</strong> pictures, videos and audio you upload, such as your own narration recording or a long video you make clips from
-            (or import from a link: we keep the link only until the video is downloaded);
+            (or import from a link or your own YouTube channel: we keep the link only until the video is downloaded);
             for uploads with speech, the words and their timings, when each speaker talks (speakers are numbered, never identified) and sounds such as
             laughter or applause; and for videos you find clips in, the moments found (their times, titles, scores and suggested post text) and where
             the people in a clip appear in the picture and which of them is talking.
@@ -543,7 +547,7 @@ function privacy(op: Operator): Section[] {
                 </tr>
                 <tr>
                   <th scope="row">TikTok, Meta (Instagram), Google (YouTube)</th>
-                  <td>Publishing your videos and reading their stats — only when you connect an account</td>
+                  <td>Publishing your videos and reading their stats, and importing a video of your own YouTube channel when you choose one — only when you connect an account</td>
                   <td>The videos you post, their titles and captions, and the account tokens</td>
                 </tr>
               </tbody>

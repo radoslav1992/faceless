@@ -4,7 +4,7 @@ export interface Env {
   MEDIA: R2Bucket;
   AI: { run: (model: string, input: Record<string, unknown>) => Promise<unknown> };
   ASSETS: Fetcher;
-  /** Video runs ({runId}), upload checks ({inspectId}) and series episodes ({episode}). */
+  /** Video runs ({runId}), upload checks ({inspectId}), imports from links ({importId}) and series episodes ({episode}). */
   CONTENT?: Workflow<{ runId?: string; inspectId?: string; importId?: string; episode?: { seriesId: string; slot: number; first?: boolean } }>;
   PUBLISH?: Workflow<{ publicationId: string }>;
   MEDIA_RENDERER?: DurableObjectNamespace;
@@ -15,6 +15,11 @@ export interface Env {
   BILLING_ENABLED?: string;
   /** Rendering and AI generation (needs the renderer container and provider keys). */
   MEDIA_ENABLED?: string;
+  /**
+   * "true": paid plans can import videos from their own connected YouTube channel for clips (server/youtube-import.ts;
+   * a beta, off by default: see docs/DEPLOYMENT.md before switching it on).
+   */
+  YOUTUBE_IMPORT?: string;
   EMAIL_FROM?: string;
   CONTACT_EMAIL?: string;
   ADMIN_EMAILS?: string;

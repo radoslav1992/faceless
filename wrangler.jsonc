@@ -37,8 +37,9 @@
     },
   ],
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "faceless-media" }],
+  // Three renderers and one container that only downloads YouTube videos (imports from people's own channels).
   "containers": [
-    { "class_name": "MediaRenderer", "image": "./renderer/Dockerfile", "max_instances": 3, "instance_type": "standard-2" },
+    { "class_name": "MediaRenderer", "image": "./renderer/Dockerfile", "max_instances": 4, "instance_type": "standard-2" },
   ],
   "durable_objects": { "bindings": [{ "name": "MEDIA_RENDERER", "class_name": "MediaRenderer" }] },
   "migrations": [{ "tag": "renderer-v1", "new_sqlite_classes": ["MediaRenderer"] }],

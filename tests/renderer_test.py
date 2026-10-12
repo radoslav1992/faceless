@@ -1099,4 +1099,74 @@ class CarouselStillsTest(RendererTest):
         # A logo that is not a picture is named after the download.
         self.assert_fails(self.payload(urls=[FIXTURES.url('wide.png'), FIXTURES.url('clip.mp4')]), 'MEDIA_FORMAT', network=True)
 
+FAKE_YTDLP = r"""#!/usr/bin/env python3
+# Stands in for yt-dlp (this test never reaches YouTube): records its arguments, then acts as FAKE_YTDLP_MODE says.
+import json, os, shutil, sys
+args = sys.argv[1:]
+with open(os.environ['FAKE_YTDLP_LOG'], 'a') as log: log.write(json.dumps(args) + '\n')
+mode = os.environ['FAKE_YTDLP_MODE']
+errors = {
+    'bot': "ERROR: [youtube] dQw4w9WgXcQ: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication.",
+    'forbidden': 'ERROR: unable to download video data: HTTP Error 403: Forbidden',
+    'members': 'ERROR: [youtube] dQw4w9WgXcQ: Join this channel to get access to members-only content like this video, and other exclusive perks.',
+    'age': 'ERROR: [youtube] dQw4w9WgXcQ: Sign in to confirm your age. This video may be inappropriate for some users.',
+    'removed': 'ERROR: [youtube] dQw4w9WgXcQ: Video unavailable. This video has been removed by the uploader',
+    'other': 'ERROR: something unexpected',
+}
+if mode in errors:
+    print(errors[mode], file=sys.stderr); sys.exit(1)
+if mode == 'big': print('[download] File is larger than max-filesize (2000000 bytes > 1000 bytes). Aborting.'); sys.exit(0)
+if mode == 'filter': print('[youtube] dQw4w9WgXcQ: does not pass filter (duration <= 600), skipping ..'); sys.exit(0)
+shutil.copy(os.environ['FAKE_YTDLP_FILE'], os.path.join(args[args.index('-P') + 1], 'video.mp4'))
+"""
+
+class YoutubeTest(RendererTest):
+    """Operation 'youtube': one video by its ID, with yt-dlp (a stand-in here), and YouTube's refusals as reasons."""
+    def setUp(self):
+        super().setUp()
+        self.bin = Path(tempfile.mkdtemp(dir=WORK))
+        tool = self.bin / 'yt-dlp'
+        tool.write_text(FAKE_YTDLP)
+        tool.chmod(0o755)
+        self.log = self.bin / 'calls.jsonl'
+
+    def download(self, mode, **payload):
+        env = {'PATH': f'{self.bin}{os.pathsep}{os.environ["PATH"]}', 'FAKE_YTDLP_MODE': mode, 'FAKE_YTDLP_LOG': str(self.log),
+               'FAKE_YTDLP_FILE': str(FIXTURES.dir / 'clip.mp4')}
+        with patch.dict(os.environ, env):
+            return run({'operation': 'youtube', 'video': 'dQw4w9WgXcQ', 'maxSeconds': 600, 'maxBytes': 50_000_000, **payload})
+
+    def calls(self):
+        return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
+
+    def test_downloads_the_video_by_its_id_as_one_mp4(self):
+        job = self.download('ok')
+        self.assertEqual((job['status'], job['files']), ('completed', 1), job)
+        self.assertEqual([os.path.basename(p) for p in job['outputs']], ['video.mp4'])
+        self.assertEqual(Path(job['outputs'][0]).read_bytes(), (FIXTURES.dir / 'clip.mp4').read_bytes())
+        self.assert_outputs_only(job)
+        [args] = self.calls()
+        # Only YouTube's own address for that ID; the person's limits; 1080p at most; never their config or a cache.
+        self.assertEqual(args[-2:], ['--', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'])
+        self.assertEqual(args[args.index('--max-filesize') + 1], '50000000')
+        self.assertIn('duration <= 600', args[args.index('--match-filter') + 1])
+        self.assertIn('[height<=1080]', args[args.index('-f') + 1])
+        for flag in ('--ignore-config', '--no-playlist', '--no-cache-dir'): self.assertIn(flag, args)
+        self.assertFalse(any('cookie' in a or 'proxy' in a for a in args))
+        self.assertEqual(len(FIXTURES.requests), self.requests, 'nothing is asked of the site')
+
+    def test_names_youtube_refusals_and_skips(self):
+        for mode, code in (('bot', 'YOUTUBE_BLOCKED'), ('forbidden', 'YOUTUBE_BLOCKED'), ('members', 'YOUTUBE_RESTRICTED'), ('age', 'YOUTUBE_RESTRICTED'),
+                           ('removed', 'YOUTUBE_UNAVAILABLE'), ('other', 'YOUTUBE_FAILED'), ('big', 'MEDIA_TOO_LARGE'), ('filter', 'MEDIA_TOO_LONG')):
+            job = self.download(mode)
+            self.assertEqual((job['status'], job.get('error')), ('failed', code), mode)
+            self.assertEqual(os.listdir(job['dir']), [], mode)
+
+    def test_refuses_anything_but_a_video_id_before_running_anything(self):
+        for payload in ({'video': 'dQw4w9WgXc'}, {'video': '--exec=sh -c'}, {'video': 'https://youtu.be/dQw4w9WgXcQ'}, {'video': None},
+                        {'maxSeconds': 'all'}, {'maxBytes': 0}, {'maxBytes': server.MAX_BYTES + 1}, {'maxSeconds': server.LONG_LENGTH + 1}):
+            job = self.download('ok', **payload)
+            self.assertEqual((job['status'], job.get('error')), ('failed', 'MEDIA_INVALID'), payload)
+        self.assertEqual(self.calls(), [])
+
 if __name__ == '__main__': unittest.main()

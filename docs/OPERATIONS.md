@@ -103,6 +103,11 @@ video is attached to it); its failure refunds the credits and the Clips page say
 | `PROVIDER_REDIRECT`, `PROVIDER_URL`, `PROVIDER_DOWNLOAD` | a provider answered with a redirect or an output on an unexpected host |
 | `INTERNAL` | anything else; the workflow log (`Run failed`) has the run ID |
 
+**Imports from links** fail the imported file (it shows "Can't be used" with the reason), never a run, and charge
+nothing; the workflow logs `Import failed` with the code. YouTube imports (beta) add `YOUTUBE_BLOCKED` (YouTube refused
+the download from our servers: bot check, 429 or 403), `YOUTUBE_RESTRICTED` (members-only, age-restricted, private),
+`YOUTUBE_UNAVAILABLE` (removed or region-blocked) and `YOUTUBE_FAILED` (anything else, often an outdated yt-dlp).
+
 **Publications** store the plain message people read, not a code; Operations groups them by network and the message's
 first sentence. The codes behind them (`server/social/errors.ts`): `AUTH_EXPIRED` (reconnect; the account is marked
 expired), `PERMISSION` (reconnect and allow posting), `RATE_LIMITED`, `ACCOUNT_LIMITED`, `MEDIA_REJECTED` (the network
@@ -196,7 +201,13 @@ again by itself.
   found`) only costs transcripts of uploads.
 - **Renderer** (`RENDERER_UNAVAILABLE`, `MEDIA_TIMEOUT`, `MEDIA_LOST`): check Containers in the dashboard (instances
   running, the latest image rolled out, errors). Three containers render one job each; more work waits for a free
-  one, and runs time out after about 40 minutes of waiting or rendering.
+  one, and runs time out after about 40 minutes of waiting or rendering. A fourth (`download-0`) only downloads
+  YouTube imports, one at a time.
+- **YouTube import** (beta): many `YOUTUBE_BLOCKED` failures in the logs (`Import failed`) mean YouTube is refusing
+  downloads from Cloudflare's servers; there is nothing to fix on our side, and people are told to upload the file
+  instead. If it lasts, switch `YOUTUBE_IMPORT=false` so people aren't offered a feature that keeps failing. A rise of
+  `YOUTUBE_FAILED` usually means yt-dlp is out of date: raise its version in `renderer/Dockerfile` and deploy. If
+  Google contacts you about downloading, set `YOUTUBE_IMPORT=false` first (no deploy).
 - **Workers AI** (the writer): drafts answer "We couldn't write this video right now", series slots are retried and
   then skipped with reason `failed`, and `Text model failed` is logged (without the input). `TEXT_MODEL` switches the
   model without a deploy.

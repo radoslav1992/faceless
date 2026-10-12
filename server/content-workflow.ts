@@ -16,6 +16,7 @@ import { failAsset } from "./media";
 import { claimSpeech, mayHaveSpeech, storedTranscript, transcribe } from "./speech";
 import { momentsAfterSpeech } from "./highlights";
 import { downloadImport, importFailure } from "./imports";
+import { storeYoutube, youtubeJob } from "./youtube-import";
 import { narrationContext } from "./story";
 import { runEpisode, videoReady, videoFailed } from "./series";
 import { LONG_VIDEO_SECONDS, SPEECH_MAX_SECONDS, speechTurns } from "../shared/speech";
@@ -413,7 +414,7 @@ async function renderJob(e: Env, step: WorkflowStep, run: RunInfo, part: Plan["c
 }
 
 /** Waits for a renderer job (on a free container) and returns its final status and the slot that holds it. */
-async function rendererJob(e: Env, step: WorkflowStep, name: string, payload: RenderPayload, rounds: number, wait: "4 seconds" | "8 seconds") {
+async function rendererJob(e: Env, step: WorkflowStep, name: string, payload: RenderPayload, rounds: number, wait: "4 seconds" | "8 seconds" | "15 seconds") {
   let slot: number | null = null, result: RenderStatus | null = null;
   for (let i = 0; i < rounds && !result; i++) {
     const r = await step.do(`${name}-${i}`, { retries: { limit: 2, delay: "10 seconds" }, timeout: "2 minutes" }, async () => {
@@ -477,14 +478,22 @@ async function inspectUpload(e: Env, step: WorkflowStep, assetId: string) {
 const importOnce = { retries: { limit: 1, delay: "1 minute" as const }, timeout: "45 minutes" as const };
 /**
  * A video imported from a link (server/imports.ts): downloaded into storage, then checked and transcribed like an
- * upload. A failed download fails the file with the reason; nothing is charged.
+ * upload. A video of the person's own YouTube channel (server/youtube-import.ts) is downloaded by the renderer's
+ * download container first (up to 30 minutes, waiting its turn). A failed download fails the file with the reason;
+ * nothing is charged.
  */
 async function importVideo(e: Env, step: WorkflowStep, assetId: string) {
+  let youtube: RenderPayload | null = null;
   try {
-    if (!(await step.do("import", importOnce, () => downloadImport(e, assetId)))) return;
+    youtube = await step.do("import-youtube", safe, () => youtubeJob(e, assetId));
+    if (youtube) {
+      const job = youtube;
+      const { slot } = await rendererJob(e, step, "youtube", job, 120, "15 seconds");
+      if (!(await step.do("youtube-store", importOnce, () => storeYoutube(e, assetId, slot, job.id)))) return;
+    } else if (!(await step.do("import", importOnce, () => downloadImport(e, assetId)))) return;
   } catch (error) {
     console.warn("Import failed", { assetId, code: error instanceof Error && /^[A-Z_]{3,40}$/.test(error.message) ? error.message : error instanceof Error ? error.name : "INTERNAL" });
-    await step.do("import-failed", () => failAsset(e, assetId, importFailure(error)));
+    await step.do("import-failed", () => failAsset(e, assetId, importFailure(error, !!youtube)));
     return;
   }
   await inspectUpload(e, step, assetId);

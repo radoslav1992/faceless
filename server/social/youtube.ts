@@ -7,11 +7,11 @@ import { bearer, challenge, checkedUrl, clip, count, form, json, readRange, send
 // YouTube: Google OAuth 2 (web server flow with PKCE) and the YouTube Data API v3 resumable upload.
 const AUTHORIZE = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN = "https://oauth2.googleapis.com/token";
-const API = "https://www.googleapis.com/youtube/v3";
+export const API = "https://www.googleapis.com/youtube/v3";
 const UPLOAD = "https://www.googleapis.com/upload/youtube/v3/videos";
 const UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload";
 /** Reads the channel at connection and the videos' statistics. */
-const READ_SCOPE = "https://www.googleapis.com/auth/youtube.readonly";
+export const READ_SCOPE = "https://www.googleapis.com/auth/youtube.readonly";
 const SCOPES = [UPLOAD_SCOPE, READ_SCOPE] as const;
 const VIDEO_ID = /^[\w-]{6,20}$/;
 /** Upload chunk: a multiple of 256 KiB, as the resumable protocol requires; bounded memory and resumable. */

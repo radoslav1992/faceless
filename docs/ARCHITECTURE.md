@@ -123,18 +123,36 @@ by the renderer (`inspect`: kind, picture size, length up to the plan's `videoMi
 or 2 hours for videos on paid plans — and sound) and, when they may hold speech and last up to 10 minutes, transcribed
 once by ElevenLabs Scribe v2 for free within the same daily allowance. A failed transcription only means no subtitles.
 
-**Imports from links** (`server/imports.ts`, `POST /api/media/imports`, the Clips page's *Import from a link*,
-`POST /api/v1/sources` and the MCP tool `import_video`): a direct link to an MP4, MOV or WebM file, or a Dropbox
-(`dl=1`) or Google Drive (its `drive.usercontent.google.com` download address) share link. Only https on the default
-port to a public host name is fetched: no IP addresses, local or reserved names, credentials or this site — on every
-redirect too (at most five, followed by hand). Links to YouTube, TikTok, Instagram, Facebook, X, Twitch, Vimeo and
-Kick are refused before any request, with what to do instead (YouTube's terms and API policies don't allow
-downloading its videos). While the person waits the link is opened once: a page, a missing file or a file whose first
-bytes are not MP4, MOV or WebM is refused at once, as is a size over the plan's `videoMb`. The file is then a
-`checking` upload with `meta.import` (the link and the bytes reserved: its size, or the plan's largest video when the
-link doesn't tell); the workflow (`importId`) downloads it into R2 in 5 MiB parts (`storeStream`, never past the
-reserved size, 40 minutes at most, one more try after a minute) and checks it like an upload. Confirmed emails only;
-30 links an hour and 3 imports at once per person.
+**Imports from links** (`server/imports.ts`, `POST /api/media/imports`, the Clips page's *Import*, `POST
+/api/v1/sources` and the MCP tool `import_video`): a direct link to an MP4, MOV or WebM file, or a Dropbox (`dl=1`) or
+Google Drive (its `drive.usercontent.google.com` download address) share link. Only https on the default port to a
+public host name is fetched: no IP addresses, local or reserved names, credentials or this site — on every redirect
+too (at most five, followed by hand). Links to TikTok, Instagram, Facebook, X, Twitch, Vimeo and Kick, and to YouTube
+unless YouTube import is on (below), are refused before any request, with what to do instead. While the person waits
+the link is opened once: a page, a missing file or a file whose first bytes are not MP4, MOV or WebM is refused at
+once, as is a size over the plan's `videoMb`. The file is then a `checking` upload with `meta.import` (the link and
+the bytes reserved: its size, or the plan's largest video when the link doesn't tell); the workflow (`importId`)
+downloads it into R2 in 5 MiB parts (`storeStream`, never past the reserved size, 40 minutes at most, one more try
+after a minute) and checks it like an upload. Confirmed emails only; 30 links an hour and 3 imports at once per
+person.
+
+**YouTube import (beta, `YOUTUBE_IMPORT=true`, paid plans)** (`server/youtube-import.ts`): only videos of a YouTube
+channel the person connected (the same OAuth connection as posting, with `youtube.readonly`). `GET /api/media/youtube`
+lists each connected channel's 25 latest uploads for the import picker (channels, playlistItems and videos.list: 3
+quota units per channel; 30 listings an hour per person), each with why it can't be imported: private, live or
+upcoming, still processing, age-restricted, under 20 seconds or over the plan's `videoMinutes`. A YouTube link sent to
+the import (any form: watch, youtu.be, shorts, live, embed) is looked up with videos.list; a video whose
+`snippet.channelId` is not one of the person's connected channels is refused, so nobody can import someone else's
+video. The file is reserved at 2 MB a second of the video plus 50 MB (at most the plan's `videoMb`), `meta.import`
+holds `{ youtube, channel, limit }`, and the workflow hands the renderer an operation `youtube` (the video ID, the
+longest length and the reserved size) that runs only on the fourth container, `download-0` (`DOWNLOAD_SLOT`), one
+download at a time, so renders never wait behind one; the workflow waits up to 30 minutes, then moves the MP4 into R2
+(never past the reserved size) and checks it like an upload. The renderer runs yt-dlp (with Deno, its JavaScript
+runtime, both pinned in the Dockerfile) on `https://www.youtube.com/watch?v=<id>` only, at most 1080p (H.264 and AAC
+when YouTube has them), with no proxy, cookies or account; YouTube's refusals come back as `YOUTUBE_BLOCKED` (bot
+checks, 429, 403), `YOUTUBE_RESTRICTED` (members-only, age-restricted, private), `YOUTUBE_UNAVAILABLE` or
+`YOUTUBE_FAILED`, and the video fails with what to do instead (download it in YouTube Studio and upload it). The app's
+CSP allows `https://i.ytimg.com` images for the picker's thumbnails.
 
 ## The content workflow
 
@@ -183,14 +201,14 @@ seconds; music loops, fades and is lowered under the voice; free-trial videos ge
 name. The cover is taken once the first words (and the headline) are on screen. Output is 1080×1920 at 30 fps, at most
 180 seconds.
 
-**The container** (`renderer/`, Python 3.12 with FFmpeg, libass and the bundled Noto fonts): three instances
-(`max_instances: 3`, `standard-2`), each running one job at a time. A job goes to the container its ID hashes to, or
-the next free one (`429` means busy), and the workflow records the slot that accepted it. Inputs are downloaded only
-from `SITE_URL`'s origin on the capability paths; finished files wait 30 minutes for the Worker. Files with an AI
-voice, picture or clip are marked as AI-made (MP4 tags and an XMP packet with the IPTC digital source type), and the
-saved render carries `{"ai":true}`. The Worker uses the `compose`, `inspect` and `track` operations; a clip's split
-layout is a `compose` segment with `panes` (windows of the picture cropped in whole even pixels, scaled to fill the
-frame's width and their height, stacked).
+**The container** (`renderer/`, Python 3.12 with FFmpeg, libass and the bundled Noto fonts): three render instances
+and one download instance for YouTube imports (`max_instances: 4`, `standard-2`), each running one job at a time. A
+job goes to the container its ID hashes to, or the next free one (`429` means busy), and the workflow records the slot
+that accepted it. Inputs are downloaded only from `SITE_URL`'s origin on the capability paths; finished files wait 30
+minutes for the Worker. Files with an AI voice, picture or clip are marked as AI-made (MP4 tags and an XMP packet with
+the IPTC digital source type), and the saved render carries `{"ai":true}`. The Worker uses the `compose`, `inspect`
+and `track` operations; a clip's split layout is a `compose` segment with `panes` (windows of the picture cropped in
+whole even pixels, scaled to fill the frame's width and their height, stacked).
 
 ## Clips from long videos
 

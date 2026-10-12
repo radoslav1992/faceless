@@ -7,14 +7,17 @@ import { hit, token } from "./security";
 import { extOf, mediaKey, storeStream } from "./storage";
 import { allowance } from "./billing";
 import { requireVerified } from "./videos";
+import { ownYoutubeVideo, youtubeImport } from "./youtube-import";
 import { PRODUCT } from "../shared/brand";
-import { planById } from "../shared/plans";
+import { planById, type Plan } from "../shared/plans";
+import { youtubeId } from "../shared/youtube";
 
 // Videos imported from a link, for Clips: a direct link to an MP4, MOV or WebM file, or a Dropbox or Google Drive share
 // link. The link is checked and opened once while the person waits (so a web page or a missing file is refused at
 // once); the workflow then downloads the file into storage (`downloadImport`) and checks it like an upload. Pages of
-// video platforms are never imported: YouTube's terms forbid downloading its videos, and the others serve pages, not
-// files. Only public https hosts are fetched (no addresses, no local names, never this site), on every redirect too.
+// video platforms are not fetched: the others serve pages, not files, and a YouTube link is only taken for a video on
+// the person's own connected channel when YouTube import is on (server/youtube-import.ts; the renderer downloads it).
+// Only public https hosts are fetched (no addresses, no local names, never this site), on every redirect too.
 
 /** Links opened per person and hour (refused ones included), and imports downloading at once. */
 export const LINKS_PER_HOUR = 30, ACTIVE_IMPORTS = 3;
@@ -42,12 +45,22 @@ const failures: Record<string, string> = {
   LINK_TIMEOUT: "Downloading this video took too long. Try again, or upload the file.",
   MEDIA_SIZE: "This video is larger than your plan takes: up to 500 MB on the free trial and 2 GB on paid plans.",
   MEDIA_EMPTY: "The file at this link is empty.",
+  // A YouTube video from the person's channel, as the renderer's download reports it (renderer/server.py).
+  YOUTUBE_BLOCKED: "YouTube is blocking downloads from our servers right now. Try again later, or download the video in YouTube Studio and upload the file.",
+  YOUTUBE_RESTRICTED: "YouTube doesn't allow downloading this video (members-only, age-restricted or private). Download it in YouTube Studio and upload the file.",
+  YOUTUBE_UNAVAILABLE: "This video isn't available on YouTube any more, or not in our region. Download it in YouTube Studio and upload the file.",
+  YOUTUBE_FAILED: "This video couldn't be downloaded from YouTube. Try again, or download it in YouTube Studio and upload the file.",
+  MEDIA_TOO_LARGE: "This video is too large to import. Download it in YouTube Studio and upload the file.",
+  MEDIA_TIMEOUT: "Downloading this video took too long. Try again, or upload the file.",
 };
-/** The message for a failed import (a code from this module or storeStream; anything else is a failed download). */
-export function importFailure(error: unknown) {
+/**
+ * The message for a failed import (a code from this module, storeStream or the renderer's YouTube download; anything
+ * else is a failed download).
+ */
+export function importFailure(error: unknown, youtube = false) {
   const e = error as Error;
   if (e?.name === "TimeoutError" || e?.name === "AbortError") return failures.LINK_TIMEOUT;
-  return failures[e?.message] || failures.LINK_FAILED;
+  return failures[e?.message] || (youtube ? failures.YOUTUBE_FAILED : failures.LINK_FAILED);
 }
 
 /**
@@ -185,6 +198,12 @@ export async function importLink(env: Env, user: DbUser, raw: string) {
   const active = await env.DB.prepare("SELECT COUNT(*) AS n FROM media_assets WHERE user_id=? AND status='checking' AND json_extract(meta,'$.import') IS NOT NULL")
     .bind(user.id).first<{ n: number }>();
   if ((active?.n || 0) >= ACTIVE_IMPORTS) throw new HTTPException(429, { message: `${ACTIVE_IMPORTS} videos are being imported for you. Wait for one to finish, then try again.` });
+  // A video on the person's own YouTube channel: checked with the YouTube API, downloaded by the renderer.
+  const video = youtubeImport(env) ? youtubeId(raw) : null;
+  if (video) {
+    const own = await ownYoutubeVideo(env, user, video);
+    return startImport(env, user, own.plan, { name: own.title, mime: "video/mp4", bytes: own.limit, source: { youtube: video, channel: own.channel, limit: own.limit } });
+  }
   let found: Awaited<ReturnType<typeof probe>>;
   try {
     found = await probe(env, raw);
@@ -195,17 +214,26 @@ export async function importLink(env: Env, user: DbUser, raw: string) {
   if (found.bytes && found.bytes > max)
     throw new HTTPException(413, { message: `Videos can be up to ${(max / MB).toLocaleString("en-US")} MB${plan.id === "free" ? " on the free trial; paid plans take videos up to 2 hours" : ""}.` });
   // The size is reserved now (the plan's largest video when the link doesn't tell), so imports can't overfill storage.
+  return startImport(env, user, plan, { name: found.name, mime: found.mime, bytes: found.bytes || max, source: { url: found.link, limit: found.bytes || max } });
+}
+
+/**
+ * Creates an imported video (checking, `meta.import` saying where it comes from and the bytes it may take, which are
+ * reserved in the person's storage now) and starts its download in the workflow.
+ */
+async function startImport(env: Env, user: DbUser, plan: Plan, d: { name: string; mime: string; bytes: number; source: Record<string, unknown> }) {
   const id = uid();
   try {
     await env.DB.prepare(
       "INSERT INTO media_assets(id,user_id,kind,name,object_key,mime,bytes,status,meta,created_at,updated_at) VALUES (?,?,'upload',?,?,?,?,'checking',?,?,?)",
     ).bind(
-      id, user.id, found.name, mediaKey(user.id, id, extOf(found.mime)), found.mime, found.bytes || max,
-      JSON.stringify({ token: token(), maxSeconds: (plan.videoMinutes || 10) * 60, import: { url: found.link, limit: found.bytes || max, at: now() } }), now(), now(),
+      id, user.id, d.name, mediaKey(user.id, id, extOf(d.mime)), d.mime, d.bytes,
+      JSON.stringify({ token: token(), maxSeconds: (plan.videoMinutes || 10) * 60, import: { ...d.source, at: now() } }), now(), now(),
     ).run();
   } catch (e) {
     dbFailure(e);
   }
+  if (!env.CONTENT) throw new HTTPException(503, { message: "The import couldn't start. Please try again." });
   try {
     await env.CONTENT.create({ id: `import-${id}`, params: { importId: id } });
   } catch {

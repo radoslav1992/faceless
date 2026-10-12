@@ -9,6 +9,10 @@ ARG YUNET_SHA256=8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa
 RUN mkdir -p /app/models && python -c "import hashlib, urllib.request; d = urllib.request.urlopen('$YUNET_URL', timeout=120).read(); \
 assert hashlib.sha256(d).hexdigest() == '$YUNET_SHA256', 'YuNet model: checksum mismatch'; \
 open('/app/models/face_detection_yunet_2023mar.onnx', 'wb').write(d)"
+# Downloads of the person's own YouTube videos (operation 'youtube', on the download container only): yt-dlp with its
+# pinned dependencies and Deno, the JavaScript runtime it needs for YouTube (both published on PyPI by their authors).
+# YouTube changes often break downloads: update the yt-dlp version here every few weeks (docs/OPERATIONS.md).
+RUN pip install --no-cache-dir "yt-dlp[default,pin]==2026.8.19" deno==2.9.7
 ENV PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
 COPY server.py /app/server.py
