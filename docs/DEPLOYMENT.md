@@ -38,12 +38,14 @@ npx wrangler d1 migrations list faceless --remote   # nothing left to apply
   SHA-256, so the build needs network access to `media.githubusercontent.com`. Each `standard-2` instance runs one
   render at a time.
 - **Domain**: `hookstreak.app` (and `www.hookstreak.app`, which redirects to it) are custom domains in `routes`, with
-  `SITE_URL=https://hookstreak.app` and `CONTACT_EMAIL=hello@hookstreak.com` in `vars`. Both domains used to belong to
+  `SITE_URL=https://hookstreak.app` and `CONTACT_EMAIL=hello@hookstreak.app` in `vars`. Both domains used to belong to
   the ad-app Worker (hookstreak.com): deploy ad-app without them first (a domain belongs to one Worker at a time), and if
-  they still show under ad-app's Domains & Routes, remove them there. Mail goes out from `hello@hookstreak.com`, the
-  sender already verified for hookstreak.com; to send from `hookstreak.app` instead, set up Email Sending for that zone
-  and change `CONTACT_EMAIL` and `allowed_sender_addresses` together. The Worker sends every other host
-  (except `*.workers.dev` and localhost) to the same path on `SITE_URL` (308). `SITE_URL` must be the public `https`
+  they still show under ad-app's Domains & Routes, remove them there. hookstreak.app has Email Sending onboarded in
+  Cloudflare (mail goes out from `hello@hookstreak.app`), and Email Routing forwards mail sent to that address
+  (replies, and the contact address on the legal pages) to the operator's inbox. `allowed_sender_addresses` also keeps
+  `hello@hookstreak.com` for a dashboard `EMAIL_FROM` that still names it; change `CONTACT_EMAIL`, `EMAIL_FROM` and the
+  allowed senders together. The Worker sends every other host (except `*.workers.dev` and localhost) to the same path
+  on `SITE_URL` (308). `SITE_URL` must be the public `https`
   origin: the renderer downloads only from it, and OAuth redirect URIs and the providers' input links are built from
   it.
 - **The domain's security settings** must let machines read the capability links: the renderer, fal, ElevenLabs,
