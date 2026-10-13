@@ -223,16 +223,12 @@ media.delete("/:id", async (c) => {
   return c.json({ ok: true });
 });
 
-/**
- * The renderer reads an upload it is checking through a capability link (token in the URL, while checking), and
- * ElevenLabs Scribe a ready one whose speech it transcribes (its own token, while that is pending, 3 hours at most).
- */
+/** The renderer reads an upload it is checking through a capability link (token in the URL, while checking). */
 export const uploadInputs = new Hono<{ Bindings: Env }>();
 uploadInputs.get("/:id", async (c) => {
   const a = await c.env.DB.prepare("SELECT object_key,meta,status FROM media_assets WHERE id=?").bind(c.req.param("id")).first<any>();
   const meta = json<any>(a?.meta, {}), given = c.req.query("token") || "";
   const checking = a?.status === "checking" && typeof meta.token === "string" && safeEqual(meta.token, given);
-  const listening = a?.status === "ready" && typeof meta.listen?.token === "string" && meta.listen.until > now() && safeEqual(meta.listen.token, given);
-  if (!a || !(checking || listening)) throw new HTTPException(404, { message: "Not found." });
+  if (!a || !checking) throw new HTTPException(404, { message: "Not found." });
   return serveObject(c.env, a.object_key, c.req.header("Range"), "no-store");
 });

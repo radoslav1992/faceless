@@ -12,6 +12,15 @@ import { call, signedIn, subscribe, testEnv } from "./helpers";
 const step = { do: async (_name: string, a: any, b?: any) => (b ?? a)(), sleep: async () => {} };
 afterEach(() => vi.unstubAllGlobals());
 
+/** A stored file as the workflow hands it to Scribe. */
+const fileOf = (bytes: Uint8Array, type = "video/mp4") => ({ body: new Blob([bytes as BlobPart]).stream(), size: bytes.length, type, name: "upload.mp4" });
+/** What Scribe receives: the form fields and the uploaded file, read from the streamed multipart body. */
+async function received(init: any) {
+  const form = await new Response(init.body, { headers: { "Content-Type": init.headers["Content-Type"] } }).formData();
+  const file = form.get("file") as File;
+  form.delete("file");
+  return { fields: Object.fromEntries(form.entries()), file: { name: file.name, type: file.type, bytes: new Uint8Array(await file.arrayBuffer()) } };
+}
 /** Scribe's answer: words with spacing between them, as the API returns it. */
 const scribe = (words: [string, number, number][], language = "eng") => ({
   language_code: language, language_probability: 0.98, text: words.map((w) => w[0]).join(" "),
@@ -74,31 +83,42 @@ describe("Scribe answers", () => {
     expect(storedTranscript(JSON.stringify({ transcript: { language: "eng", words: t.words } }))).toEqual({ language: "eng", words: t.words });
   });
 
-  it("sends the file's link (no upload, no language) and reads the words", async () => {
+  it("uploads the file itself, streamed (no link for ElevenLabs to fetch, no language), and reads the words", async () => {
     const seen: any[] = [];
     vi.stubGlobal("fetch", async (url: string, init: any) => {
-      seen.push({ url, method: init.method, key: init.headers["xi-api-key"], redirect: init.redirect, fields: Object.fromEntries((init.body as FormData).entries()) });
+      seen.push({ url, method: init.method, key: init.headers["xi-api-key"], redirect: init.redirect, ...(await received(init)) });
       return Response.json(scribe([["Here's", 1, 1.4], ["how.", 1.4, 1.7]], "bul"));
     });
     const env: any = { ELEVENLABS_API_KEY: " el-key " };
-    expect(await transcribe(env, "https://app.test/api/upload-inputs/x?token=t", 30)).toEqual({
+    const bytes = new Uint8Array(300_000).map((_, i) => i % 251);
+    expect(await transcribe(env, fileOf(bytes), 30)).toEqual({
       language: "bul", words: [{ text: "Here's", start: 1, end: 1.4 }, { text: "how.", start: 1.4, end: 1.7 }], turns: [[1, 1.7, 0]],
     });
     expect(seen).toEqual([{
       url: SCRIBE_URL, method: "POST", key: "el-key", redirect: "manual",
-      fields: { model_id: SCRIBE_MODEL, source_url: "https://app.test/api/upload-inputs/x?token=t", timestamps_granularity: "word", diarize: "true", tag_audio_events: "true" },
+      fields: { model_id: SCRIBE_MODEL, timestamps_granularity: "word", diarize: "true", tag_audio_events: "true" },
+      file: { name: "upload.mp4", type: "video/mp4", bytes },
     }]);
     expect(SCRIBE_MODEL).toBe("scribe_v2");
   });
 
   it("turns failures into codes and never calls without a key", async () => {
     vi.stubGlobal("fetch", async () => Response.json({ detail: { status: "quota_exceeded", message: "secret" } }, { status: 401 }));
-    await expect(transcribe({ ELEVENLABS_API_KEY: "k" } as any, "https://x", 5)).rejects.toMatchObject({ code: "SPEECH_UNAVAILABLE" });
+    const file = () => fileOf(new Uint8Array(100));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // The account's credits are used up: ElevenLabs reads the file first (it prices by length), then refuses.
+    await expect(transcribe({ ELEVENLABS_API_KEY: "k" } as any, file(), 5)).rejects.toMatchObject({ code: "SPEECH_CREDITS" });
+    expect(warn).toHaveBeenLastCalledWith("Scribe refused", { status: 401, reason: "quota_exceeded" });
+    vi.stubGlobal("fetch", async () => Response.json({ detail: { status: "invalid_api_key", message: "secret" } }, { status: 401 }));
+    await expect(transcribe({ ELEVENLABS_API_KEY: "k" } as any, file(), 5)).rejects.toMatchObject({ code: "SPEECH_UNAVAILABLE" });
+    // A key without the Speech to Text permission says so (Admin → Operations shows the reason).
+    vi.stubGlobal("fetch", async () => Response.json({ detail: { status: "missing_permissions", message: "secret" } }, { status: 401 }));
+    await expect(transcribe({ ELEVENLABS_API_KEY: "k" } as any, file(), 5)).rejects.toMatchObject({ code: "SPEECH_PERMISSION" });
     vi.stubGlobal("fetch", async () => new Response("oops", { status: 500 }));
-    await expect(transcribe({ ELEVENLABS_API_KEY: "k" } as any, "https://x", 5)).rejects.toMatchObject({ code: "SPEECH_FAILED" });
+    await expect(transcribe({ ELEVENLABS_API_KEY: "k" } as any, file(), 5)).rejects.toMatchObject({ code: "SPEECH_FAILED" });
     const never = vi.fn();
     vi.stubGlobal("fetch", never);
-    await expect(transcribe({} as any, "https://x", 5)).rejects.toBeInstanceOf(ProviderError);
+    await expect(transcribe({} as any, file(), 5)).rejects.toBeInstanceOf(ProviderError);
     expect(never).not.toHaveBeenCalled();
   });
 });
@@ -127,14 +147,14 @@ function renderer(duration: number, log: any[], error?: string) {
     }),
   };
 }
-/** Scribe: reads the file through its link (as the real service does), then answers `words` (or `status`). */
-function scribeService(env: any, words: () => [string, number, number][], status = 200) {
-  const calls: { link: string; download: number }[] = [];
+/** Scribe: receives the uploaded file, then answers `words` (or `status`, with an ElevenLabs `reason`). */
+function scribeService(words: () => [string, number, number][], status = 200, reason?: string) {
+  const calls: { name: string; type: string; bytes: number }[] = [];
   vi.stubGlobal("fetch", async (url: string, init: any) => {
     if (url !== SCRIBE_URL) throw new Error("unexpected " + url);
-    const link = new URL(String((init.body as FormData).get("source_url")));
-    calls.push({ link: link.href, download: (await call(worker, env, "GET", link.pathname + link.search)).status });
-    return status === 200 ? Response.json(scribe(words())) : new Response("{}", { status });
+    const { file } = await received(init);
+    calls.push({ name: file.name, type: file.type, bytes: file.bytes.length });
+    return status === 200 ? Response.json(scribe(words())) : Response.json(reason ? { detail: { status: reason } } : {}, { status });
   });
   return calls;
 }
@@ -158,16 +178,14 @@ const run = (env: any, payload: Record<string, string>) => new ContentGeneration
 const meta = (sqlite: any, id: string) => JSON.parse((sqlite.prepare("SELECT meta FROM media_assets WHERE id=?").get(id) as any).meta);
 
 describe("speech in uploads (free, up to 10 minutes)", () => {
-  it("transcribes an upload after its check, through a link that stops working afterwards", async () => {
+  it("transcribes an upload after its check, sending ElevenLabs the stored file itself", async () => {
     const { env, sqlite, user, log } = setup();
-    const calls = scribeService(env, () => [["Here's", 1, 1.4], ["how", 1.4, 1.7], ["it", 123, 123.2], ["works.", 123.2, 123.8]]);
+    const calls = scribeService(() => [["Here's", 1, 1.4], ["how", 1.4, 1.7], ["it", 123, 123.2], ["works.", 123.2, 123.8]]);
     const id = await upload(env, sqlite, user);
     await run(env, { inspectId: id });
     expect(log.map((p) => [p.operation, p.maxSeconds])).toEqual([["inspect", SPEECH_MAX_SECONDS]]);
     expect(log[0].url).toBe(`https://app.test/api/upload-inputs/${id}?token=${"t".repeat(64)}`);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].link).toMatch(new RegExp(`^https://app\\.test/api/upload-inputs/${id}\\?token=[0-9a-f]{64}$`));
-    expect(calls[0].download).toBe(200);
+    expect(calls).toEqual([{ name: "upload.mp4", type: "video/mp4", bytes: 5000 }]);
     const one = await call(worker, env, "GET", `/api/media/${id}`, undefined, user.cookie);
     expect(one.data.asset).toMatchObject({ status: "ready", hasAudio: true, speech: "found", speechLanguage: "eng", duration: 130 });
     expect(one.data.asset.transcript).toEqual({
@@ -182,19 +200,22 @@ describe("speech in uploads (free, up to 10 minutes)", () => {
     const list = await call(worker, env, "GET", "/api/media?type=video", undefined, user.cookie);
     expect(list.data.assets[0]).toMatchObject({ id, speech: "found" });
     expect(list.data.assets[0].transcript).toBeUndefined();
-    const link = new URL(calls[0].link);
-    expect((await call(worker, env, "GET", link.pathname + link.search)).status).toBe(404);
+    // Once checked, the file has no link anyone can read it through.
+    expect((await call(worker, env, "GET", `/api/upload-inputs/${id}?token=${"t".repeat(64)}`)).status).toBe(404);
     expect(meta(sqlite, id).listen).toBeUndefined();
   });
 
   it("keeps a failed transcription a usable upload, and finds speech again on request", async () => {
     const { env, sqlite, user } = setup();
-    scribeService(env, () => [], 500);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    scribeService(() => [], 401, "missing_permissions");
     const id = await upload(env, sqlite, user);
     await run(env, { inspectId: id });
     const failed = (await call(worker, env, "GET", `/api/media/${id}`, undefined, user.cookie)).data.asset;
     expect(failed).toMatchObject({ status: "ready", speech: "failed", error: null, transcript: null });
-    const calls = scribeService(env, () => [["hi", 0.2, 0.5]]);
+    // The reason is kept for the owner's message and Admin → Operations.
+    expect(meta(sqlite, id).speech).toMatchObject({ status: "failed", code: "SPEECH_PERMISSION" });
+    const calls = scribeService(() => [["hi", 0.2, 0.5]]);
     const again = await call(worker, env, "POST", `/api/media/${id}/speech`, {}, user.cookie);
     expect(again.status).toBe(202);
     expect(again.data.asset.speech).toBe("pending");
@@ -202,13 +223,13 @@ describe("speech in uploads (free, up to 10 minutes)", () => {
     expect((await call(worker, env, "POST", `/api/media/${id}/speech`, {}, user.cookie)).status).toBe(200);
     expect(env.CONTENT.created).toHaveLength(1);
     await run(env, env.CONTENT.created[0].params);
-    expect(calls.map((c) => c.download)).toEqual([200]);
+    expect(calls).toHaveLength(1);
     expect((await call(worker, env, "GET", `/api/media/${id}`, undefined, user.cookie)).data.asset).toMatchObject({ speech: "found", transcript: { words: [{ text: "hi", start: 0.2, end: 0.5 }] } });
   });
 
   it("says when there is no speech, and refuses what cannot hold any", async () => {
     const { env, sqlite, user } = setup();
-    scribeService(env, () => []);
+    scribeService(() => []);
     const id = await upload(env, sqlite, user);
     await run(env, { inspectId: id });
     expect((await call(worker, env, "GET", `/api/media/${id}`, undefined, user.cookie)).data.asset).toMatchObject({ status: "ready", speech: "none" });
@@ -222,11 +243,11 @@ describe("speech in uploads (free, up to 10 minutes)", () => {
 
   it("never calls Scribe twice for one claim (an answer lost mid-step fails instead of paying again)", async () => {
     const { env, sqlite, user } = setup();
-    const calls = scribeService(env, () => [["x", 0, 1]]);
+    const calls = scribeService(() => [["x", 0, 1]]);
     const id = await upload(env, sqlite, user);
     // The check is done and the speech claimed, as if a first attempt had called Scribe and then died.
     sqlite.prepare("UPDATE media_assets SET status='ready',duration=130,meta=? WHERE id=?")
-      .run(JSON.stringify({ hasAudio: true, speech: { status: "pending", at: Math.floor(Date.now() / 1000), claim: "earlier" }, listen: { token: "a".repeat(64), until: 9e9 } }), id);
+      .run(JSON.stringify({ hasAudio: true, speech: { status: "pending", at: Math.floor(Date.now() / 1000), claim: "earlier" }, listen: { until: 9e9 } }), id);
     vi.spyOn(console, "error").mockImplementation(() => {});
     await run(env, { inspectId: id });
     expect(calls).toHaveLength(0);
@@ -236,7 +257,7 @@ describe("speech in uploads (free, up to 10 minutes)", () => {
   it("is bounded per person and day, in files and in minutes, shared with script matching", async () => {
     const { env } = testEnv();
     // 30 minutes: three 10-minute files, then nothing; another person has their own allowance.
-    for (let i = 0; i < 3; i++) expect(await claimSpeech(env, "u1", {}, 600)).toMatchObject({ speech: { status: "pending" }, listen: { token: expect.stringMatching(/^[0-9a-f]{64}$/) } });
+    for (let i = 0; i < 3; i++) expect(await claimSpeech(env, "u1", {}, 600)).toMatchObject({ speech: { status: "pending" }, listen: { until: expect.any(Number) } });
     expect(await claimSpeech(env, "u1", {}, 30)).toBeNull();
     expect(await claimSpeech(env, "u2", {}, 61)).not.toBeNull();
     // 20 files of a few seconds, then nothing (minutes are left, files are not).
@@ -257,7 +278,7 @@ describe("speech in uploads (free, up to 10 minutes)", () => {
   it("never transcribes a file over 10 minutes for free; long videos only on paid plans", async () => {
     // On the free trial the renderer is asked to refuse files over 10 minutes: such an upload fails, unheard.
     const refused = setup(3000, "MEDIA_TOO_LONG");
-    let calls = scribeService(refused.env, () => [["x", 0, 1]]);
+    let calls = scribeService(() => [["x", 0, 1]]);
     const long = await upload(refused.env, refused.sqlite, refused.user);
     await run(refused.env, { inspectId: long });
     expect(refused.log[0]).toMatchObject({ operation: "inspect", maxSeconds: SPEECH_MAX_SECONDS });
@@ -268,7 +289,7 @@ describe("speech in uploads (free, up to 10 minutes)", () => {
     // A long video uploaded on a paid plan is checked up to 2 hours and kept, but never sent to Scribe for free (nor on
     // "Find speech": clips are found in it for credits, server/highlights.ts).
     const { env, sqlite, user, log } = setup(3000);
-    calls = scribeService(env, () => [["x", 0, 1]]);
+    calls = scribeService(() => [["x", 0, 1]]);
     const id = await upload(env, sqlite, user);
     sqlite.prepare("UPDATE media_assets SET meta=? WHERE id=?").run(JSON.stringify({ token: "t".repeat(64), maxSeconds: 7200 }), id);
     await run(env, { inspectId: id });

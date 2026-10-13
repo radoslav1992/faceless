@@ -128,8 +128,8 @@ work without Turnstile. Add your address to `ADMIN_EMAILS` (and confirm it) to s
 
 Making videos needs `MEDIA_ENABLED=true`, `FAL_KEY`, `ELEVENLABS_API_KEY` and the renderer container. `wrangler dev`
 builds `renderer/Dockerfile` with a local Docker. The renderer downloads its inputs only from `SITE_URL`'s origin, and
-fal and ElevenLabs read some inputs from capability links on `SITE_URL`, so an end-to-end render needs a `SITE_URL` that
-the container and the providers can reach. Everything else works with `MEDIA_ENABLED=false`.
+fal reads some inputs from capability links on `SITE_URL` (ElevenLabs gets its files uploaded), so an end-to-end render
+needs a `SITE_URL` that the container and fal can reach. Everything else works with `MEDIA_ENABLED=false`.
 
 ## Scripts
 
