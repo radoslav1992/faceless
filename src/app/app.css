@@ -105,3 +105,8 @@
 .schedule-item:hover { border-color: var(--brand-line); }
 .schedule-item.planned { border-style: dashed; background: transparent; }
 @media (max-width: 520px) { .series-grid { grid-template-columns: 1fr; } }
+
+/* Install the app (iPhone and iPad steps) */
+.install-steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+.install-steps li { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--line); }
+.install-steps svg { color: var(--brand); flex: none; }

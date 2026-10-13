@@ -641,8 +641,9 @@ function privacy(op: Operator): Section[] {
           <p>
             The app also keeps a few things in your browser's storage: whether the sidebar is collapsed; a draft from the “try it” demo on our home page, so
             it can be carried into the app after you sign up; the new-series wizard's answers while you connect a channel (only for that browser session);
-            and a marker that lets the app reload once after we release an update (also only for that session). Cloudflare Turnstile may run a short check
-            in your browser to tell people from bots on our forms.
+            and a marker that lets the app reload once after we release an update (also only for that session). The app also keeps a copy of its own
+            files (code, icons, fonts and an offline page) in your browser's cache, so it opens quickly and can be installed; your videos, files and
+            account details are never kept there. Cloudflare Turnstile may run a short check in your browser to tell people from bots on our forms.
           </p>
         </>
       ),

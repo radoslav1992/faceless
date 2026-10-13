@@ -31,6 +31,10 @@ export default tseslint.config(
     },
   },
   {
+    files: ["public/sw.js"],
+    languageOptions: { globals: { ...globals.serviceworker } },
+  },
+  {
     files: ["tests/**/*.ts"],
     rules: { "@typescript-eslint/no-non-null-assertion": "off" },
   },

@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { House, PenSquare, Repeat, Clapperboard, CalendarDays, Share2, CircleDollarSign, Settings, Shield, PanelLeftClose, PanelLeftOpen, Clock, Menu, LogOut, Coins, Scissors } from "lucide-react";
+import {
+  House, PenSquare, Repeat, Clapperboard, CalendarDays, Share2, CircleDollarSign, Settings, Shield, PanelLeftClose, PanelLeftOpen, Clock, Menu, LogOut, Coins, Scissors,
+  Download, Share, SquarePlus,
+} from "lucide-react";
 import { post, timeLeft, useAuth, number } from "../lib";
 import { planById } from "../../shared/plans";
-import { Logo, LogoMark, useToast } from "../ui";
+import { Logo, LogoMark, Modal, useToast } from "../ui";
+import { useInstall } from "../install";
 import "./app.css";
 
 /** The dashboard: sidebar, the credits bar and the current page. */
@@ -67,6 +71,7 @@ export function AppLayout() {
           <div className="meter" aria-hidden="true"><span style={{ width: `${user.limit ? Math.min(100, (left / user.limit) * 100) : 0}%` }} /></div>
           <Link to="/app/billing" className="small text-link">{free ? "Upgrade" : "Add credits"}</Link>
         </div>
+        <InstallItem collapsed={collapsed} />
         <button className="nav-item" style={{ background: "none", border: 0, cursor: "pointer", width: "100%" }} onClick={logout}><LogOut size={20} /><span className="text">Log out</span></button>
       </aside>
       {open && <div className="sidebar-scrim" role="presentation" onClick={() => setOpen(false)} />}
@@ -92,5 +97,33 @@ export function AppLayout() {
         <Outlet />
       </div>
     </div>
+  );
+}
+
+/** "Install app" while the app runs in a browser that can install it: the browser's own dialog, or the steps on iPhone and iPad. */
+function InstallItem({ collapsed }: { collapsed: boolean }) {
+  const { way, install } = useInstall();
+  const toast = useToast();
+  const [steps, setSteps] = useState(false);
+  if (!way) return null;
+  const go = async () => {
+    if (way === "steps") return setSteps(true);
+    if (await install()) toast("Installed. Open Hookstreak from your home screen or app list.", "good");
+  };
+  return (
+    <>
+      <button type="button" className="nav-item" style={{ background: "none", border: 0, cursor: "pointer", width: "100%" }} onClick={() => void go()} title={collapsed ? "Install app" : undefined}>
+        <Download size={20} aria-hidden="true" /><span className="text">Install app</span>
+      </button>
+      {steps && (
+        <Modal title="Install the app" onClose={() => setSteps(false)}>
+          <ol className="install-steps">
+            <li><Share size={18} aria-hidden="true" /><span>Tap <strong>Share</strong> in Safari's toolbar.</span></li>
+            <li><SquarePlus size={18} aria-hidden="true" /><span>Choose <strong>Add to Home Screen</strong>, then <strong>Add</strong>.</span></li>
+          </ol>
+          <p className="muted small" style={{ marginTop: 12 }}>Hookstreak then opens from your home screen like any app, full screen and signed in.</p>
+        </Modal>
+      )}
+    </>
   );
 }
