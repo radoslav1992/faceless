@@ -27,7 +27,7 @@ Each request passes, in order:
 6. `POST /api/billing/webhook`, `GET /api/health` (D1 reachable: 200, else 503), then the public routes
    (`/api/public/config`, `/api/contact`).
 7. **Capability links** (a token in the URL, no session): `/api/render-inputs` (the renderer and fal read a run's
-   inputs), `/api/upload-inputs` (the renderer and Scribe read an upload), `/api/publish-media` (Instagram fetches a
+   inputs), `/api/upload-inputs` (the renderer reads an upload it checks), `/api/publish-media` (Instagram fetches a
    video).
 8. **Session**: the HttpOnly cookie's token is looked up by its SHA-256 in `sessions` (30 days). `/api/auth` follows.
 9. **Sign-in required** for the rest (a social network's callback without a session goes to `/login`):

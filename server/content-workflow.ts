@@ -511,7 +511,7 @@ async function patchMeta(e: Env, assetId: string, change: (meta: any) => void) {
 /** Calls to Scribe: once (each is billed), and long enough for two hours of sound. */
 const scribeOnce = { retries: { limit: 0, delay: "1 second" as const }, timeout: "50 minutes" as const };
 /**
- * Transcribes a ready file whose speech is pending: ElevenLabs Scribe reads it through its capability link. A free
+ * Transcribes a ready file whose speech is pending: it is uploaded to ElevenLabs Scribe from storage. A free
  * transcription that fails leaves the file usable, without subtitles ("failed"; it can be tried again); a paid one
  * (`paid`: a run of kind "speech") also fails its run, which refunds the credits. A free one then finds the moments
  * asked for meanwhile (a paid run does that after it completes).
@@ -520,8 +520,8 @@ async function findSpeech(e: Env, step: WorkflowStep, assetId: string, paid = fa
   const job = await step.do("speech-start", async () => {
     const a = await e.DB.prepare("SELECT meta,status,duration FROM media_assets WHERE id=?").bind(assetId).first<any>();
     const meta = json<any>(a?.meta, {});
-    if (a?.status !== "ready" || meta.speech?.status !== "pending" || typeof meta.listen?.token !== "string") return null;
-    return { url: `${siteUrl(e)}/api/upload-inputs/${assetId}?token=${meta.listen.token}`, duration: Number(a.duration) || 0, claim: uid() };
+    if (a?.status !== "ready" || meta.speech?.status !== "pending" || !meta.listen) return null;
+    return { duration: Number(a.duration) || 0, claim: uid() };
   });
   if (!job) {
     if (paid) throw new Error("SPEECH_INVALID");
@@ -532,8 +532,11 @@ async function findSpeech(e: Env, step: WorkflowStep, assetId: string, paid = fa
       // Paid once: the claim is stored before the call, so a step that runs again after it (its answer lost) stops.
       const before = await e.DB.prepare("SELECT meta FROM media_assets WHERE id=?").bind(assetId).first<{ meta: string }>();
       if (json<any>(before?.meta, {}).speech?.claim) throw new Error("SPEECH_UNCERTAIN");
+      const a = await e.DB.prepare("SELECT object_key,mime FROM media_assets WHERE id=?").bind(assetId).first<{ object_key: string; mime: string }>();
+      const stored = a && await e.MEDIA.get(a.object_key);
+      if (!a || !stored) throw new Error("SPEECH_INVALID");
       await patchMeta(e, assetId, (meta) => { meta.speech = { ...meta.speech, claim: job.claim }; });
-      const transcript = await transcribe(e, job.url, job.duration);
+      const transcript = await transcribe(e, { body: stored.body, size: stored.size, type: a.mime, name: `upload.${extOf(a.mime)}` }, job.duration);
       await patchMeta(e, assetId, (meta) => {
         const found = transcript.words.length > 0;
         meta.speech = { status: found ? "found" : "none", at: now(), ...(found && transcript.language && { language: transcript.language }) };
@@ -543,10 +546,11 @@ async function findSpeech(e: Env, step: WorkflowStep, assetId: string, paid = fa
       });
     });
   } catch (error) {
-    // Never a failed upload: the file stays ready, only without subtitles.
-    console.error("Speech not found", { assetId, code: error instanceof Error && /^[A-Z_]{3,40}$/.test(error.message) ? error.message : "INTERNAL" });
+    // Never a failed upload: the file stays ready, only without subtitles. The code says why (shown to the owner).
+    const code = error instanceof Error && /^[A-Z_]{3,40}$/.test(error.message) ? error.message : "INTERNAL";
+    console.error("Speech not found", { assetId, code });
     await step.do("speech-failed", () => patchMeta(e, assetId, (meta) => {
-      meta.speech = { status: "failed", at: now() };
+      meta.speech = { status: "failed", at: now(), code };
       delete meta.listen;
     }));
     if (paid) {

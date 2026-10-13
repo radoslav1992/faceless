@@ -214,8 +214,8 @@ export async function operationsSnapshot(e: Env) {
       .bind(t - 7 * DAY, since).all<{ platform: string; error: string | null }>(),
     e.DB.prepare("SELECT platform,metrics_error AS code,COUNT(*) AS n FROM publications WHERE status='published' AND published_at>? AND metrics_error IS NOT NULL AND metrics_checked_at>? GROUP BY platform,metrics_error")
       .bind(t - 31 * DAY, since).all<{ platform: string; code: string; n: number }>(),
-    e.DB.prepare("SELECT COUNT(*) AS n FROM media_assets WHERE rowid>(SELECT COALESCE(MAX(rowid),0) FROM media_assets)-5000 AND json_valid(meta) AND json_extract(meta,'$.speech.status')='failed' AND json_extract(meta,'$.speech.at')>?")
-      .bind(since).first<{ n: number }>(),
+    e.DB.prepare("SELECT json_extract(meta,'$.speech.code') AS code,COUNT(*) AS n FROM media_assets WHERE rowid>(SELECT COALESCE(MAX(rowid),0) FROM media_assets)-5000 AND json_valid(meta) AND json_extract(meta,'$.speech.status')='failed' AND json_extract(meta,'$.speech.at')>? GROUP BY code")
+      .bind(since).all<{ code: string | null; n: number }>(),
   ]);
   const failures: Failure[] = [];
   for (const r of runs.results) failures.push({ area: serviceOf(r.code || "INTERNAL"), code: r.code || "INTERNAL", count: Number(r.n) });
@@ -228,7 +228,8 @@ export async function operationsSnapshot(e: Env) {
   }
   failures.push(...published.values());
   for (const m of metrics.results) failures.push({ area: `stats:${m.platform}`, code: m.code, count: Number(m.n) });
-  if (transcription?.n) failures.push({ area: "speech", code: "Transcription failed", count: Number(transcription.n) });
+  // By reason (SPEECH_PERMISSION: the ElevenLabs key lacks Speech to Text); transcriptions from before reasons were kept have none.
+  for (const s of transcription.results) failures.push({ area: "speech", code: s.code || "Transcription failed", count: Number(s.n) });
   const r = await e.DB.prepare(
     `SELECT
       (SELECT COUNT(*) FROM runs WHERE status IN ('queued','running') AND created_at<?1) runs,

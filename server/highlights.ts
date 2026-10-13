@@ -234,6 +234,13 @@ export async function searchMoments(env: Env, userId: string, assetId: string, r
     .bind(JSON.stringify({ at: now(), list: moments, request }), now(), assetId).run();
   return moments;
 }
+/** What the owner reads when a video's transcription failed, by its reason (meta.speech.code). */
+export function speechProblem(code: unknown) {
+  if (code === "SPEECH_PERMISSION" || code === "SPEECH_UNAVAILABLE") return "Transcription is unavailable right now. We've been told; please try again later.";
+  if (code === "SPEECH_BUSY") return "Transcription is busy right now. Try again in a few minutes.";
+  if (code === "SPEECH_FILE") return "We couldn't read the sound in this video. Try exporting it again as an MP4 and uploading that.";
+  return "We couldn't transcribe this video. Try again.";
+}
 /**
  * After a video's speech was found (or not): the search that waited for it. A failure is kept as a message for the
  * page; the search is never retried by itself.
@@ -244,7 +251,7 @@ export async function momentsAfterSpeech(env: Env, assetId: string) {
   if (!a || !meta.wanted) return;
   const parsed = momentRequestSchema.safeParse(meta.wanted);
   let error: string | null = null;
-  if (meta.speech?.status !== "found") error = meta.speech?.status === "none" ? "We didn't hear anyone speak in this video, so it has no moments to cut." : "We couldn't transcribe this video. Try again.";
+  if (meta.speech?.status !== "found") error = meta.speech?.status === "none" ? "We didn't hear anyone speak in this video, so it has no moments to cut." : speechProblem(meta.speech?.code);
   else if (!parsed.success) error = "Choose how many clips to find, then try again.";
   else {
     try {

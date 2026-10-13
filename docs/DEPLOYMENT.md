@@ -48,8 +48,8 @@ npx wrangler d1 migrations list faceless --remote   # nothing left to apply
   on `SITE_URL` (308). `SITE_URL` must be the public `https`
   origin: the renderer downloads only from it, and OAuth redirect URIs and the providers' input links are built from
   it.
-- **The domain's security settings** must let machines read the capability links: the renderer, fal, ElevenLabs,
-  TikTok and Instagram download `/api/render-inputs/`, `/api/upload-inputs/` and `/api/publish-media/` (each link
+- **The domain's security settings** must let machines read the capability links: the renderer, fal, TikTok and
+  Instagram download `/api/render-inputs/`, `/api/upload-inputs/` and `/api/publish-media/` (each link
   carries its own token). A challenge there fails every video with "A file in this post couldn't be loaded". Keep Bot
   Fight Mode off (it can't be skipped per path on the Free plan), and add a WAF custom rule *URI Path starts with*
   those three paths → *Skip* Browser Integrity Check and Security Level. The renderer introduces itself as
@@ -84,7 +84,7 @@ the Worker reads (`Env` in `server/types.ts`); `.dev.vars.example` lists them fo
 | `FAL_KEY` | secret | AI pictures (`openai/gpt-image-2.5/flare/text-to-image`) and clips (`fal-ai/kling-video/v2.5-turbo/pro/image-to-video`) |
 | `FAL_IMAGE_MODEL` | text | Optional picture model: `openai/gpt-image-2.5/sunburst/text-to-image`, `fal-ai/nano-banana-2` or `fal-ai/flux/schnell` (cheapest); anything else uses the default |
 | `FAL_IMAGE_QUALITY` | text | Optional GPT Image 2.5 quality: `low`, `medium`, `high` (default), `xhigh` or `max`. Each step up costs more per picture |
-| `ELEVENLABS_API_KEY` | secret | Narration (`eleven_v4` with timestamps), forced alignment, and Scribe v2 transcription of uploads (Scribe and forced alignment read files through links on `SITE_URL`). Admin → Voices lists the account's voices to import, so the key needs the Voices read permission (and Text to Speech, Speech to Text, Forced Alignment) |
+| `ELEVENLABS_API_KEY` | secret | Narration (`eleven_v4` with timestamps), forced alignment, and Scribe v2 transcription of uploads (the files are uploaded to ElevenLabs from storage, so nothing there depends on ElevenLabs reaching `SITE_URL`). Admin → Voices lists the account's voices to import, so the key needs the Voices read permission (and Text to Speech, Speech to Text, Forced Alignment). A key without Speech to Text shows as `SPEECH_PERMISSION` under Admin → Operations |
 | `TOKEN_ENCRYPTION_KEY` | secret | `openssl rand -base64 32`. Seals OAuth tokens (AES-256-GCM) and signs API download links. Never change it once accounts are connected |
 | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` | secret | TikTok app (section 4) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | secret | Google OAuth client for YouTube (section 4) |

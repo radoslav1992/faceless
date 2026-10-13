@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { Env } from "./types";
 import { DAY, now } from "./types";
 import { json } from "./db";
-import { take, token } from "./security";
+import { take } from "./security";
 import { failureCode, providerFetch, ProviderError } from "./providers/http";
 import {
   LONG_VIDEO_SECONDS, SPEECH_MAX_SECONDS, TRANSCRIPT_MAX_EVENTS, TRANSCRIPT_MAX_TURNS, TRANSCRIPT_MAX_WORDS, type SoundEvent, type SpeechStatus, type Transcript, type Turn,
@@ -10,8 +10,9 @@ import {
 import type { CaptionWord } from "../shared/captions";
 
 // Speech in uploaded videos and tracks: an owner's own voiceover is timed by its words for subtitles and scenes.
-// ElevenLabs Scribe v2 (the pipeline rech-bg runs in production) reads the file itself through a short-lived
-// capability link and returns word timings in the language it detects. The words are kept in the file's meta
+// ElevenLabs Scribe v2 (the pipeline rech-bg runs in production) gets the file uploaded from storage (streamed, never
+// held in memory, so nothing depends on ElevenLabs reaching this site) and returns word timings in the language it
+// detects. The words are kept in the file's meta
 // (bounded); failures only mean "no subtitles", never a failed upload. Files up to 10 minutes are transcribed for
 // free, bounded per person and day (files and minutes); longer videos (for clips) on request, for credits (a run of
 // kind "speech").
@@ -22,7 +23,7 @@ export const SCRIBE_URL = "https://api.elevenlabs.io/v1/speech-to-text";
 export const SPEECH_FILES_PER_DAY = 20;
 /** …and minutes of sound (Scribe costs about $0.40 an hour). */
 export const SPEECH_MINUTES_PER_DAY = 30;
-/** How long Scribe may read a file through its link; a run never lives longer (maintenance fails it). */
+/** How long a transcription may stay pending; a run never lives longer (maintenance fails it). */
 const LISTEN_SECONDS = 3 * 3600;
 /** A transcription that has not finished by then is reported as failed (it can be tried again). */
 const PENDING_SECONDS = 3600;
@@ -76,26 +77,71 @@ export function scribeWords(result: unknown, duration: number): Transcript {
   return { language, words, ...(turns.length && { turns }), ...(events.length && { events }) };
 }
 
+/** A stored file to transcribe: its bytes as a stream, their exact count, its type and a file name. */
+export type SpeechFile = { body: ReadableStream<Uint8Array>; size: number; type: string; name: string };
 /**
- * Transcribes the file behind `url` (a capability link Scribe downloads from) once: no automatic retries, each call is
- * billed. No language is given, so Scribe detects it.
+ * A multipart/form-data body of `fields` and then `file`, streamed (a two-hour video is never held in memory), with its
+ * exact length: workerd's FixedLengthStream sends it as Content-Length; elsewhere (tests) a plain pass-through.
  */
-export async function transcribe(e: Env, url: string, duration: number): Promise<Transcript> {
+export function multipart(fields: Record<string, string>, file: SpeechFile) {
+  const boundary = `hookstreak-${crypto.randomUUID()}`;
+  const safe = (s: string) => s.replace(/["\\\r\n]/g, "_");
+  const encode = (s: string) => new TextEncoder().encode(s);
+  const head = encode(Object.entries(fields).map(([k, v]) => `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`).join("")
+    + `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${safe(file.name)}"\r\nContent-Type: ${safe(file.type)}\r\n\r\n`);
+  const tail = encode(`\r\n--${boundary}--\r\n`);
+  const length = head.length + file.size + tail.length;
+  const { readable, writable } = typeof FixedLengthStream === "function" ? new FixedLengthStream(length) : new TransformStream<Uint8Array, Uint8Array>();
+  void (async () => {
+    const writer = writable.getWriter();
+    try {
+      await writer.write(head);
+      const reader = file.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        await writer.write(value);
+      }
+      await writer.write(tail);
+      await writer.close();
+    } catch (error) {
+      await writer.abort(error).catch(() => {});
+    }
+  })();
+  return { body: readable as ReadableStream<Uint8Array>, type: `multipart/form-data; boundary=${boundary}`, length };
+}
+/**
+ * Transcribes a stored file once, uploading it to Scribe: no automatic retries, each call is billed. No language is
+ * given, so Scribe detects it.
+ */
+export async function transcribe(e: Env, file: SpeechFile, duration: number): Promise<Transcript> {
   const key = e.ELEVENLABS_API_KEY?.trim();
   if (!key) throw new ProviderError("SPEECH_UNAVAILABLE");
-  const body = new FormData();
-  body.set("model_id", SCRIBE_MODEL);
-  body.set("source_url", url);
-  body.set("timestamps_granularity", "word");
-  // Who speaks when (the crop of a clip cuts to whoever talks) and laughter or applause (a clip's virality score).
-  body.set("diarize", "true");
-  body.set("tag_audio_events", "true");
+  const form = multipart({
+    model_id: SCRIBE_MODEL, timestamps_granularity: "word",
+    // Who speaks when (the crop of a clip cuts to whoever talks) and laughter or applause (a clip's virality score).
+    diarize: "true", tag_audio_events: "true",
+  }, file);
   // About ten minutes, and more for long videos (Scribe answers when the whole file is done).
   const r = await providerFetch(SCRIBE_URL, {
-    method: "POST", headers: { "xi-api-key": key }, body, signal: AbortSignal.timeout((10 + Math.min(duration, LONG_VIDEO_SECONDS) / 240) * 60000),
+    method: "POST", headers: { "xi-api-key": key, "Content-Type": form.type }, body: form.body,
+    signal: AbortSignal.timeout((10 + Math.min(duration, LONG_VIDEO_SECONDS) / 240) * 60000),
   });
-  if (!r.ok) throw new ProviderError(await failureCode(r, "SPEECH"));
+  if (!r.ok) throw new ProviderError(await speechFailure(r));
   return scribeWords(await r.json(), duration);
+}
+/**
+ * Why Scribe refused, as a code: SPEECH_PERMISSION (the API key lacks Speech to Text), SPEECH_UNAVAILABLE (no credits
+ * or a bad key), SPEECH_BUSY, SPEECH_FILE (the file can't be read as sound), else SPEECH_FAILED.
+ */
+export async function speechFailure(r: Response) {
+  const body = await r.clone().json().catch(() => null) as any;
+  const status = String(body?.detail?.status || "").toLowerCase();
+  if (status === "missing_permissions") return "SPEECH_PERMISSION";
+  if (r.status === 400 || r.status === 422) {
+    if (/invalid_(file|audio|content)|unsupported|corrupt|too_short|no_audio/.test(status)) return "SPEECH_FILE";
+  }
+  return failureCode(r, "SPEECH");
 }
 
 /** What the API tells about a file's speech: its status (null: never checked) and language. */
@@ -129,9 +175,9 @@ export function mayHaveSpeech(a: { kind: string; mime: string; duration: number 
 export function mayTranscribe(a: { kind: string; mime: string; duration: number }, hasAudio: boolean | null | undefined) {
   return ownSound(a, hasAudio) && a.duration > SPEECH_MAX_SECONDS && a.duration <= LONG_VIDEO_SECONDS + 1;
 }
-/** Meta for a file whose speech is about to be transcribed: pending, with a capability token Scribe reads it with. */
+/** Meta for a file whose speech is about to be transcribed: pending, until when it may be. */
 export function listening(meta: Record<string, unknown>, extra: Record<string, unknown> = {}) {
-  return { ...meta, speech: { status: "pending", at: now(), ...extra }, listen: { token: token(), until: now() + LISTEN_SECONDS } };
+  return { ...meta, speech: { status: "pending", at: now(), ...extra }, listen: { until: now() + LISTEN_SECONDS } };
 }
 /**
  * Meta for a free transcription of a file `seconds` long, or null when the person's daily allowance (files or

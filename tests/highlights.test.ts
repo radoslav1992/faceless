@@ -254,6 +254,8 @@ async function setup(plan: "starter" | null = "starter") {
     const meta = words ? { hasAudio: true, speech: { status: "found", at: 1, language: "eng" }, transcript: { language: "eng", words } } : { hasAudio: true };
     sqlite.prepare("INSERT INTO media_assets(id,user_id,kind,name,object_key,mime,bytes,duration,width,height,status,meta,created_at,updated_at) VALUES (?,?,'upload','Podcast.mp4',?,'video/mp4',5000,?,1920,1080,'ready',?,1,1)")
       .run(id, user.id, `media/${user.id}/${id}.mp4`, duration, JSON.stringify({ ...meta, ...extra }));
+    // The file itself (a transcription uploads it to Scribe).
+    void env.MEDIA.put(`media/${user.id}/${id}.mp4`, new Uint8Array(5000).fill(7), { httpMetadata: { contentType: "video/mp4" } });
     return id;
   };
   const used = () => (sqlite.prepare("SELECT used FROM usage_windows WHERE user_id=? ORDER BY created_at DESC LIMIT 1").get(user.id) as any).used as number;
@@ -266,7 +268,9 @@ function scribe(words: CaptionWord[], status = 200) {
   const calls: string[] = [];
   vi.stubGlobal("fetch", async (url: string, init: any) => {
     if (url !== SCRIBE_URL) throw new Error("unexpected " + url);
-    calls.push(String((init.body as FormData).get("source_url")));
+    // The stored video itself is uploaded (multipart, streamed).
+    const form = await new Response(init.body, { headers: { "Content-Type": init.headers["Content-Type"] } }).formData();
+    calls.push((form.get("file") as File).name);
     if (status !== 200) return new Response("{}", { status });
     return Response.json({ language_code: "eng", words: words.map((w) => ({ ...w, type: "word" })) });
   });
