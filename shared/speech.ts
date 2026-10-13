@@ -58,3 +58,32 @@ export function speechTurns(t: Pick<Transcript, "words" | "turns"> | null | unde
   }
   return clip(out);
 }
+
+/** A pause this long (seconds) between words ends a stretch of speech for the tracker. */
+const SPAN_GAP = 0.3;
+/**
+ * Speech in [from, to) for following whoever talks, on the recording's own clock, as [start, end, speaker]: every
+ * stretch of words without a pause (sentences and phrases, not whole speaker turns), with the transcription's speaker
+ * for it (the turn its words fall in, or the nearest one within a second; -1 without speakers). The pauses between
+ * them are what tells the tracker whose lips move with the voice and whose (a photo, a face on a slide or a screen) do
+ * not. At most TRANSCRIPT_MAX_TURNS.
+ */
+export function speechSpans(t: Pick<Transcript, "words" | "turns"> | null | undefined, from: number, to: number): Turn[] {
+  if (!t) return [];
+  if (!t.words.length) return speechTurns(t, from, to);
+  const turns = t.turns ?? [];
+  const out: Turn[] = [];
+  let k = 0;
+  for (const w of t.words) {
+    if (w.end <= from || w.start >= to) continue;
+    const mid = (w.start + w.end) / 2;
+    while (k < turns.length && turns[k][1] < mid) k++;
+    const after = turns[k], before = turns[k - 1];
+    const gapAfter = after ? Math.max(0, after[0] - mid) : Infinity, gapBefore = before ? mid - before[1] : Infinity;
+    const speaker = Math.min(gapAfter, gapBefore) > 1 ? -1 : gapAfter <= gapBefore ? after[2] : before[2];
+    const last = out.at(-1);
+    if (last && last[2] === speaker && w.start - last[1] <= SPAN_GAP) last[1] = Math.max(last[1], w.end);
+    else out.push([w.start, w.end, speaker]);
+  }
+  return out.map(([a, b, s]): Turn => [round(Math.max(a, from)), round(Math.min(b, to)), s]).filter(([a, b]) => b > a).slice(0, TRANSCRIPT_MAX_TURNS);
+}

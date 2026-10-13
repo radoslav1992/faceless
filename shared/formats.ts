@@ -117,8 +117,10 @@ export type HighlightSpec = z.infer<typeof highlightSpec>;
 export const specSchema = z.discriminatedUnion("format", [storySpec, highlightSpec]);
 export type Spec = StorySpec | HighlightSpec;
 export const isHighlight = (spec: Spec): spec is HighlightSpec => spec.format === "highlight";
-/** The moment a clip's people were measured for: a new moment needs a new measurement. */
-export const trackKey = (spec: HighlightSpec) => `${spec.source.assetId}:${spec.source.start}:${spec.source.end}`;
+/** The speaker tracker's version: a better tracker measures every clip again the next time it is made. */
+export const TRACKER = 2;
+/** The moment a clip's people were measured for, by this tracker: a new moment (or tracker) needs a new measurement. */
+export const trackKey = (spec: HighlightSpec) => `${spec.source.assetId}:${spec.source.start}:${spec.source.end}@${TRACKER}`;
 /** How much of moment `b` lies inside moment `a` (0–1), for re-pricing a moved clip. */
 export function momentOverlap(a: { start: number; end: number }, b: { start: number; end: number }) {
   return Math.max(0, Math.min(a.end, b.end) - Math.max(a.start, b.start)) / Math.max(0.01, b.end - b.start);

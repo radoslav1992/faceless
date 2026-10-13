@@ -63,6 +63,7 @@ PATCH = (16, 10)        # pixels of a mouth or nose patch
 MIN_TURN = 1.0          # seconds: a shorter turn (a "yeah", a laugh) never moves the crop
 MIN_HOLD = 1.0          # seconds the crop stays on a speaker before it cuts to another
 CLEAR = 1.25            # how much more a face's lips must move than the next face's for a turn to be its own
+SYNC = 1.3              # how much more a speaking face's lips move while someone talks than in the pauses
 MAX_TURNS = 4000
 MAX_PANES = 2           # windows of a clip's picture stacked in the frame (two speakers; a screen and a camera)
 # The caption fonts (renderer/fonts, the same files the browser preview uses); libass loads them before system fonts.
@@ -147,7 +148,11 @@ def command(args, timeout=90, explain=None):
         if job is not None: job.pop('proc', None)
     if p.returncode or cancelled():
         if p.returncode and not cancelled():
-            log(f'{os.path.basename(args[0])} exited with {p.returncode}: {err.decode("utf-8", "replace").strip()[-600:]}')
+            text = err.decode('utf-8', 'replace').strip()
+            log(f'{os.path.basename(args[0])} exited with {p.returncode}: {text[-600:]}')
+            # The program's last words, for the Worker's log (the job's status): enough to tell one failure from another.
+            last = next((line for line in reversed(text.splitlines()) if line.strip()), '') or f'exit status {p.returncode}'
+            if job is not None: job['detail'] = re.sub(r'[^\x20-\x7e]', '', f'{os.path.basename(args[0])}: {last}')[:240]
         raise ValueError(explain(err.decode('utf-8', 'replace')) if explain and not cancelled() else 'Media processing failed')
     return out
 
@@ -911,13 +916,8 @@ def lip_motion(a, b):
     (mouth_a, nose_a), (mouth_b, nose_b) = a, b
     return max(0.0, float(abs(mouth_a - mouth_b).mean()) - float(abs(nose_a - nose_b).mean()))
 
-def speakers(tracks, turns, count, fps=TRACK_FPS):
-    """Per sample of one shot, the index of the track that is talking, or None when that is never clear. `turns` are
-    stretches of speech on the shot's clock as (start, end, speaker): the transcript's speaker label, or -1 without one.
-    Each turn goes to the face on screen whose lips move most during it, clearly more than any other's. A label
-    sticks to the face its clear turns were matched with most, so a turn whose lips are hidden (a hand, a profile)
-    still finds its speaker. Turns shorter than MIN_TURN, unclear ones and silences keep the last speaker, and the crop
-    stays at least MIN_HOLD on someone before it moves on."""
+def lip_motions(tracks):
+    """Per track, how much its lips moved at each sample (from the one before; only where both were measured)."""
     motion = []
     for t in tracks:
         moved = {}
@@ -926,6 +926,44 @@ def speakers(tracks, turns, count, fps=TRACK_FPS):
                 v = lip_motion(t['lips'].get(a), t['lips'].get(b))
                 if v is not None: moved[b] = v
         motion.append(moved)
+    return motion
+
+def speech_samples(turns, count, fps=TRACK_FPS):
+    """Per sample of a shot, whether someone is talking in it (any turn)."""
+    speaking = [False] * count
+    for start, end, _ in turns:
+        for i in range(max(0, math.floor(start * fps)), min(count, math.ceil(end * fps))): speaking[i] = True
+    return speaking
+
+def lip_sync(moved, speaking):
+    """How much more a face's lips move while someone talks than in the pauses (talking mean minus quiet mean), or None
+    when either was seen too rarely to tell (fewer than 4 samples). A face that speaks moves with the voice; a photo
+    never moves, and a face on a changing screen or slide moves as much in the pauses."""
+    talking = [v for i, v in moved.items() if speaking[i]]
+    quiet = [v for i, v in moved.items() if not speaking[i]]
+    if len(talking) < 4 or len(quiet) < 4: return None
+    return sum(talking) / len(talking) - SYNC * sum(quiet) / len(quiet)
+
+def voice_face(tracks, turns, count, fps=TRACK_FPS):
+    """The face whose lips move most with the voice over a whole shot (its lip_sync clearly positive), or None: for a
+    shot where no turn by itself was clear (one voice for the whole moment, a face hard to read now and then), so the
+    crop holds on the person talking rather than on the biggest face."""
+    motion, speaking = lip_motions(tracks), speech_samples(turns, count, fps)
+    scores = [(lip_sync(m, speaking), k) for k, m in enumerate(motion)]
+    scores = [(s, k) for s, k in scores if s is not None and s > 0]
+    return max(scores)[1] if scores else None
+
+def speakers(tracks, turns, count, fps=TRACK_FPS):
+    """Per sample of one shot, the index of the track that is talking, or None when that is never clear. `turns` are
+    stretches of speech on the shot's clock as (start, end, speaker): the transcript's speaker label, or -1 without one.
+    Each turn goes to the face on screen whose lips move most during it, clearly more than any other's. A face whose
+    lips do not move with the voice (no more while someone talks than in the pauses: a photo, a face on a slide or a
+    changing screen) is never the one talking. A label sticks to the face its clear turns were matched with most, so a
+    turn whose lips are hidden (a hand, a profile) still finds its speaker. Turns shorter than MIN_TURN, unclear ones
+    and silences keep the last speaker, and the crop stays at least MIN_HOLD on someone before it moves on."""
+    motion, speaking = lip_motions(tracks), speech_samples(turns, count, fps)
+    sync = [lip_sync(m, speaking) for m in motion]
+    mute = {k for k, s in enumerate(sync) if s is not None and s <= 0}
     calls, votes = [], {}
     for start, end, label in sorted(turns):
         a, b = max(0, math.floor(start * fps)), min(count, math.ceil(end * fps))
@@ -936,7 +974,7 @@ def speakers(tracks, turns, count, fps=TRACK_FPS):
             if len(visible) < max(1, 0.4 * (b - a)): continue
             on_screen.add(k)
             moves = [motion[k][i] for i in visible if i in motion[k]]
-            if moves: scores[k] = sum(moves) / len(moves)
+            if moves and k not in mute: scores[k] = sum(moves) / len(moves)
         ranked = sorted(scores.items(), key=lambda kv: -kv[1])
         clear = ranked[0][0] if ranked and ranked[0][1] > 0 and (len(ranked) == 1 or ranked[0][1] >= CLEAR * ranked[1][1]) else None
         if clear is not None and label >= 0: votes.setdefault(label, {}).setdefault(clear, 0.0); votes[label][clear] += end - start
@@ -1009,7 +1047,12 @@ def shot_cameras(samples, cuts, crop, fps, turns=None):
         frames = [[] if near_cut(i / fps) else samples[i] for i in indexes]
         first = indexes[0]
         tracks = face_tracks(frames, fps) if turns else []
-        talking = speakers(tracks, [(s - first / fps, e - first / fps, label) for s, e, label in turns if e > first / fps and s < (indexes[-1] + 1) / fps], len(frames), fps) if len(tracks) > 1 else None
+        spoken = [(s - first / fps, e - first / fps, label) for s, e, label in turns or [] if e > first / fps and s < (indexes[-1] + 1) / fps]
+        talking = speakers(tracks, spoken, len(frames), fps) if len(tracks) > 1 else None
+        if not talking and len(tracks) > 1 and spoken:
+            # No turn was clear by itself: the face whose lips move with the voice holds the shot (not the biggest one).
+            k = voice_face(tracks, spoken, len(frames), fps)
+            if k is not None: talking = [k] * len(frames)
         if talking:
             found, k = True, 0
             while k < len(frames):
@@ -1194,6 +1237,8 @@ def process(job, payload, id=None):
         else: raise ValueError('Invalid operation')
     except Exception as e:
         job.update(status='failed', error=failure_code(e))
+        # FFmpeg's own last words when it failed (set by command), else what went wrong here.
+        job.setdefault('detail', re.sub(r'[^\x20-\x7e]', '', f'{type(e).__name__}: {e}')[:240])
         if not job.get('cancelled'): log(f'{operation} {id or ""} failed ({job["error"]}): {type(e).__name__}: {e}')
     finally:
         job['finished'] = time.time()
@@ -1212,7 +1257,7 @@ def process(job, payload, id=None):
             path = os.path.join(job['dir'], name)
             if path not in keep: os.remove(path)
 
-STATUS_FIELDS = ('status', 'duration', 'error', 'files', 'meta', 'track')
+STATUS_FIELDS = ('status', 'duration', 'error', 'detail', 'files', 'meta', 'track')
 CONTENT_TYPES = {'.mp4': 'video/mp4', '.jpg': 'image/jpeg'}
 
 class Handler(BaseHTTPRequestHandler):

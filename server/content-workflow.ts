@@ -19,7 +19,7 @@ import { downloadImport, importFailure } from "./imports";
 import { storeYoutube, youtubeJob } from "./youtube-import";
 import { narrationContext } from "./story";
 import { runEpisode, videoReady, videoFailed } from "./series";
-import { LONG_VIDEO_SECONDS, SPEECH_MAX_SECONDS, speechTurns } from "../shared/speech";
+import { LONG_VIDEO_SECONDS, SPEECH_MAX_SECONDS, speechSpans } from "../shared/speech";
 import {
   isHighlight, narrationCurrent, pendingMedia, referencedAssets, referencedLibrary, specSchema, trackKey, type HighlightSpec, type PendingMedia, type Spec, type StorySpec,
 } from "../shared/formats";
@@ -288,10 +288,10 @@ async function trackMoment(e: Env, step: WorkflowStep, run: RunInfo, spec: Highl
   if (source.width > (source.height * 9) / 16 * 1.01) {
     const payload = await step.do("track-payload", async (): Promise<RenderPayload> => {
       const start = Math.min(spec.source.start, Math.max(0, source.duration - 1)), length = Math.max(1, Math.min(spec.source.end, source.duration) - start);
-      // Who talks when in the moment (speakers told apart by the transcription, or just when someone talks): the crop
-      // cuts to the face whose lips move with it.
+      // Who talks when in the moment, phrase by phrase (with the transcription's speakers when it told them apart): the
+      // crop cuts to the face whose lips move with the voice, and never to one that moves as much in the pauses.
       const meta = await e.DB.prepare("SELECT meta FROM media_assets WHERE id=? AND user_id=?").bind(spec.source.assetId, run.user_id).first<{ meta: string | null }>();
-      const turns = speechTurns(storedTranscript(meta?.meta ?? null, start, start + length), start, start + length);
+      const turns = speechSpans(storedTranscript(meta?.meta ?? null, start, start + length), start, start + length);
       return { id: uid(), operation: "track", url: await inputUrl(e, run.id, source.object_key), start, length, ...(turns.length && { turns }) };
     });
     try {
@@ -408,7 +408,12 @@ async function renderJob(e: Env, step: WorkflowStep, run: RunInfo, part: Plan["c
       return renderStatus(e, slot, payload.id);
     });
     if (status.status === "completed") return status;
-    if (status.status === "failed") throw new Error(typeof status.error === "string" && /^MEDIA_[A-Z_]+$/.test(status.error) ? status.error : "MEDIA_PROCESSING_FAILED");
+    if (status.status === "failed") {
+      const code = typeof status.error === "string" && /^MEDIA_[A-Z_]+$/.test(status.error) ? status.error : "MEDIA_PROCESSING_FAILED";
+      // What FFmpeg said: Workers Logs tell one failure from another (the person reads the code's message).
+      console.error("Render failed", { runId: run.id, code, detail: typeof status.detail === "string" ? status.detail.slice(0, 240) : null });
+      throw new Error(code);
+    }
     await step.sleep(`compose-wait-${i}`, "8 seconds");
   }
   throw new Error("MEDIA_TIMEOUT");

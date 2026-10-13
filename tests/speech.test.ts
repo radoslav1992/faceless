@@ -3,7 +3,7 @@ import worker from "../server/index";
 import { ContentGeneration } from "../server/content-workflow";
 import { claimSpeech, scribeWords, SCRIBE_MODEL, SCRIBE_URL, spendSpeech, SPEECH_FILES_PER_DAY, SPEECH_MINUTES_PER_DAY, storedTranscript, transcribe } from "../server/speech";
 import { ProviderError } from "../server/providers/http";
-import { SPEECH_MAX_SECONDS, speechTurns } from "../shared/speech";
+import { SPEECH_MAX_SECONDS, speechSpans, speechTurns } from "../shared/speech";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 
 // Speech to text with ElevenLabs Scribe v2 (as rech-bg): the request and its answer, and the free transcription of
@@ -78,6 +78,15 @@ describe("Scribe answers", () => {
     expect(speechTurns(t, 0.5, 5)).toEqual([[0.5, 1, 0], [1.2, 1.8, 1], [4, 5, 1]]);
     expect(speechTurns({ words: t.words }, 0.5, 5)).toEqual([[0.5, 1.8, -1], [4, 5, -1]]);
     expect(speechTurns(null, 0, 10)).toEqual([]);
+    // For the tracker: phrase by phrase (a pause of more than 0.3 s ends one, and so does another speaker), each with
+    // its turn's speaker ("hm", heard without one, goes with the turn it falls in).
+    expect(speechSpans(t, 0, 10)).toEqual([[0, 1, 0], [1.2, 1.8, 1], [4, 5.3, 1], [5.5, 5.9, 0]]);
+    expect(speechSpans({ words: t.words }, 0.5, 5)).toEqual([[0.5, 1.8, -1], [4, 5, -1]]);
+    // A word just outside its turn (a turn's edges are rounded) goes with the nearest one within a second.
+    const edges = { words: [{ text: "Yes.", start: 0, end: 0.4 }, { text: "No.", start: 2.5, end: 2.9 }, { text: "Hm.", start: 9, end: 9.2 }], turns: [[0.1, 2, 0], [3, 4, 1]] as [number, number, number][] };
+    expect(speechSpans(edges, 0, 10)).toEqual([[0, 0.4, 0], [2.5, 2.9, 1], [9, 9.2, -1]]);
+    expect(speechSpans({ words: [], turns: t.turns }, 0.5, 5)).toEqual(speechTurns({ words: [], turns: t.turns }, 0.5, 5));
+    expect(speechSpans(null, 0, 10)).toEqual([]);
     const stored = JSON.stringify({ transcript: t });
     expect(storedTranscript(stored, 4.2, 6.5)).toMatchObject({ turns: [[4, 5.3, 1], [5.5, 5.9, 0]], events: [{ text: "applause" }] });
     expect(storedTranscript(JSON.stringify({ transcript: { language: "eng", words: t.words } }))).toEqual({ language: "eng", words: t.words });

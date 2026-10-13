@@ -126,6 +126,8 @@ export type RenderStatus = {
   duration?: number;
   /** A short code (MEDIA_*), never a raw message. */
   error?: string;
+  /** With a failure: FFmpeg's last error line (or the renderer's own), for the Worker's log only, never shown. */
+  detail?: string;
   /** How many output files GET /jobs/:id/file/:n serves (MP4 or JPEG). */
   files?: number;
   /** inspect: what the file is. */

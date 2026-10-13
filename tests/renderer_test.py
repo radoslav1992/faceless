@@ -211,6 +211,8 @@ class RendererTest(unittest.TestCase):
     def assert_fails(self, payload, code, network=False):
         job = run(payload)
         self.assertEqual((job['status'], job.get('error')), ('failed', code), payload)
+        # Every failure says what went wrong, for the Worker's log: printable, short.
+        self.assertRegex(job.get('detail', ''), r'^[\x20-\x7e]{1,240}$')
         if not network: self.assertEqual(len(FIXTURES.requests), self.requests, 'refused before any download')
         self.assertEqual(os.listdir(job['dir']), [])
         return job
@@ -578,7 +580,10 @@ class HttpTest(RendererTest):
         # A failed job reports a code only.
         bad = {'id': id, 'operation': 'inspect', 'url': FIXTURES.url('broken.bin')}
         self.assertEqual(self.json('POST', '/jobs', bad)[0], 202)
-        self.assertEqual(self.wait(id), {'status': 'failed', 'error': 'MEDIA_FORMAT'})
+        failed = self.wait(id)
+        self.assertEqual((failed['status'], failed['error']), ('failed', 'MEDIA_FORMAT'))
+        # What ffprobe said, for the Worker's log.
+        self.assertRegex(failed['detail'], r'^ffprobe: .*Invalid data found when processing input$')
         # An inspect reports meta and duration.
         self.json('DELETE', f'/jobs/{id}')
         self.json('POST', '/jobs', {'id': id, 'operation': 'inspect', 'url': FIXTURES.url('clip.mp4')})
@@ -857,6 +862,32 @@ class TrackTest(RendererTest):
         mixed = self.talk([(0, 2, 0), (2, 2.5, 1), (2.5, 4, 0), (4, 10, 1)], 10)
         points = server.track_path(mixed, [], self.WIDE, turns=[(0, 2, 0), (2, 3.2, 1), (3.2, 4, 0), (4, 10, 1)])['points']
         self.assertEqual(points, [[0.0, 0.25], [2.0, 0.25], [2.0, 0.75]])
+
+    def test_one_voice_holds_on_the_face_whose_lips_move_with_it(self):
+        # A presenter on the left talks phrase by phrase; on the right a bigger "face" (on a slide, a screen or a video
+        # beside her) changes all the time, more than her lips. The transcription heard one speaker.
+        phrases = [(k * 2.0, k * 2.0 + 1.4, 0) for k in range(6)]
+        samples = []
+        for i in range(48):
+            talking = any(a <= i / 4 < b for a, b, _ in phrases)
+            samples.append([(0.25, 0.4, 0.08, 0.14, (i % 2) * 0.3 if talking else 0.0), (0.75, 0.4, 0.16, 0.28, (i % 2) * 0.5)])
+        self.assertEqual(server.track_path(samples, [], self.WIDE, turns=phrases)['points'], [[0.0, 0.25]])
+        # The right face moves as much in the pauses: it never speaks, whatever its lips do.
+        self.assertLess(server.lip_sync({i: 0.5 for i in range(1, 48)}, server.speech_samples(phrases, 48)), 0)
+        # Without speech nothing tells them apart: the biggest face is followed.
+        self.assertEqual(server.track_path(samples, [], self.WIDE)['points'], [[0.0, 0.75]])
+
+    def test_without_a_clear_turn_the_face_moving_with_the_voice_wins_over_the_biggest(self):
+        # Phrases too short to move the crop by themselves; a big photo of a face on the right never moves.
+        phrases = [(k * 2.0, k * 2.0 + 0.8, -1) for k in range(6)]
+        samples = []
+        for i in range(48):
+            talking = any(a <= i / 4 < b for a, b, _ in phrases)
+            samples.append([(0.25, 0.4, 0.08, 0.14, (i % 2) * 0.3 if talking else 0.0), (0.75, 0.4, 0.18, 0.32, 0.0)])
+        self.assertEqual(server.track_path(samples, [], self.WIDE, turns=phrases)['points'], [[0.0, 0.25]])
+        # Lips never measured (a profile, a hand): nothing to go by, the biggest face holds as before.
+        hidden = [[f[:4] + (None,) for f in faces] for faces in samples]
+        self.assertEqual(server.track_path(hidden, [], self.WIDE, turns=phrases)['points'], [[0.0, 0.75]])
 
     def test_turns_are_checked_before_any_download(self):
         for turns in ('x', [[0, 1]], [[1, 0, 0]], [[0, 1, 'a']], [[0, 1, True]], [[0, 1, 65]], [[0, 'x', 0]], [[0, 1, 0]] * 4001):

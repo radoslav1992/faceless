@@ -101,7 +101,7 @@ video is attached to it); its failure refunds the credits and the Clips page say
 | `RENDERER_UNAVAILABLE` | the container did not answer, or the `MEDIA_RENDERER` binding is missing |
 | `MEDIA_TIMEOUT` | no render finished in about 40 minutes (no free container, or a stuck render), or maintenance ended a run at 3 hours |
 | `MEDIA_LOST` | the container no longer knew the job (it restarted) |
-| `MEDIA_PROCESSING_FAILED`, `MEDIA_INVALID`, `MEDIA_NO_AUDIO`, `MEDIA_TOO_LONG`, `MEDIA_CANCELLED` | the renderer refused or failed the job |
+| `MEDIA_PROCESSING_FAILED`, `MEDIA_INVALID`, `MEDIA_NO_AUDIO`, `MEDIA_TOO_LONG`, `MEDIA_CANCELLED` | the renderer refused or failed the job; the workflow log (`Render failed`) has the run ID and FFmpeg's last error line (`detail`) |
 | `MEDIA_INPUT`, `MEDIA_FORMAT`, `MEDIA_TOO_LARGE` | a file of the video is missing or unreadable. Caused by the request |
 | `VIDEO_INVALID` | the stored spec no longer validates. Caused by the request |
 | `PROVIDER_REDIRECT`, `PROVIDER_URL`, `PROVIDER_DOWNLOAD` | a provider answered with a redirect or an output on an unexpected host |
