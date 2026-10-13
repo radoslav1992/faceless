@@ -91,7 +91,9 @@ trend data.
 
 ## Stack
 
-- **Client** (`src/`): React 19, React Router 7, Vite 7; Inter and Bricolage Grotesque (Fontsource), lucide icons.
+- **Client** (`src/`): React 19, React Router 7, Vite 7; Inter and Bricolage Grotesque (Fontsource), lucide icons. An
+  installable app (PWA): `public/manifest.webmanifest`, icons in `public/icons`, a service worker (`public/sw.js`) and
+  an offline page; "Install app" in the sidebar (`src/install.ts`).
 - **Worker** (`server/`): Hono 4 on Cloudflare Workers, zod 4 for every input.
 - **Data**: D1 (`migrations/0001_initial.sql`), a private R2 bucket for every file.
 - **Background work**: two Workflows (`ContentGeneration` makes videos and episodes and checks uploads; `Publication`

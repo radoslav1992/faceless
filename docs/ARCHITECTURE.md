@@ -34,9 +34,20 @@ Each request passes, in order:
    `/api/billing`, `/api/series`, `/api/videos`, `/api/story`, `/api/media`, `/api/library`, `/api/accounts`,
    publishing under `/api` (`/videos/:id/publish`, `/publications…`), `/api/settings`, `/api/keys` and `/api/admin`
    (administrators only; others get 404).
-10. Unknown `/api/*` paths answer 404 JSON. Other paths go to `server/pages.ts`: `robots.txt`, `sitemap.xml` and the
-    single-page app document with each public page's title, description and canonical/Open Graph tags
-    (`shared/seo.ts`); unknown paths get the app's not-found page with a real 404.
+10. Unknown `/api/*` paths answer 404 JSON. Other paths go to `server/pages.ts`: `robots.txt`, `sitemap.xml`, the
+    installable app's files (`/sw.js` with `Cache-Control: no-cache`, `/manifest.webmanifest` with its own type,
+    `/offline.html` with a 200) and the single-page app document with each public page's title, description and
+    canonical/Open Graph tags (`shared/seo.ts`); unknown paths get the app's not-found page with a real 404.
+
+**Installable app (PWA).** `index.html` links the manifest (`public/manifest.webmanifest`: name, icons, `start_url`
+`/app`, standalone display, shortcuts) and the Apple touch icon. `src/install.ts` registers `public/sw.js` in
+production builds and shows "Install app" in the sidebar: the browser's own dialog (`beforeinstallprompt`), or the
+Share → Add to Home Screen steps on iPhone and iPad. The service worker caches only the site's own static files:
+hashed build files (`/assets/…`) once fetched (the newest 150 kept), icons, fonts and the manifest (served from the
+cache, refreshed in the background), and the offline page. Pages always come from the network first, so a deploy shows
+at once; without a connection a page shows `public/offline.html`. It never answers `/api/…` (data, media files,
+capability links, OAuth callbacks), `/mcp`, crawler files, requests other than GET, or video range requests.
+Changing what it caches means bumping `VERSION` in `sw.js` (old caches are deleted when the new worker activates).
 
 Errors: an `HTTPException` becomes `{error}` with its status; a zod error 400 with the fields; anything unexpected 503
 with a reference that is logged as `Request failed` (billing routes answer their own plain message). The `scheduled`

@@ -6,6 +6,9 @@ import "@fontsource-variable/bricolage-grotesque";
 import "./style.css";
 import { App } from "./App";
 import { ToastProvider } from "./ui";
+import { setUpInstall } from "./install";
+
+setUpInstall();
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

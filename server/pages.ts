@@ -16,6 +16,24 @@ pages.get("/sitemap.xml", (c) => {
     "Content-Type": "application/xml; charset=utf-8",
   });
 });
+// The installable app's files (index.html links them): the service worker is always checked for a new version and may
+// control the whole site; the manifest has its own type; the offline page is a file of its own, never the app.
+pages.get("/sw.js", async (c) => {
+  const r = await c.env.ASSETS.fetch(c.req.raw);
+  const out = new Response(r.body, r);
+  out.headers.set("Content-Type", "text/javascript; charset=utf-8");
+  out.headers.set("Cache-Control", "no-cache");
+  out.headers.set("Service-Worker-Allowed", "/");
+  return out;
+});
+pages.get("/manifest.webmanifest", async (c) => {
+  const r = await c.env.ASSETS.fetch(c.req.raw);
+  const out = new Response(r.body, r);
+  out.headers.set("Content-Type", "application/manifest+json; charset=utf-8");
+  out.headers.set("Cache-Control", "public, max-age=3600");
+  return out;
+});
+pages.get("/offline.html", (c) => c.env.ASSETS.fetch(c.req.raw));
 const escapeAttr = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 pages.get("*", async (c) => {
   const meta = pageMeta(c.req.path);
