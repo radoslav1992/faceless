@@ -281,13 +281,19 @@ The app's Clips (code: "highlights", so they never mix with a scene's AI clip): 
 - **The run**: when the layout needs it (`follow`, or `split` placed automatically) and the moment was not measured
   yet, the renderer's `track` operation finds the faces in the moment (YuNet, 4 samples a second) and returns the crop
   path and the two people seen most (`faces`), kept as the server-owned `tracked` with the moment's key; a failure
-  only leaves the picture centred. **Active speaker**: the Worker sends who talks when in the moment (`speechTurns`:
-  Scribe's diarized turns, or stretches of speech when the transcript has no speakers). For every face the renderer
-  compares its mouth with the last sample (a small patch between the mouth's corners, less the change of one on the
-  nose, so a moving head is not talking); each turn of at least a second goes to the face clearly moving its lips
-  most, and a speaker label keeps the face it was matched to most often (so a turn whose lips were not readable still
-  finds its face). The crop cuts at each change of speaker (never more than once a second) and follows that face
-  calmly within the turn; with no speech, or one face, it follows the face seen most. Then `planHighlight` makes one
+  only leaves the picture centred. **Active speaker**: the Worker sends who talks when in the moment, phrase by phrase
+  (`speechSpans`: the words joined into stretches split at pauses over 0.3 s, each with the diarized speaker nearest
+  it within a second, else -1), so the pauses between phrases are known too. For every face the renderer compares its
+  mouth with the last sample (a small patch between the mouth's corners, less the change of one on the nose, so a
+  moving head is not talking). A face whose lips move no more (×1.3) while someone talks than in the pauses — a photo,
+  a face on a slide or a changing screen — is never the speaker. Each turn of at least a second goes to the face
+  clearly moving its lips most, and a speaker label keeps the face it was matched to most often (so a turn whose lips
+  were not readable still finds its face); when no turn is clear by itself (one voice the whole moment), the shot
+  holds on the face whose lips move most with the voice rather than the biggest. The crop cuts at each change of
+  speaker (never more than once a second) and follows that face calmly within the turn; with no speech, or one face,
+  it follows the face seen most. `trackKey` carries the tracker's version (`TRACKER`), so a better tracker measures
+  clips again when they are made again. A render that fails logs `Render failed` with the run, the code and FFmpeg's
+  last error line (`detail`), which never reaches the owner. Then `planHighlight` makes one
   video segment: the moment trimmed, its kept parts, and either the `follow` path, `fit: "contain"` or `panes`; the
   clip's own sound; captions from the transcript's words cut like the picture; the hook title; music under it all.
   Nothing in a clip is AI-made, so it is never marked as such.

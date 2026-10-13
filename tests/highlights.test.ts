@@ -9,7 +9,7 @@ import { DAY } from "../server/types";
 import {
   viralityScore, defaultClipOptions, layoutFor, momentSpec, paneWindow, placedPanes, splitHeights, type ClipOptions, type Moment,
 } from "../shared/highlights";
-import { specCredits, specSchema, visualPart, type HighlightSpec } from "../shared/formats";
+import { specCredits, specSchema, TRACKER, visualPart, type HighlightSpec } from "../shared/formats";
 import { highlightCredits, speechCredits } from "../shared/credits";
 import type { CaptionWord } from "../shared/captions";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
@@ -185,7 +185,7 @@ describe("the clip format", () => {
     const words = [...transcript(6, 30), ...transcript(4, 55)];
     const ctx = { media: { [id]: { key: "media/u/v.mp4", kind: "video" as const, duration: 3600, width: 1920, height: 1080, words } }, watermark: "" };
     const base = clipSpec(id, {}, { start: 30, end: 66 });
-    const tracked = { key: `${id}:30:66`, track: { v: 1 as const, points: [[30, 0.3], [40, 0.3], [40, 0.7]] as [number, number][], faces: [[0.25, 0.4], [0.75, 0.42]] as [number, number][] } };
+    const tracked = { key: `${id}:30:66@${TRACKER}`, track: { v: 1 as const, points: [[30, 0.3], [40, 0.3], [40, 0.7]] as [number, number][], faces: [[0.25, 0.4], [0.75, 0.42]] as [number, number][] } };
     const follow = planRender({ ...base, tracked }, ctx).compose;
     const [segment] = follow.segments;
     expect(segment).toMatchObject({ kind: "video", input: 0, trim: 30, audio: 1 });
@@ -394,13 +394,16 @@ describe("making clips", () => {
     expect(used()).toBe(1);
     await run();
     expect(log.map((p) => p.operation)).toEqual(["track", "compose"]);
-    // When someone talks in the moment (no speakers told apart in this transcript), so the crop can find who.
-    expect(log[0]).toMatchObject({ start: 33, length: 33, turns: [[33.3, 65.75, -1]], url: expect.stringMatching(/^https:\/\/app\.test\/api\/render-inputs\//) });
+    // When someone talks in the moment, phrase by phrase with the pauses between (no speakers told apart in this
+    // transcript), so the crop can find whose lips move with the voice.
+    expect(log[0]).toMatchObject({ start: 33, length: 33, url: expect.stringMatching(/^https:\/\/app\.test\/api\/render-inputs\//) });
+    expect(log[0].turns.slice(0, 2)).toEqual([[33.3, 36.05, -1], [36.6, 39.35, -1]]);
+    expect([log[0].turns.length, log[0].turns.at(-1)]).toEqual([10, [63, 65.75, -1]]);
     expect(log[1].segments[0]).toMatchObject({ kind: "video", trim: 33, audio: 1, follow: [[0, 0.3], [expect.any(Number), 0.3]] });
     expect(log[1].synthetic).toBe(false);
     let video = (await call(worker, env, "GET", `/api/videos/${made.data.id}`, undefined, user.cookie)).data.video;
     expect(video).toMatchObject({ renderStatus: "ready", title: "Why we priced it at $9", hook: "Why we priced it at $9" });
-    expect(video.spec.tracked).toMatchObject({ key: `${id}:33:66`, track: { faces: [[0.25, 0.4], [0.75, 0.42]] } });
+    expect(video.spec.tracked).toMatchObject({ key: `${id}:33:66@${TRACKER}`, track: { faces: [[0.25, 0.4], [0.75, 0.42]] } });
     const render = sqlite.prepare("SELECT meta FROM media_assets WHERE id=?").get(video.videoAssetId) as any;
     expect(render.meta).toBe("{}");
     // The clip is listed with its video.
@@ -418,7 +421,7 @@ describe("making clips", () => {
     expect([reframed.status, reframed.data.credits]).toEqual([200, 0]);
     expect(log.map((p) => p.operation)).toEqual(["compose"]);
     expect(log[0].segments[0].panes.map((p: any) => p.height)).toEqual([960, 960]);
-    expect(video.spec.tracked.key).toBe(`${id}:33:66`);
+    expect(video.spec.tracked.key).toBe(`${id}:33:66@${TRACKER}`);
     // A new moment is tracked again (here the transcription told two speakers apart: the renderer gets who talks
     // when); moved onto other footage it costs a new clip.
     log.length = 0;
@@ -427,7 +430,12 @@ describe("making clips", () => {
     const moved = await edit((s) => ({ ...s, layout: { kind: "follow" }, source: { ...s.source, start: 70, end: 100 } }));
     expect(moved.data.credits).toBe(1);
     expect(log.map((p) => p.operation)).toEqual(["track", "compose"]);
-    expect(log[0].turns).toEqual([[70, 80, 0], [80.5, 95, 1], [95.5, 100, 0]]);
+    // Phrase by phrase, each with the speaker of the turn it falls in.
+    // (words in the short gaps between turns go with the nearest turn).
+    expect(log[0].turns).toEqual([
+      [70, 72.35, 0], [72.9, 75.65, 0], [76.2, 78.95, 0], [79.5, 80.15, 0], [80.2, 82.25, 1], [82.8, 85.55, 1], [86.1, 88.85, 1],
+      [89.4, 92.15, 1], [92.7, 95.1, 1], [95.15, 95.45, 0], [96, 98.75, 0], [99.3, 99.95, 0],
+    ]);
     expect(used()).toBe(2);
     // Post text only: no render.
     log.length = 0;
