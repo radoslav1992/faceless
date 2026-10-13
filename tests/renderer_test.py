@@ -889,6 +889,13 @@ class TrackTest(RendererTest):
         hidden = [[f[:4] + (None,) for f in faces] for faces in samples]
         self.assertEqual(server.track_path(hidden, [], self.WIDE, turns=phrases)['points'], [[0.0, 0.75]])
 
+    def test_one_presenter_who_changes_place_is_cut_to_where_she_is_now(self):
+        # A webcam bubble moves from the right corner to the left one at 6 s without a cut (the screen stays); one voice.
+        phrases = [(k * 2.0, k * 2.0 + 1.4, 0) for k in range(6)]
+        samples = [[(0.82 if i < 24 else 0.17, 0.45, 0.08, 0.14, (i % 2) * 0.3 if any(a <= i / 4 < b for a, b, _ in phrases) else 0.0)]
+                   for i in range(48)]
+        self.assertEqual(server.track_path(samples, [], self.WIDE, turns=phrases)['points'], [[0.0, 0.82], [6.0, 0.82], [6.0, 0.17]])
+
     def test_turns_are_checked_before_any_download(self):
         for turns in ('x', [[0, 1]], [[1, 0, 0]], [[0, 1, 'a']], [[0, 1, True]], [[0, 1, 65]], [[0, 'x', 0]], [[0, 1, 0]] * 4001):
             self.assert_fails({'operation': 'track', 'url': FIXTURES.url('upright.mp4'), 'start': 0, 'length': 1, 'turns': turns}, 'MEDIA_INVALID')
