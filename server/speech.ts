@@ -131,13 +131,17 @@ export async function transcribe(e: Env, file: SpeechFile, duration: number): Pr
   return scribeWords(await r.json(), duration);
 }
 /**
- * Why Scribe refused, as a code: SPEECH_PERMISSION (the API key lacks Speech to Text), SPEECH_UNAVAILABLE (no credits
- * or a bad key), SPEECH_BUSY, SPEECH_FILE (the file can't be read as sound), else SPEECH_FAILED.
+ * Why Scribe refused, as a code: SPEECH_PERMISSION (the API key lacks Speech to Text), SPEECH_CREDITS (the account's
+ * credits or quota are used up), SPEECH_UNAVAILABLE (a bad key), SPEECH_BUSY, SPEECH_FILE (the file can't be read as
+ * sound), else SPEECH_FAILED. ElevenLabs' own reason (a short status word such as "quota_exceeded", never its message)
+ * is logged with the HTTP status, so a refusal can be told apart in the Worker's logs.
  */
 export async function speechFailure(r: Response) {
   const body = await r.clone().json().catch(() => null) as any;
-  const status = String(body?.detail?.status || "").toLowerCase();
+  const status = String(body?.detail?.status || body?.detail?.code || "").toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 60);
+  console.warn("Scribe refused", { status: r.status, reason: status || null });
   if (status === "missing_permissions") return "SPEECH_PERMISSION";
+  if (/quota|credit|balance|limit_reached|payment|subscription/.test(status)) return "SPEECH_CREDITS";
   if (r.status === 400 || r.status === 422) {
     if (/invalid_(file|audio|content)|unsupported|corrupt|too_short|no_audio/.test(status)) return "SPEECH_FILE";
   }

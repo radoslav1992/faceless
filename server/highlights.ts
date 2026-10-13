@@ -236,7 +236,7 @@ export async function searchMoments(env: Env, userId: string, assetId: string, r
 }
 /** What the owner reads when a video's transcription failed, by its reason (meta.speech.code). */
 export function speechProblem(code: unknown) {
-  if (code === "SPEECH_PERMISSION" || code === "SPEECH_UNAVAILABLE") return "Transcription is unavailable right now. We've been told; please try again later.";
+  if (code === "SPEECH_PERMISSION" || code === "SPEECH_CREDITS" || code === "SPEECH_UNAVAILABLE") return "Transcription is unavailable right now. We've been told; please try again later.";
   if (code === "SPEECH_BUSY") return "Transcription is busy right now. Try again in a few minutes.";
   if (code === "SPEECH_FILE") return "We couldn't read the sound in this video. Try exporting it again as an MP4 and uploading that.";
   return "We couldn't transcribe this video. Try again.";

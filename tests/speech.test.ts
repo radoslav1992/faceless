@@ -105,6 +105,11 @@ describe("Scribe answers", () => {
   it("turns failures into codes and never calls without a key", async () => {
     vi.stubGlobal("fetch", async () => Response.json({ detail: { status: "quota_exceeded", message: "secret" } }, { status: 401 }));
     const file = () => fileOf(new Uint8Array(100));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // The account's credits are used up: ElevenLabs reads the file first (it prices by length), then refuses.
+    await expect(transcribe({ ELEVENLABS_API_KEY: "k" } as any, file(), 5)).rejects.toMatchObject({ code: "SPEECH_CREDITS" });
+    expect(warn).toHaveBeenLastCalledWith("Scribe refused", { status: 401, reason: "quota_exceeded" });
+    vi.stubGlobal("fetch", async () => Response.json({ detail: { status: "invalid_api_key", message: "secret" } }, { status: 401 }));
     await expect(transcribe({ ELEVENLABS_API_KEY: "k" } as any, file(), 5)).rejects.toMatchObject({ code: "SPEECH_UNAVAILABLE" });
     // A key without the Speech to Text permission says so (Admin → Operations shows the reason).
     vi.stubGlobal("fetch", async () => Response.json({ detail: { status: "missing_permissions", message: "secret" } }, { status: 401 }));
