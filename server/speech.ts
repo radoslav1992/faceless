@@ -28,7 +28,7 @@ const LISTEN_SECONDS = 3 * 3600;
 /** A transcription that has not finished by then is reported as failed (it can be tried again). */
 const PENDING_SECONDS = 3600;
 
-// The Scribe answer (ElevenLabs speech-to-text, as in @elevenlabs/elevenlabs-js SpeechToTextChunkResponseModel):
+// The Scribe answer (ElevenLabs speech-to-text, SpeechToTextChunkResponseModel in its API reference):
 // language_code (ISO 639-3, e.g. "eng"), text, and words [{ text, start, end, type: word|spacing|audio_event,
 // speaker_id }] — speaker_id ("speaker_0"…) with diarization on.
 const scribeOutput = z.object({

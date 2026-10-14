@@ -18,7 +18,6 @@
   },
   "dependencies": {
     "@cloudflare/containers": "^0.3.7",
-    "@elevenlabs/elevenlabs-js": "^2.68.0",
     "@fontsource-variable/bricolage-grotesque": "^5.2.8",
     "@fontsource-variable/inter": "^5.2.8",
     "hono": "^4.12.0",

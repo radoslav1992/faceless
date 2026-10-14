@@ -1,4 +1,3 @@
-import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
 import { z } from "zod";
 import type { Env } from "../types";
 import { alignmentWords, type CaptionWord } from "../../shared/captions";
@@ -10,6 +9,10 @@ import { failureCode, providerFetch, ProviderError } from "./http";
 // recording, for a voice without timings and for an owner's voiceover whose exact script they gave.
 export const SPEECH_MODEL = "eleven_v4";
 export const ALIGNMENT_URL = "https://api.elevenlabs.io/v1/forced-alignment";
+const SPEECH_URL = "https://api.elevenlabs.io/v1/text-to-speech";
+// The text-to-speech-with-timestamps answer: the audio and the timing of each character, as written and as spoken.
+const timings = z.object({ characters: z.array(z.string()), character_start_times_seconds: z.array(z.number()), character_end_times_seconds: z.array(z.number()) });
+const speechAnswer = z.object({ audio_base64: z.string().min(1), alignment: timings.nullish(), normalized_alignment: timings.nullish() });
 
 /** 16-bit mono PCM as a WAV file. */
 export function wav(pcm: Uint8Array, rate: number) {
@@ -30,20 +33,23 @@ export function wav(pcm: Uint8Array, rate: number) {
 export async function speak(e: Env, voiceId: string, text: string, language = "en", timing: "normalized" | "original" = "normalized"): Promise<{ audio: Uint8Array; seconds: number; words: CaptionWord[] }> {
   const voice = await providerVoiceId(e, voiceId);
   if (!e.ELEVENLABS_API_KEY?.trim() || !voice) throw new ProviderError("VOICE_UNAVAILABLE");
-  const client = new ElevenLabsClient({ apiKey: e.ELEVENLABS_API_KEY.trim() });
-  let result;
-  try {
-    result = await client.textToSpeech.convertWithTimestamps(voice, {
-      text, modelId: SPEECH_MODEL, languageCode: language.slice(0, 2), outputFormat: "pcm_24000",
-    }, { maxRetries: 0, timeoutInSeconds: 240 });
-  } catch (error) {
-    const status = (error as any)?.statusCode;
-    throw new ProviderError(status === 401 || status === 402 ? "VOICE_UNAVAILABLE" : status === 429 ? "VOICE_BUSY" : "VOICE_FAILED");
+  // The REST call itself (not ElevenLabs' SDK: its thousands of modules made the Worker too slow to start).
+  const url = `${SPEECH_URL}/${encodeURIComponent(voice)}/with-timestamps?output_format=pcm_24000`;
+  const r = await providerFetch(url, {
+    method: "POST", headers: { "xi-api-key": e.ELEVENLABS_API_KEY.trim(), "Content-Type": "application/json" },
+    body: JSON.stringify({ text, model_id: SPEECH_MODEL, language_code: language.slice(0, 2) }), signal: AbortSignal.timeout(240000),
+  }).catch((error) => { throw error instanceof ProviderError ? error : new ProviderError("VOICE_FAILED"); });
+  if (!r.ok) {
+    await r.body?.cancel();
+    throw new ProviderError(r.status === 401 || r.status === 402 ? "VOICE_UNAVAILABLE" : r.status === 429 ? "VOICE_BUSY" : "VOICE_FAILED");
   }
-  if (!result.audioBase64 || result.audioBase64.length > 20_000_000) throw new ProviderError("VOICE_FAILED");
-  const pcm = Uint8Array.from(atob(result.audioBase64), (c) => c.charCodeAt(0));
+  const result = speechAnswer.safeParse(await r.json().catch(() => null));
+  if (!result.success || result.data.audio_base64.length > 20_000_000) throw new ProviderError("VOICE_FAILED");
+  const { audio_base64: audioBase64, alignment: spoken, normalized_alignment: normalized } = result.data;
+  const pcm = Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0));
   if (!pcm.length || pcm.length % 2) throw new ProviderError("VOICE_FAILED");
-  const alignment = timing === "original" ? result.alignment || result.normalizedAlignment : result.normalizedAlignment || result.alignment;
+  const chosen = timing === "original" ? spoken || normalized : normalized || spoken;
+  const alignment = chosen ? { characters: chosen.characters, characterStartTimesSeconds: chosen.character_start_times_seconds, characterEndTimesSeconds: chosen.character_end_times_seconds } : undefined;
   const seconds = pcm.length / 48000;
   // The model's timings can run a little past the audio (tens of milliseconds): words never end after the voice does.
   const words = alignmentWords(alignment).map((w) => ({ ...w, start: Math.min(w.start, seconds), end: Math.min(w.end, seconds) }));
