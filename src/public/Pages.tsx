@@ -4,6 +4,7 @@ import { ArrowRight, BookOpen, Bot, Building2, CalendarClock, Clapperboard, Eye,
 import { useAuth } from "../lib";
 import { StyleArt } from "../art";
 import { SamplePhone } from "./Phone";
+import { useExamples } from "../examples";
 import { Faq, StyleGallery, homeFaq } from "./Landing";
 import { NotFound } from "./NotFound";
 import { categories, templates, tools, toolBySlug, type TemplateId } from "../../shared/templates";
@@ -91,6 +92,7 @@ export function ToolPage() {
   const [prompt, setPrompt] = useState("");
   const [animal, setAnimal] = useState("");
   const [object, setObject] = useState("");
+  const examples = useExamples();
   if (!tool) return <NotFound />;
   const t = templates[tool.id];
   const Icon = icons[tool.icon] || Sparkles;
@@ -131,7 +133,8 @@ export function ToolPage() {
           )}
         </div>
         <SamplePhone style={t.style} kind={t.kind} backdrop={t.kind === "backdrop" ? "bd-aurora" : undefined}
-          title={t.kind === "pov" ? `POV: ${t.examples[0]}` : t.kind === "mashup" ? "Sneakorino Sharkalino" : t.examples[0]} caption={t.short} />
+          title={t.kind === "pov" ? `POV: ${t.examples[0]}` : t.kind === "mashup" ? "Sneakorino Sharkalino" : t.examples[0]} caption={t.short}
+          example={examples[tool.id]} autoplay />
       </div>
       <section className="pub-section tight">
         <div className="pub-wrap">

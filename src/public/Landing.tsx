@@ -11,10 +11,12 @@ import { categories, templateIds, templates, type CategoryId } from "../../share
 import { PRODUCT } from "../../shared/brand";
 import { storyStyles, type StoryStyle } from "../../shared/styles";
 import { StyleArt } from "../art";
+import { useExamples, type Example } from "../examples";
 
 // The home page: what the product does, its popular formats, how it compares, what every video includes, how it works,
 // a video to try right here, every style, clips, plans and questions. Every word and picture on it is ours; it shows
-// drawn samples (and a drawing of the dashboard), never invented results, users or reviews.
+// real videos made with the styles (Admin → Examples) or drawn samples (and a drawing of the dashboard), never invented
+// results, users or reviews.
 
 /** A draft started on the home page, picked up by Create after sign-up. */
 export const DEMO_DRAFT = "hss-demo-draft";
@@ -85,6 +87,7 @@ function Demo() {
 
 /** The gallery of faceless styles: filter by category, open one in Create (sign-up first). */
 export function StyleGallery({ to }: { to: (id: string) => string }) {
+  const examples = useExamples();
   const [category, setCategory] = useState<CategoryId | "all">("all");
   const shown = templateIds.filter((id) => category === "all" || templates[id].category === category);
   return (
@@ -104,7 +107,7 @@ export function StyleGallery({ to }: { to: (id: string) => string }) {
               <div style={{ position: "relative" }}>
                 {"popular" in t && t.popular && <span className="badge-popular">POPULAR</span>}
                 <SamplePhone style={t.style} kind={t.kind} title={t.kind === "pov" ? `POV: ${t.examples[0]}` : t.kind === "mashup" ? "Toastero Froggarino" : t.examples[0]}
-                  caption={t.short} backdrop={t.kind === "backdrop" ? "bd-city" : undefined} />
+                  caption={t.short} backdrop={t.kind === "backdrop" ? "bd-city" : undefined} example={examples[id]} />
               </div>
               <strong>{t.name}</strong>
               <small>{t.short}</small>
@@ -145,7 +148,7 @@ const categoryName = (id: CategoryId) => categories.find((c) => c.id === id)?.na
 const musicLabel = (mood: string) => (mood === "none" ? "No music" : mood === "auto" ? "Matching music" : `${mood[0].toUpperCase()}${mood.slice(1)} music`);
 
 /** Popular formats in a 3D coverflow: the one in front can be made at once. */
-function FormatCarousel({ to }: { to: (id: string) => string }) {
+function FormatCarousel({ to, examples }: { to: (id: string) => string; examples: Record<string, Example> }) {
   const [at, setAt] = useState(0);
   const n = showcase.length;
   const go = (step: number) => setAt((x) => (x + step + n) % n);
@@ -166,7 +169,7 @@ function FormatCarousel({ to }: { to: (id: string) => string }) {
               <span className="cf-kind">{categoryName(t.category)}</span>
               <strong className="cf-name">{t.name}</strong>
               <SamplePhone style={t.style} kind={t.kind} title={t.kind === "pov" ? `POV: ${t.examples[0]}` : t.kind === "mashup" ? "Toastero Froggarino" : t.examples[0]}
-                caption={t.short} backdrop={t.kind === "backdrop" ? "bd-city" : undefined} />
+                caption={t.short} backdrop={t.kind === "backdrop" ? "bd-city" : undefined} example={examples[id]} autoplay={front} />
               <span className="cf-facts" aria-label={`${storyStyles[t.style].name} art, about ${t.seconds} seconds, ${musicLabel(t.music).toLowerCase()}`}>
                 <span>{storyStyles[t.style].name}</span><span>~{t.seconds} s</span><span>{musicLabel(t.music)}</span>
               </span>
@@ -226,8 +229,17 @@ const included: [typeof Mic, string, string][] = [
   [Download, "Yours to keep", "Every video downloads as a 1080 × 1920 MP4, on every plan."],
 ];
 
+/** The hero's videos: real examples (popular styles first) once there are three, else the drawn samples. */
+function heroExamples(examples: Record<string, Example>) {
+  const ids = [...templateIds].sort((a, b) => Number("popular" in templates[b] && templates[b].popular) - Number("popular" in templates[a] && templates[a].popular));
+  const found = ids.filter((id) => examples[id]).slice(0, 5);
+  return found.length >= 3 ? found : null;
+}
+
 export function Landing() {
   const { user } = useAuth();
+  const examples = useExamples();
+  const shown = heroExamples(examples);
   const start = user ? "/app" : "/register";
   const make = (id: string) => (user ? `/app/create?template=${id}` : `/register?next=${encodeURIComponent(`/app/create?template=${id}`)}`);
   return (
@@ -243,9 +255,15 @@ export function Landing() {
               <Link className="btn big" to="/tools">Browse video tools</Link>
             </div>
             <p className="hero-note">Free trial · no card needed · cancel any time</p>
-            <div className="reel" aria-label="Example videos (drawn samples)">
-              {reel.map((r) => <SamplePhone key={r.title} {...r} />)}
-            </div>
+            {shown ? (
+              <div className="reel" aria-label={`Example videos made with ${PRODUCT.name}`}>
+                {shown.map((id) => <SamplePhone key={id} caption="" title={templates[id].name} label={`Example: ${templates[id].name}`} example={examples[id]} autoplay />)}
+              </div>
+            ) : (
+              <div className="reel" aria-label="Example videos (drawn samples)">
+                {reel.map((r) => <SamplePhone key={r.title} {...r} />)}
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -257,7 +275,7 @@ export function Landing() {
             <h2 className="title">Made for <span className="glow-text">every niche</span></h2>
             <p className="sub">Each format comes with its own script recipe, voice, art style and music. Pick one and get your first video in minutes.</p>
           </div>
-          <FormatCarousel to={make} />
+          <FormatCarousel to={make} examples={examples} />
           <p className="sample-note">Drawn samples. Your videos are written and drawn fresh for your topic.</p>
         </div>
       </section>

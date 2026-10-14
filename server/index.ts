@@ -13,6 +13,7 @@ import { billing, webhook } from "./billing";
 import { billingFailure } from "./billing-errors";
 import { pages } from "./pages";
 import { publicRoutes } from "./routes/public";
+import { publicExamples } from "./examples";
 import { settings } from "./routes/settings";
 import { admin } from "./routes/admin";
 import { videos } from "./videos";
@@ -86,6 +87,7 @@ app.get("/api/health", async (c) => {
   }
 });
 app.route("/", publicRoutes);
+app.route("/", publicExamples);
 // Capability links (token in the URL) for the renderer, AI providers and social networks: no session.
 app.route("/api/render-inputs", renderInputs);
 app.route("/api/upload-inputs", uploadInputs);
