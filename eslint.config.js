@@ -16,6 +16,9 @@ export default tseslint.config(
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrors: "none" }],
       "no-empty": ["error", { allowEmptyCatch: true }],
+      // Everything the Worker imports runs when it starts, within Cloudflare's startup CPU limit: providers are called
+      // with fetch, never through their SDKs (ElevenLabs' alone took most of that time).
+      "no-restricted-imports": ["error", { patterns: [{ group: ["@elevenlabs/*", "@fal-ai/*", "openai"], message: "Call the provider's REST API with fetch (server/providers): SDKs slow the Worker's startup." }] }],
     },
   },
   {
