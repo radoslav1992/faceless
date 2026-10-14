@@ -56,14 +56,15 @@ handler runs `maintenance()` every minute.
 ## Data model
 
 `migrations/0001_initial.sql`, `0002_clips.sql` (runs of kind `speech`), `0003_voices.sql` (narration voices) and
-`0004_library.sql` (library pictures, descriptions and the AI mark); D1 always enforces foreign keys.
+`0004_library.sql` (library pictures, descriptions and the AI mark) and `0005_style_examples.sql` (each style's example
+video); D1 always enforces foreign keys.
 
 | Area | Tables |
 | --- | --- |
 | Accounts | `users`, `sessions`, `auth_tokens` (verify/reset), `rate_limits`, `terms_acceptances`, `contact_messages`, `cleanup_tasks` |
 | Billing | `subscriptions` (Stripe subscriptions and `grant_` rows), `stripe_status`, `stripe_reconciled`, `billing_events` (webhook de-duplication), `checkout_intents`, `usage_windows`, `trial_history`, `credit_topups`, `media_limits`, `checkout_consents`, `withdrawals` |
 | Social | `social_accounts` (sealed credentials), `oauth_states` |
-| Making videos | `series`, `videos`, `runs`, `media_assets`, `media_parts`, `library_items`, `voices` |
+| Making videos | `series`, `videos`, `runs`, `media_assets`, `media_parts`, `library_items`, `voices`, `style_examples` |
 | Publishing | `publications` (status, attempts, media-link token, provider ticket, URL, stats) |
 | API | `api_keys` (SHA-256 of the key and a short prefix only) |
 | Operations | `operations_state`, `manual_reviews` |
@@ -132,6 +133,16 @@ the active items (all of them, folded to lowercase without accents, a plural mat
 be in the name, description or tags, name matches first, then tags, then descriptions; `?ids=` returns particular
 items (the editor's scenes). Music is a track, a background a clip, a scene a clip or a picture (`checkReferences`).
 An item marked as AI-made makes the video that shows it AI-made (`compose.synthetic`), like the owner's AI pictures.
+
+**Style examples** (`server/examples.ts`, `style_examples`, Admin → Examples in `src/app/AdminExamples.tsx`). One real
+video per faceless style, played on the style's card in Create, the app's home, the home page's gallery and coverflow,
+its tool page, and in the home page's hero once three styles have one (else the drawn samples). An administrator
+chooses one of their own finished videos (`PUT /api/admin/examples/:template`); its file and cover are copied under
+`examples/{id}/` (up to 100 MB), so deleting the video keeps the example, and a new choice gets a new id, deleting the
+old files through `cleanup_tasks`. `GET /api/public/examples` lists them (cached a minute) and their files are served
+with `immutable` caching. `src/examples.tsx` shows the cover at rest and plays the video muted and looping while the
+card is hovered or focused, and on touch screens (or the hero) while it is in view; with reduced motion only hovering
+plays it. A style without one shows its drawing (`StyleArt`, cropped to fill the 9:16 tile).
 
 ## Writing
 

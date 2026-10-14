@@ -43,6 +43,11 @@ under `/api/admin` answers 404 to anyone else.
   `playful`, `ambient`); clips loop behind storytime videos and, like pictures, can be any scene's picture. Videos that
   show an item marked as AI-made are disclosed as AI-made when they're posted. Switched-off or deleted items leave new
   videos; made videos keep their render.
+- **Examples**: a real video for each faceless style, played on its card in Create, on the home page and on its tool
+  page (the home page's hero shows real examples once three styles have one). Make a video in the style, then choose
+  it from the style's list (videos of the style's own type come first); it is copied, so deleting the video later
+  keeps the example. Replace or remove it at any time; a style without one shows its drawing. Choose videos up to
+  100 MB that show the style at its best, and only ones that are yours to show.
 - **Messages**: the last 100 contact-form messages; abuse reports are red, billing and withdrawal requests amber. Each
   message is also e-mailed to `ADMIN_EMAILS`.
 

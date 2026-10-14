@@ -176,7 +176,7 @@ export const templates = {
 export type TemplateId = keyof typeof templates;
 export const templateIds = Object.keys(templates) as TemplateId[];
 export const templateOf = (id: string): Template => (templates as Record<string, Template>)[id] ?? templates.custom;
-export const isTemplate = (id: string): id is TemplateId => id in templates;
+export const isTemplate = (id: string): id is TemplateId => Object.hasOwn(templates, id);
 /** Templates a series can run on (every one but a script, which needs the owner's words each time). */
 export const seriesTemplates = templateIds.filter((id) => templates[id].kind !== "script");
 /** The public tool pages. */

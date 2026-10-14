@@ -6,14 +6,14 @@ import type { StoryStyle } from "../shared/story";
 
 const ink = { stroke: "#15171d", strokeWidth: 2.6, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 
-/** The sample scene of one style (viewBox 100 × 120). */
+/** The sample scene of one style (viewBox 100 × 120; a taller or wider frame crops it, centred). */
 export function StyleArt({ style }: { style: StoryStyle }) {
   const id = useId().replace(/[^a-zA-Z0-9]/g, "");
   const ref = (name: string) => `url(#${id}${name})`;
   switch (style) {
     case "doodle":
       return (
-        <svg viewBox="0 0 100 120" aria-hidden="true">
+        <svg viewBox="0 0 100 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
           <rect width="100" height="120" fill="#fbf6ec" />
           <circle cx="76" cy="24" r="11" fill="#ffe28a" {...ink} />
           <path d="M70 9 l-2 -5 M86 12 l4 -4 M90 26 h5" {...ink} fill="none" />
@@ -27,7 +27,7 @@ export function StyleArt({ style }: { style: StoryStyle }) {
       );
     case "watercolor":
       return (
-        <svg viewBox="0 0 100 120" aria-hidden="true">
+        <svg viewBox="0 0 100 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
           <defs>
             <filter id={`${id}w`} x="-20%" y="-20%" width="140%" height="140%">
               <feTurbulence type="fractalNoise" baseFrequency="0.06" numOctaves="3" seed="3" />
@@ -48,7 +48,7 @@ export function StyleArt({ style }: { style: StoryStyle }) {
       );
     case "clay":
       return (
-        <svg viewBox="0 0 100 120" aria-hidden="true">
+        <svg viewBox="0 0 100 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
           <defs>
             <radialGradient id={`${id}s`} cx="35%" cy="30%" r="75%"><stop offset="0" stopColor="#ffd9a0" /><stop offset="1" stopColor="#e8862f" /></radialGradient>
             <radialGradient id={`${id}h`} cx="40%" cy="20%" r="90%"><stop offset="0" stopColor="#b6e3a8" /><stop offset="1" stopColor="#4f9a4a" /></radialGradient>
@@ -67,7 +67,7 @@ export function StyleArt({ style }: { style: StoryStyle }) {
       );
     case "comic":
       return (
-        <svg viewBox="0 0 100 120" aria-hidden="true">
+        <svg viewBox="0 0 100 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
           <defs>
             <pattern id={`${id}p`} width="6" height="6" patternUnits="userSpaceOnUse"><circle cx="3" cy="3" r="1.3" fill="#e9a70f" /></pattern>
           </defs>
@@ -82,7 +82,7 @@ export function StyleArt({ style }: { style: StoryStyle }) {
       );
     case "flat":
       return (
-        <svg viewBox="0 0 100 120" aria-hidden="true">
+        <svg viewBox="0 0 100 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
           <rect width="100" height="120" fill="#cfeee9" />
           <circle cx="72" cy="30" r="12" fill="#ff8a65" />
           <path d="M-6 100 L28 56 L58 100Z" fill="#2f5d62" />
@@ -95,7 +95,7 @@ export function StyleArt({ style }: { style: StoryStyle }) {
       );
     case "cinematic":
       return (
-        <svg viewBox="0 0 100 120" aria-hidden="true">
+        <svg viewBox="0 0 100 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
           <defs>
             <linearGradient id={`${id}k`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#0f1b33" /><stop offset="0.55" stopColor="#7c3d4d" /><stop offset="0.8" stopColor="#f2a35e" /></linearGradient>
             <radialGradient id={`${id}u`} cx="62%" cy="74%" r="45%"><stop offset="0" stopColor="#ffe3a3" stopOpacity="0.95" /><stop offset="1" stopColor="#ffe3a3" stopOpacity="0" /></radialGradient>
@@ -112,7 +112,7 @@ export function StyleArt({ style }: { style: StoryStyle }) {
       );
     case "anime":
       return (
-        <svg viewBox="0 0 100 120" aria-hidden="true">
+        <svg viewBox="0 0 100 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
           <defs>
             <linearGradient id={`${id}a`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#3b82f6" /><stop offset="1" stopColor="#bfdbfe" /></linearGradient>
           </defs>
@@ -129,7 +129,7 @@ export function StyleArt({ style }: { style: StoryStyle }) {
       );
     case "storybook":
       return (
-        <svg viewBox="0 0 100 120" aria-hidden="true">
+        <svg viewBox="0 0 100 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
           <rect width="100" height="120" fill="#fbefd9" />
           <circle cx="74" cy="26" r="11" fill="#f7c873" />
           <path d="M-4 92 Q24 70 52 86 T104 80 V124 H-4Z" fill="#a8cf8e" />
@@ -145,7 +145,7 @@ export function StyleArt({ style }: { style: StoryStyle }) {
       );
     case "toy3d":
       return (
-        <svg viewBox="0 0 100 120" aria-hidden="true">
+        <svg viewBox="0 0 100 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
           <defs>
             <linearGradient id={`${id}t`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#8fd3ff" /><stop offset="1" stopColor="#e3f4ff" /></linearGradient>
             <radialGradient id={`${id}b`} cx="35%" cy="30%" r="75%"><stop offset="0" stopColor="#ffd27a" /><stop offset="1" stopColor="#f08a24" /></radialGradient>
@@ -166,7 +166,7 @@ export function StyleArt({ style }: { style: StoryStyle }) {
       );
     case "dark":
       return (
-        <svg viewBox="0 0 100 120" aria-hidden="true">
+        <svg viewBox="0 0 100 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
           <defs>
             <linearGradient id={`${id}d`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#0b1424" /><stop offset="1" stopColor="#1d2b3a" /></linearGradient>
             <radialGradient id={`${id}m`} cx="50%" cy="50%" r="50%"><stop offset="0" stopColor="#ffe9c4" /><stop offset="0.6" stopColor="#f0b36b" stopOpacity="0.5" /><stop offset="1" stopColor="#f0b36b" stopOpacity="0" /></radialGradient>
@@ -182,7 +182,7 @@ export function StyleArt({ style }: { style: StoryStyle }) {
       );
     case "vintage":
       return (
-        <svg viewBox="0 0 100 120" aria-hidden="true">
+        <svg viewBox="0 0 100 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
           <defs>
             <filter id={`${id}n`}><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="5" /><feColorMatrix type="saturate" values="0" /><feComponentTransfer><feFuncA type="linear" slope="0.18" /></feComponentTransfer><feBlend in="SourceGraphic" mode="multiply" /></filter>
             <linearGradient id={`${id}v`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#e7c99a" /><stop offset="1" stopColor="#b98a5a" /></linearGradient>
@@ -200,7 +200,7 @@ export function StyleArt({ style }: { style: StoryStyle }) {
       );
     case "oil":
       return (
-        <svg viewBox="0 0 100 120" aria-hidden="true">
+        <svg viewBox="0 0 100 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
           <defs>
             <filter id={`${id}o`} x="-10%" y="-10%" width="120%" height="120%">
               <feTurbulence type="turbulence" baseFrequency="0.05 0.12" numOctaves="2" seed="8" />
@@ -221,7 +221,7 @@ export function StyleArt({ style }: { style: StoryStyle }) {
       );
     case "sketch":
       return (
-        <svg viewBox="0 0 100 120" aria-hidden="true">
+        <svg viewBox="0 0 100 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
           <defs>
             <pattern id={`${id}h`} width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><path d="M0 0 V4" stroke="#6b6b6b" strokeWidth="0.8" /></pattern>
           </defs>
@@ -237,7 +237,7 @@ export function StyleArt({ style }: { style: StoryStyle }) {
       );
     case "pixel":
       return (
-        <svg viewBox="0 0 100 120" aria-hidden="true" shapeRendering="crispEdges">
+        <svg viewBox="0 0 100 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true" shapeRendering="crispEdges">
           <rect width="100" height="120" fill="#5fb7ff" />
           <rect x="70" y="16" width="16" height="16" fill="#ffe14d" />
           <rect x="10" y="24" width="20" height="6" fill="#fff" /><rect x="14" y="20" width="10" height="4" fill="#fff" />
@@ -253,7 +253,7 @@ export function StyleArt({ style }: { style: StoryStyle }) {
       );
     case "neon":
       return (
-        <svg viewBox="0 0 100 120" aria-hidden="true">
+        <svg viewBox="0 0 100 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
           <defs>
             <linearGradient id={`${id}s`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#0a0420" /><stop offset="1" stopColor="#2a0a3f" /></linearGradient>
             <linearGradient id={`${id}u`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#ffd84d" /><stop offset="1" stopColor="#ff3fa4" /></linearGradient>

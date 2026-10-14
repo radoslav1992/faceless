@@ -3,6 +3,7 @@ import { ArrowRight, PenSquare, Repeat, Scissors, Sparkles } from "lucide-react"
 import { useApi, useAuth, usePoll, number, when, type Series, type Video } from "../lib";
 import { VideoCard, making } from "./video-ui";
 import { StyleArt } from "../art";
+import { ExampleVideo, useExamples } from "../examples";
 import { templates } from "../../shared/templates";
 
 // Home: what needs the owner (videos to review), what posts next, the latest videos and the series at a glance.
@@ -10,6 +11,7 @@ import { templates } from "../../shared/templates";
 type Scheduled = { id: string; videoId: string; title: string; hook: string; platform: string; accountName: string; scheduledAt: number; status: string };
 export function Home() {
   const { user } = useAuth();
+  const examples = useExamples();
   const videos = useApi<{ videos: Video[]; counts: { making: number; review: number; failed: number; total: number } }>("/videos?limit=12");
   const series = useApi<{ series: Series[] }>("/series");
   const upcoming = useApi<{ publications: Scheduled[] }>(`/publications?from=${Math.floor(Date.now() / 1000)}`);
@@ -37,7 +39,7 @@ export function Home() {
           <div className="choice-grid">
             {(["scary", "facts", "dayinlife", "mashup", "motivation", "storytime"] as const).map((id) => (
               <Link key={id} to={`/app/create?template=${id}`} className="choice" style={{ textDecoration: "none" }}>
-                <div style={{ borderRadius: 10, overflow: "hidden" }}><StyleArt style={templates[id].style} /></div>
+                <div className="choice-art">{examples[id] ? <ExampleVideo example={examples[id]} /> : <StyleArt style={templates[id].style} />}</div>
                 <strong>{templates[id].name}</strong><small>{templates[id].short}</small>
               </Link>
             ))}

@@ -4,6 +4,7 @@ import { ArrowLeft, Repeat, Search, Wand2 } from "lucide-react";
 import { errorText, newKey, post, useAuth } from "../lib";
 import { useToast } from "../ui";
 import { StyleArt } from "../art";
+import { ExampleVideo, useExamples } from "../examples";
 import { StoryStylePicker } from "./StoryStyles";
 import { VideoEditor } from "./EditVideo";
 import { creditBlock, CreditBlockNotice, useOfferedVoice, VoiceSelect } from "./pickers";
@@ -21,6 +22,7 @@ const DEMO_DRAFT = "hss-demo-draft";
 const lengths = [30, 45, 60, 90];
 
 function Gallery({ onPick }: { onPick: (id: TemplateId) => void }) {
+  const examples = useExamples();
   const [category, setCategory] = useState<CategoryId | "all">("all");
   const [query, setQuery] = useState("");
   const shown = templateIds.filter((id) => (category === "all" || templates[id].category === category) &&
@@ -37,7 +39,10 @@ function Gallery({ onPick }: { onPick: (id: TemplateId) => void }) {
           const t = templates[id];
           return (
             <button key={id} type="button" className="template-card" onClick={() => onPick(id)}>
-              <span className="art">{"popular" in t && t.popular && <span className="chip solid pop">Popular</span>}<StyleArt style={t.style} /></span>
+              <span className="art">
+                {"popular" in t && t.popular && <span className="chip solid pop">Popular</span>}
+                {examples[id] ? <ExampleVideo example={examples[id]} /> : <StyleArt style={t.style} />}
+              </span>
               <strong>{t.name}</strong>
               <small>{t.short}</small>
             </button>

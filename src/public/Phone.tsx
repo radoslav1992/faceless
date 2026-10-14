@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { StyleArt } from "../art";
+import { ExampleVideo, type Example } from "../examples";
 import type { StoryStyle } from "../../shared/story";
 import type { VideoKind } from "../../shared/templates";
 
 // A phone showing a drawn sample of a video: the style's picture (moving slowly), its on-screen title and the
-// subtitles a few words at a time with a key word in lime. Drawings and words only: never a fake result.
+// subtitles a few words at a time with a key word in lime. Drawings and words only: never a fake result. A style with
+// an example (a real video made with it, Admin → Examples) shows that video instead.
 
 const reduced = () => typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 /** Words of `text` in groups of three, a key word (*between stars*) in lime. */
@@ -33,12 +35,22 @@ export function Captions({ text, color = "#fff", accent = "var(--brand)" }: { te
   );
 }
 
-export function SamplePhone({ style, title, caption, kind = "story", label, children, backdrop, color }: {
+export function SamplePhone({ style, title, caption, kind = "story", label, children, backdrop, color, example, autoplay }: {
   style?: StoryStyle; title?: string; caption: string; kind?: VideoKind; label?: string; children?: ReactNode; color?: string;
   /** A CSS backdrop class (storytime) instead of a drawn picture. */
   backdrop?: string;
+  /** A real video made in this style (Admin → Examples), shown instead of the drawing; `autoplay` plays it in view. */
+  example?: Example; autoplay?: boolean;
 }) {
   const titleClass = kind === "pov" ? "ph-title pov" : kind === "mashup" ? "ph-title loud" : "ph-title";
+  if (example) {
+    return (
+      <div className="phone" role="img" aria-label={label || `Example video${title ? `: ${title}` : ""}`}>
+        <ExampleVideo example={example} autoplay={autoplay} />
+        {children}
+      </div>
+    );
+  }
   return (
     <div className="phone" role="img" aria-label={label || [title, caption.replace(/\*/g, "")].filter(Boolean).join(" — ")}>
       {backdrop ? <div className={`backdrop ${backdrop}`} /> : style && <StyleArt style={style} />}

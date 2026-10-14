@@ -25,3 +25,12 @@
 .ops-dl dd { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .ops-dl div { grid-template-columns: 1fr; gap: 2px; } }
 
+
+/* Admin → Examples (AdminExamples.tsx): each style with its example video (or drawing) and the choice of video. */
+.example-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 18px 14px; }
+.example-card { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.example-card .art { position: relative; display: block; aspect-ratio: 9 / 16; border-radius: 14px; overflow: hidden; background: #050605; border: 1px solid var(--line); margin-bottom: 4px; }
+.example-card .art svg, .example-card .art video { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; }
+.example-card .art .chip { position: absolute; top: 8px; right: 8px; }
+.example-card .select { width: 100%; margin-top: 4px; }
+@media (max-width: 520px) { .example-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
