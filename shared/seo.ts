@@ -3,14 +3,14 @@ import { tools } from "./templates";
 
 // Titles and descriptions per public page; the Worker puts them into the HTML for crawlers and link previews, and the
 // app updates them on navigation.
-const UPDATED = "2026-10-13";
+const UPDATED = "2026-10-15";
 const toolPages = Object.fromEntries(tools.map((t) => [`/tools/${t.slug}`, { title: `${t.title} — ${PRODUCT.name}`, description: t.description, updated: UPDATED }]));
 export const publicPages: Record<string, { title: string; description: string; updated: string }> = {
   "/": { title: `${PRODUCT.name} — ${PRODUCT.tagline}`, description: PRODUCT.pitch, updated: UPDATED },
   "/tools": { title: `AI video tools for faceless creators — ${PRODUCT.name}`, description: "Text to video, scary stories, POV, storytime and brainrot mashups: narrated vertical videos for TikTok, Shorts and Reels.", updated: UPDATED },
   ...toolPages,
   "/styles": { title: `Faceless video styles — ${PRODUCT.name}`, description: "Ready-made faceless video styles and art styles: scary stories, history, fun facts, POV, bedtime stories and more.", updated: UPDATED },
-  "/pricing": { title: `Pricing — ${PRODUCT.name}`, description: "Start free. Starter, Daily, Double and Studio plans for faceless videos on autopilot; unused credits roll over.", updated: UPDATED },
+  "/pricing": { title: `Pricing — ${PRODUCT.name}`, description: "Start free. Starter, Creator, Pro and Studio plans for faceless videos on autopilot; unused credits roll over.", updated: UPDATED },
   "/mcp": { title: `MCP connection and API — ${PRODUCT.name}`, description: `Make faceless videos from your AI assistant or your own code with the ${PRODUCT.name} MCP server and REST API.`, updated: UPDATED },
   "/business": { title: `For business — ${PRODUCT.name}`, description: "Run many faceless channels with review, API access and one bill.", updated: UPDATED },
   "/about": { title: `About — ${PRODUCT.name}`, description: `Why ${PRODUCT.name} exists and how it makes videos.`, updated: UPDATED },

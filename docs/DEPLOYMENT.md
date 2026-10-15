@@ -102,12 +102,13 @@ Overview shows which of these are configured.
    | Plan | Monthly price | Variable | Yearly price | Variable | Credits a month |
    | --- | --- | --- | --- | --- | --- |
    | Starter | $19 / month | `STRIPE_PRICE_STARTER` | $168 / year | `STRIPE_PRICE_STARTER_YEARLY` | 30 |
-   | Daily | $35 / month | `STRIPE_PRICE_DAILY` | $288 / year | `STRIPE_PRICE_DAILY_YEARLY` | 60 |
-   | Double | $59 / month | `STRIPE_PRICE_DOUBLE` | $492 / year | `STRIPE_PRICE_DOUBLE_YEARLY` | 120 |
+   | Creator | $35 / month | `STRIPE_PRICE_DAILY` | $288 / year | `STRIPE_PRICE_DAILY_YEARLY` | 60 |
+   | Pro | $59 / month | `STRIPE_PRICE_DOUBLE` | $492 / year | `STRIPE_PRICE_DOUBLE_YEARLY` | 120 |
    | Studio | $149 / month | `STRIPE_PRICE_STUDIO` | $1,248 / year | `STRIPE_PRICE_STUDIO_YEARLY` | 350 |
 
    A subscription's plan is recognised by these IDs, or by a price's lookup key or `metadata.plan` set to `starter`,
-   `daily`, `double` or `studio`. Checkout allows promotion codes.
+   `daily` (Creator), `double` (Pro) or `studio`. Checkout allows promotion codes. Name the products like the plans
+   (Starter, Creator, Pro, Studio): Checkout, receipts and the billing portal show the product's name.
 2. **Credit packs need no products.** They are one-time Checkout payments with inline `price_data`
    (`creditPacks` in `shared/plans.ts`): 10 credits for $8, 40 for $28 and 150 for $90, named "N credits — Hookstreak Shorts".
 3. **Webhook.** Add an endpoint at `${SITE_URL}/api/billing/webhook` with these events and put its signing secret into

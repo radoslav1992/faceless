@@ -4,7 +4,8 @@ import { CLIP_CREDITS, CLIP_SECONDS, HIGHLIGHT_SECONDS_PER_CREDIT, PICTURES_PER_
 // started 30 seconds (shared/credits.ts), so "up to N videos" assumes one-minute videos. The server enforces credits
 // per usage window (a D1 trigger) and `series`, `accounts`, `storageGb` and the upload limits of videos (`videoMinutes`,
 // `videoMb`: long videos for clips on paid plans) in code. Unused credits roll over from month to month while a plan
-// runs (up to ROLLOVER_MONTHS of them), and subscribers can buy credit packs.
+// runs (up to ROLLOVER_MONTHS of them), and subscribers can buy credit packs. Ids never change (subscriptions, Stripe
+// lookup keys and the API use them); names are what people see: "daily" is Creator and "double" is Pro.
 export const plans = [
   {
     id: "free",
@@ -38,7 +39,7 @@ export const plans = [
   },
   {
     id: "daily",
-    name: "Daily",
+    name: "Creator",
     monthly: 35,
     yearly: 288,
     credits: 60,
@@ -53,7 +54,7 @@ export const plans = [
   },
   {
     id: "double",
-    name: "Double",
+    name: "Pro",
     monthly: 59,
     yearly: 492,
     credits: 120,
