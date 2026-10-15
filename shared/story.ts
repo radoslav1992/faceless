@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { CaptionWord } from "./captions";
-import { SPEECH_CHARS_PER_SECOND } from "./credits";
+import { clipQualities, SPEECH_CHARS_PER_SECOND } from "./credits";
 import { storyStyles, type StoryStyle } from "./styles";
 
 // A narrated video ("story"): a voiceover (an AI voice reading a script, or the owner's own recording) laid out on its own
@@ -77,6 +77,8 @@ export const storySceneSchema = z
     /** The AI clip made from that picture. */
     clipId: uuid.optional(),
     clipSeconds: z.union([z.literal(5), z.literal(10)]).default(5),
+    /** Regular (720p, 1 credit per 5 s) or high quality (1080p, 2 credits per 5 s): shared/credits.ts. */
+    clipQuality: z.enum(clipQualities).default("regular"),
     /** Own media (an image or a video). */
     assetId: uuid.optional(),
     /** A clip or picture from the shared library. */

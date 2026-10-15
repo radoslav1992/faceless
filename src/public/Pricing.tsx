@@ -74,7 +74,7 @@ const pricingFaq: [string, string][] = [
   ["Do unused credits roll over?", "Yes. Whatever you don't use carries into the next month while your plan runs, up to three months' worth of your plan's credits plus any packs you bought."],
   ["Can I mix video types on one plan?", "Yes. Every plan includes every video type, art style, voice and language. Credits work the same for all of them."],
   ["What happens if I run out of credits?", "Nothing breaks. Series skip their next episodes until credits are back (we e-mail you), and you can add a credit pack or upgrade at any time."],
-  ["What do edits cost?", "Changing words on screen, subtitles, music, transitions or timing is free. Only new AI work costs credits: new narration for changed words (1 credit per 30 seconds), new pictures (1 credit per 5) and animated scenes (1 credit per 5 seconds)."],
+  ["What do edits cost?", "Changing words on screen, subtitles, music, transitions or timing is free. Only new AI work costs credits: new narration for changed words (1 credit per 30 seconds), new pictures (1 credit per 5) and animated scenes (1 credit per 5 seconds, 2 in high quality)."],
   [`What does the free trial include?`, `${planById("free").credits} credits to try every video type, one series and one social account, for ${TRIAL_DAYS} days. No card needed. Trial videos carry a small watermark.`],
 ];
 

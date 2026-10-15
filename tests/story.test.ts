@@ -160,7 +160,7 @@ describe("timeline edits", () => {
 
 describe("the format", () => {
   it("validates scenes, sources and the narration", () => {
-    expect(story().scenes[0]).toMatchObject({ source: "image", transition: "auto", clipSeconds: 5, keys: [] });
+    expect(story().scenes[0]).toMatchObject({ source: "image", transition: "auto", clipSeconds: 5, clipQuality: "regular", keys: [] });
     const bad = (s: Record<string, unknown>) => specSchema.safeParse({ format: "story", narration: { kind: "voice", voiceId: "george" }, scenes: [{ text: "Hello there.", ...s }] }).success;
     expect(bad({ description: "A dog" })).toBe(true);
     expect(bad({ description: "" })).toBe(false); // an AI picture needs a description
@@ -168,6 +168,8 @@ describe("the format", () => {
     expect(bad({ source: "own", assetId: id(1) })).toBe(true);
     expect(bad({ source: "library" })).toBe(false);
     expect(bad({ source: "clip", description: "A dog", clipSeconds: 7 })).toBe(false);
+    expect(bad({ source: "clip", description: "A dog", clipQuality: "high" })).toBe(true);
+    expect(bad({ source: "clip", description: "A dog", clipQuality: "ultra" })).toBe(false);
     expect(bad({ description: "A dog", transition: "spin" })).toBe(false);
     expect(specSchema.safeParse({ format: "story", narration: { kind: "upload" }, scenes: [scene(0)] }).success).toBe(false);
     expect(specSchema.safeParse({ format: "story", narration: { kind: "voice", voiceId: "george" }, scenes: Array.from({ length: 41 }, () => scene(0)) }).success).toBe(false);
@@ -175,7 +177,7 @@ describe("the format", () => {
     expect(story().style).toBe("doodle");
   });
 
-  it("prices a new video by its length and an edit by what it makes again, each clip by its seconds", () => {
+  it("prices a new video by its length and an edit by what it makes again, each clip by its seconds and quality", () => {
     const spec = story({ subject: "a small orange octopus with big eyes", style: "doodle", scenes: [
       scene(0), scene(1, { source: "clip" }), scene(2, { source: "clip", clipSeconds: 10, imageId: id(5) }),
       scene(3, { source: "own", assetId: id(6) }), scene(4, { source: "library", libraryId: id(7) }),
@@ -183,10 +185,15 @@ describe("the format", () => {
     const voice = voiceCredits(storyScript(spec.scenes));
     expect(voice).toBe(1);
     // New: its length (voice and every picture included) and the clips; 17 s of speech is one credit.
-    expect(specCredits(spec, true)).toBe(videoCredits(estimatedSeconds(spec)) + CLIP_CREDITS + CLIP_CREDITS * 2);
-    expect(specCredits(spec, true, 61)).toBe(3 + CLIP_CREDITS * 3);
+    expect(specCredits(spec, true)).toBe(videoCredits(estimatedSeconds(spec)) + CLIP_CREDITS.regular + CLIP_CREDITS.regular * 2);
+    expect(specCredits(spec, true, 61)).toBe(3 + CLIP_CREDITS.regular * 3);
     // An edit: the voice again, the two missing pictures (1 credit per 5), the clips.
-    expect(specCredits(spec, false)).toBe(voice + pictureCredits(2) + CLIP_CREDITS * 3);
+    expect(specCredits(spec, false)).toBe(voice + pictureCredits(2) + CLIP_CREDITS.regular * 3);
+    // High quality: 2 credits per 5 s instead of 1, clip by clip.
+    expect([CLIP_CREDITS.regular, CLIP_CREDITS.high]).toEqual([1, 2]);
+    const high = story({ ...spec, scenes: spec.scenes.map((s, i) => (i === 2 ? { ...s, clipQuality: "high" } : s)) });
+    expect(specCredits(high, true, 61)).toBe(3 + CLIP_CREDITS.regular + CLIP_CREDITS.high * 2);
+    expect(pendingMedia(high).filter((m) => m.kind === "clip").map((m) => [m.seconds, m.quality])).toEqual([[5, "regular"], [10, "high"]]);
     // The advertised price: a minute of speech is two credits (the finished video's padding is never charged).
     const minute = (n: number) => ({ text: `${"word ".repeat(Math.floor(n / 5))}`.trim().padEnd(n, "x") + ".", description: "A doodle" });
     const sixty = story({ scenes: [minute(447), minute(450)] });
@@ -223,8 +230,12 @@ describe("the format", () => {
     expect(clipFor(7)).toBe(10);
   });
 
-  it("asks the image model for 9:16 pictures and the clip model to start from the scene's picture", () => {
-    expect(falRequest("clip", "A doodle octopus waves.", { image: "https://app.test/api/render-inputs/r/0?token=t", seconds: 10 })).toEqual({
+  it("asks the image model for 9:16 pictures and the clip model of its quality to start from the scene's picture", () => {
+    // Regular quality (and any clip that doesn't say): Kling 2.5 Turbo Standard; high quality: the Pro model.
+    const image = "https://app.test/api/render-inputs/r/0?token=t";
+    expect(falRequest("clip", "A wave.", { image }).model).toBe("fal-ai/kling-video/v2.5-turbo/standard/image-to-video");
+    expect(falRequest("clip", "A wave.", { image, clipQuality: "regular" }).body).toEqual(falRequest("clip", "A wave.", { image, clipQuality: "high" }).body);
+    expect(falRequest("clip", "A doodle octopus waves.", { image, seconds: 10, clipQuality: "high" })).toEqual({
       model: "fal-ai/kling-video/v2.5-turbo/pro/image-to-video",
       body: {
         prompt: "A doodle octopus waves. No text, captions, logos or watermarks in the picture.", duration: "10",
@@ -545,10 +556,23 @@ async function setup() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("narrated videos in the content run", () => {
+  it("makes a high-quality clip with the finer model, for 2 credits per 5 seconds", async () => {
+    const { env, user, spec, used, run } = await setup();
+    const calls = providers();
+    const high = { ...spec, scenes: spec.scenes.map((s) => (s.source === "clip" ? { ...s, clipQuality: "high" as const } : s)) };
+    const price = videoCredits(estimatedSeconds(spec)) + CLIP_CREDITS.high;
+    const created = await call(worker, env, "POST", "/api/videos", { spec: high, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect([created.status, created.data.credits]).toEqual([201, price]);
+    await run();
+    expect(calls.filter((c) => c.method === "POST" && c.url.includes("/kling-video/")).map((c) => c.url.split("/").slice(3).join("/")))
+      .toEqual(["fal-ai/kling-video/v2.5-turbo/pro/image-to-video"]);
+    expect(used()).toBe(price);
+  });
+
   it("charges the voice, pictures and clip once, makes the clip from its picture, and re-renders for free", async () => {
     const { env, sqlite, user, spec, own, used, run } = await setup();
     const calls = providers();
-    const price = videoCredits(estimatedSeconds(spec)) + CLIP_CREDITS;
+    const price = videoCredits(estimatedSeconds(spec)) + CLIP_CREDITS.regular;
     const created = await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
     expect(created.status).toBe(201);
     expect(created.data.credits).toBe(price);
@@ -556,7 +580,7 @@ describe("narrated videos in the content run", () => {
     await run();
     const submits = () => calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/"));
     expect(submits().map((c) => c.url.split("/").slice(3).join("/"))).toEqual([
-      ...Array(4).fill("openai/gpt-image-2.5/flare/text-to-image"), "fal-ai/kling-video/v2.5-turbo/pro/image-to-video",
+      ...Array(4).fill("openai/gpt-image-2.5/flare/text-to-image"), "fal-ai/kling-video/v2.5-turbo/standard/image-to-video",
     ]);
     let post = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
     expect(post.renderStatus).toBe("ready");

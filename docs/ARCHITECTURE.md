@@ -101,13 +101,17 @@ by the server: the browser never sets it.
 
 A scene's picture is an **AI image** (made once, then shown with a slow zoom or pan), an **AI clip** made from that
 image (5 or 10 s), the owner's **image or video**, or a **library clip or picture**, chosen scene by scene in the
-editor; one button there turns every AI-picture scene into an AI clip as long as its scene (5 or 10 s), with its price,
+editor; one button there turns every AI-picture scene into an AI clip as long as its scene (5 or 10 s), at the selected
+scene's clip quality, with its price,
 and a scene still to make is labelled with what it will be. Scenes hold words, never times:
 times come from the voice's word timings, so an edit only moves words between scenes and keeps the paid recording
 (`narrationKey`: voice, length and a fingerprint of the script).
 
 **Credits** (`specCredits`, `shared/credits.ts`): a new video costs 1 credit per started 30 seconds of its estimated
-length (the owner's recording by its own length), everything included, plus 1 credit per 5 seconds of AI clips. An
+length (the owner's recording by its own length), everything included, plus per 5 seconds of AI clip 1 credit at
+regular quality (Kling 2.5 Turbo Standard, 720p, ~$0.21 per 5 s on fal) or 2 at high quality (Pro, 1080p, ~$0.35), so
+a clip credit costs at most ~$0.21 to make, below a credit's value on every plan. The quality is the scene's
+`clipQuality` (regular unless chosen), which picks the fal model (`IMAGE_CLIP_MODELS`). An
 edit of a made video costs only what it asks for again: new narration when the words or voice changed, 1 credit per
 5 new pictures, and new clips. Changes to the caption, hashtags or title need no new render; other free changes
 (subtitles, music, transitions, timing) re-render for 0 credits.

@@ -124,7 +124,7 @@ export const planIncludes = [
 /** Every credit price, built from the constants the server charges by. */
 export const tariffs: readonly { name: string; text: string }[] = [
   { name: "New video", text: `1 credit per started ${SECONDS_PER_CREDIT} seconds: a one-minute video is 2 credits, script, narration and every picture included.` },
-  { name: "Animated scenes", text: `${CLIP_CREDITS} credit per ${CLIP_SECONDS} seconds to bring a scene's picture to life with AI motion (optional).` },
+  { name: "Animated scenes", text: `${CLIP_CREDITS.regular} credit per ${CLIP_SECONDS} seconds to bring a scene's picture to life with AI motion, or ${CLIP_CREDITS.high} in high quality (1080p). Optional.` },
   { name: "New pictures", text: `1 credit per ${PICTURES_PER_CREDIT} pictures redone in a made video.` },
   { name: "New narration", text: `1 credit per started ${SECONDS_PER_CREDIT} seconds when you change the words of a made video. Your own recording is free.` },
   { name: "Clips from your videos", text: `1 credit per started ${HIGHLIGHT_SECONDS_PER_CREDIT} seconds of each clip: cut, framed on the speaker and captioned.` },
