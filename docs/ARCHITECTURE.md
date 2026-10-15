@@ -100,7 +100,9 @@ and the post text (caption, hashtags, title, topic). `generated` (the recorded A
 by the server: the browser never sets it.
 
 A scene's picture is an **AI image** (made once, then shown with a slow zoom or pan), an **AI clip** made from that
-image (5 or 10 s), the owner's **image or video**, or a **library clip or picture**. Scenes hold words, never times:
+image (5 or 10 s), the owner's **image or video**, or a **library clip or picture**, chosen scene by scene in the
+editor; one button there turns every AI-picture scene into an AI clip as long as its scene (5 or 10 s), with its price,
+and a scene still to make is labelled with what it will be. Scenes hold words, never times:
 times come from the voice's word timings, so an edit only moves words between scenes and keeps the paid recording
 (`narrationKey`: voice, length and a fingerprint of the script).
 

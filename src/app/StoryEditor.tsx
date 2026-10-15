@@ -61,7 +61,7 @@ function useStoryMedia(spec: StorySpec) {
       const k = known[s.libraryId];
       return k.kind === "image" ? { url: k.url, kind: "image" } : { url: k.url, kind: "video", loop: k.duration < seconds - 1 };
     }
-    return { pending: s.source === "own" || s.source === "library" ? `Choose ${s.source === "own" ? "your picture or video" : "a library clip or picture"}` : s.description };
+    return { pending: s.source === "own" || s.source === "library" ? `Choose ${s.source === "own" ? "your picture or video" : "a library clip or picture"}` : s.description, label: sourceNames[s.source] };
   }, [known]);
   return { known, remember, picture };
 }
@@ -104,6 +104,13 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
   }, [spec.headline, clock.duration]);
   const setScenes = (scenes: StoryScene[]) => onChange({ ...spec, scenes });
   const setScene = (patch: Partial<StoryScene>) => setScenes(spec.scenes.map((s, i) => (i === selected ? { ...s, ...patch } as StoryScene : s)));
+  // A picture's source is chosen scene by scene; this turns every AI picture into an AI clip at once, each as long as
+  // its scene needs (5 or 10 s), made from its picture.
+  const pictureScenes = spec.backdrop ? [] : spec.scenes.flatMap((s, i) => (s.source === "image" ? [{ i, seconds: clipFor(timed[i].end - timed[i].start) }] : []));
+  const allClips = {
+    count: pictureScenes.length, credits: clipCredits(pictureScenes.map((p) => p.seconds)),
+    apply: () => setScenes(spec.scenes.map((s, i) => { const p = pictureScenes.find((x) => x.i === i); return p ? { ...s, source: "clip", clipSeconds: p.seconds } as StoryScene : s; })),
+  };
   const { byId } = useVoices();
   const voiceName = spec.narration.kind === "voice" ? byId((spec.narration as { voiceId: string }).voiceId)?.name || "AI voice" : "Your recording";
   const voiceLabel = spec.narration.kind === "upload" ? `Your recording · ${clockText(clock.duration)}` : `AI voice · ${voiceName}${clock.source === "estimate" ? " · made with the video" : ""}`;
@@ -119,7 +126,7 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
             : clock.source === "recording" && !clock.said.length ? "No word timings yet: scenes are spread over the recording and no subtitles are shown." : "The preview plays the voice with the scenes, transitions and subtitles in sync."}</p>
         </div>
         <SceneInspector spec={spec} index={selected} scene={scene} seconds={timed[selected] ? timed[selected].end - timed[selected].start : 0}
-          known={media.known} onChange={setScene} pick={setPicker} initial={initial}
+          known={media.known} onChange={setScene} pick={setPicker} initial={initial} allClips={allClips}
           onSplit={(at) => setScenes(splitScene(spec.scenes, selected, at))}
           onMerge={() => setScenes(mergeScenes(spec.scenes, selected))}
           onDelete={() => { setScenes(spec.scenes.filter((_, i) => i !== selected)); setSelected(Math.max(0, selected - 1)); }} />
@@ -183,8 +190,10 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
 }
 
 /** The selected scene: its words (key words, split), its picture (source, description, price) and its way in. */
-function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, onSplit, onMerge, onDelete, initial }: {
+function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, onSplit, onMerge, onDelete, initial, allClips }: {
   spec: StorySpec; index: number; scene: StoryScene; seconds: number; known: Record<string, Known>; initial: boolean;
+  /** The scenes still showing an AI picture, what turning them all into AI clips costs, and doing it. */
+  allClips: { count: number; credits: number; apply: () => void };
   onChange: (patch: Partial<StoryScene>) => void; pick: (p: "image" | "video" | "library") => void;
   onSplit: (at: number) => void; onMerge: () => void; onDelete: () => void;
 }) {
@@ -222,7 +231,7 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
         {voice && <button type="button" className="btn sm ghost danger" disabled={spec.scenes.length <= 1} onClick={onDelete}><Trash2 size={14} aria-hidden="true" /> Delete</button>}
       </div>
       <hr />
-      <span className="small strong-label">Picture</span>
+      <span className="small strong-label">Picture of scene {index + 1}</span>
       <div className="seg small-seg story-sources" role="group" aria-label="Where the picture comes from">
         {(["image", "clip", "own", "library"] as const).map((s) => {
           const Icon = sourceIcons[s], cost = price(s);
@@ -234,6 +243,11 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
           );
         })}
       </div>
+      {(scene.source === "image" || scene.source === "clip") && allClips.count > (scene.source === "image" ? 1 : 0) && (
+        <button type="button" className="btn sm" onClick={allClips.apply}>
+          <Film size={14} aria-hidden="true" /> {scene.source === "clip" ? `AI clips for the other ${allClips.count} AI-picture scene${allClips.count === 1 ? "" : "s"}` : `AI clips for all ${allClips.count} AI-picture scenes`} · {creditsLabel(allClips.credits)}
+        </button>
+      )}
       {(scene.source === "image" || scene.source === "clip") && (
         <>
           <label className="field"><span className="small">What the picture shows</span>
