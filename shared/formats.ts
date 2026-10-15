@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { captionStyles, type CaptionStyle } from "./captions";
-import { clipCredits, highlightCredits, pictureCredits, speechSeconds, videoCredits, voiceCredits } from "./credits";
+import { clipCredits, highlightCredits, pictureCredits, speechSeconds, videoCredits, voiceCredits, type ClipQuality } from "./credits";
 import { defaultLook, textLookSchema } from "./overlay";
 import { videoKinds } from "./templates";
 import { HIGHLIGHT_MAX_SECONDS, HIGHLIGHT_MIN_SECONDS, layoutSchema } from "./highlights";
@@ -135,7 +135,7 @@ export function narrationCurrent(spec: StorySpec) {
  * An AI picture or clip to make: its asset goes to `key` of the scene at `path`. A clip `from` a picture is made from
  * the asset in that field of the same scene (made earlier in the same run); `seconds`: its length.
  */
-export type PendingMedia = { kind: "image" | "clip"; prompt: string; path: (string | number)[]; key: string; from?: string; seconds?: 5 | 10 };
+export type PendingMedia = { kind: "image" | "clip"; prompt: string; path: (string | number)[]; key: string; from?: string; seconds?: 5 | 10; quality?: ClipQuality };
 /** Every AI picture or clip the video still asks for, pictures first and then the clips made from them. */
 export function pendingMedia(spec: Spec): PendingMedia[] {
   const out: PendingMedia[] = [];
@@ -146,7 +146,7 @@ export function pendingMedia(spec: Spec): PendingMedia[] {
       out.push({ kind: "image", prompt: scenePrompt(s.description, spec.subject, spec.style), path: ["scenes", i], key: "imageId" });
   });
   spec.scenes.forEach((s, i) => {
-    if (s.source === "clip" && !s.clipId) out.push({ kind: "clip", prompt: clipPrompt(s.description), path: ["scenes", i], key: "clipId", from: "imageId", seconds: s.clipSeconds });
+    if (s.source === "clip" && !s.clipId) out.push({ kind: "clip", prompt: clipPrompt(s.description), path: ["scenes", i], key: "clipId", from: "imageId", seconds: s.clipSeconds, quality: s.clipQuality });
   });
   return out;
 }
@@ -165,7 +165,7 @@ export function specCredits(spec: Spec, initial: boolean, seconds?: number, befo
     return kept || !before ? 0 : highlightCredits(length);
   }
   const pending = pendingMedia(spec);
-  const clips = clipCredits(pending.filter((m) => m.kind === "clip").map((m) => m.seconds ?? 5));
+  const clips = clipCredits(pending.filter((m) => m.kind === "clip").map((m) => ({ seconds: m.seconds ?? 5, quality: m.quality })));
   if (initial) return videoCredits(seconds ?? spokenSeconds(spec)) + clips;
   const voice = spec.narration.kind === "voice" && !narrationCurrent(spec) ? voiceCredits(storyScript(spec.scenes)) : 0;
   return voice + pictureCredits(pending.filter((m) => m.kind === "image").length) + clips;

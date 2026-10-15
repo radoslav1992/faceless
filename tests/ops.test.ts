@@ -126,7 +126,7 @@ const billingEnv = () => testEnv({
   BILLING_ENABLED: "true", STRIPE_SECRET_KEY: "sk_test_local_only", STRIPE_WEBHOOK_SECRET: secret,
   STRIPE_PRICE_DAILY: "price_daily", STRIPE_PRICE_DAILY_YEARLY: "price_daily_yearly", COMPANY_ADDRESS: "1 Example St, Sofia",
 });
-/** A customer three days into a paid Daily month (a quarter of its 60 credits used), and an admin. */
+/** A customer three days into a paid Creator month (a quarter of its 60 credits used), and an admin. */
 function paying() {
   const { env, sqlite } = billingEnv();
   const admin = signedIn(sqlite, "admin@example.com"), client = signedIn(sqlite, "client@example.com");
@@ -183,7 +183,7 @@ describe("checkout with the request for immediate start", () => {
     expect(env.EMAIL.sent).toHaveLength(1);
     const mail = env.EMAIL.sent[0];
     expect(mail.to).toBe("client@example.com");
-    expect(mail.subject).toBe("Your Daily plan — Hookstreak Shorts");
+    expect(mail.subject).toBe("Your Creator plan — Hookstreak Shorts");
     expect(mail.text).toContain(IMMEDIATE_START_TEXT);
     expect(mail.text).toContain("$35 a month");
     expect(mail.text).toContain("renews every month");
@@ -229,7 +229,7 @@ describe("withdrawal within 14 days", () => {
     const calls = stripeApi();
     const quote = await call(worker, env, "GET", "/api/admin/withdrawals/quote?email=Client@Example.com", undefined, admin.cookie);
     expect(quote.data).toMatchObject({
-      email: "client@example.com", plan: "Daily", open: true, paid: 3500, currency: "usd", used: 15, quota: 60, refund: 2625, withdrawal: null,
+      email: "client@example.com", plan: "Creator", open: true, paid: 3500, currency: "usd", used: 15, quota: 60, refund: 2625, withdrawal: null,
     });
     // The amount the administrator saw: more use since then changes it.
     const changed = await call(worker, env, "POST", "/api/admin/withdrawals", { email: "client@example.com", refund: 3500 }, admin.cookie);

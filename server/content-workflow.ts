@@ -140,7 +140,7 @@ type RunInfo = { id: string; user_id: string; video_id: string; kind: string; pa
 
 /**
  * One AI picture or clip, paid once; returns the stored asset's ID. A clip `from` a picture gets that picture's
- * capability link (read when it is submitted) and is `seconds` long.
+ * capability link (read when it is submitted) and is `seconds` long, made at its `quality`.
  */
 async function generateMedia(e: Env, step: WorkflowStep, run: RunInfo, name: string, m: PendingMedia, phase: Phase, from?: () => Promise<string>) {
   const kind = m.kind;
@@ -151,7 +151,7 @@ async function generateMedia(e: Env, step: WorkflowStep, run: RunInfo, name: str
     const image = from ? await from() : undefined;
     await patchState(e, run.id, (s) => { (s.claims ||= {})[name] = true; });
     await phase(kind === "clip" ? "clip" : "images");
-    const t = await submitFal(e, kind, m.prompt, { image, seconds: m.seconds });
+    const t = await submitFal(e, kind, m.prompt, { image, seconds: m.seconds, clipQuality: m.quality });
     await patchState(e, run.id, (s) => { (s.tickets ||= {})[name] = t; });
     return t;
   });

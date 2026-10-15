@@ -62,7 +62,7 @@ and the maintenance cron.
   videos' views, likes, comments and shares (and saves on Instagram) are read back for 30 days.
 - **Credits and plans** (`shared/plans.ts`, `shared/credits.ts`). Credits are the one currency: a new video costs
   1 credit per started 30 seconds, script, narration and every picture included. Bringing a scene to life with an AI
-  clip costs 1 credit per 5 seconds; redoing pictures of a made video 1 credit per 5 pictures; new narration for
+  clip costs 1 credit per 5 seconds (2 in high quality, 1080p); redoing pictures of a made video 1 credit per 5 pictures; new narration for
   changed words 1 credit per started 30 seconds. A clip of a long video costs 1 credit per started minute, transcribing
   a video over 10 minutes 1 credit per started 30 minutes. Editing subtitles, music, transitions, timing, layouts and
   text is free.
@@ -71,8 +71,8 @@ and the maintenance cron.
   | --- | --- | --- | --- | --- | --- | --- |
   | Free trial (7 days) | $0 | – | 4 in all | 1 | 1 | 1 GB |
   | Starter | $19 | $168 | 30 | 2 | 1 | 10 GB |
-  | Daily | $35 | $288 | 60 | 5 | 100 | 30 GB |
-  | Double | $59 | $492 | 120 | 10 | 100 | 60 GB |
+  | Creator | $35 | $288 | 60 | 5 | 100 | 30 GB |
+  | Pro | $59 | $492 | 120 | 10 | 100 | 60 GB |
   | Studio | $149 | $1,248 | 350 | 30 | 100 | 200 GB |
 
   The free trial is once per mailbox and its videos carry a small watermark. A yearly plan gives its credits month by

@@ -1,9 +1,9 @@
 import type { Env } from "../types";
-import { CLIP_SECONDS } from "../../shared/credits";
+import { CLIP_SECONDS, type ClipQuality } from "../../shared/credits";
 import { failureCode, falQueueUrl, providerFetch, ProviderError } from "./http";
 
 // AI pictures (a video's scenes) and short AI video clips through fal's queue API. A clip is made from a scene's
-// picture with the image-to-video model, in the request shape rech-bg uses for "Раздвижи снимка".
+// picture with an image-to-video model (one per clip quality, the same request shape), as rech-bg's "Раздвижи снимка".
 /** Scene pictures by default: OpenAI's GPT Image 2.5 (Flare, the fast variant) on fal. */
 export const IMAGE_MODEL = "openai/gpt-image-2.5/flare/text-to-image";
 /** Pictures an operator can choose instead with FAL_IMAGE_MODEL (the Sunburst variant of GPT Image 2.5 works too). */
@@ -13,7 +13,11 @@ export const FAST_IMAGE_MODEL = "fal-ai/flux/schnell";
 export const imageQualities = ["low", "medium", "high", "xhigh", "max"] as const;
 export type ImageQuality = (typeof imageQualities)[number];
 const CLIP_MODEL = "fal-ai/kling-video/v2.5-turbo/pro/text-to-video";
-const IMAGE_CLIP_MODEL = "fal-ai/kling-video/v2.5-turbo/pro/image-to-video";
+/** Clips from a scene's picture: Kling 2.5 Turbo, Standard (720p) at regular quality and Pro (1080p) at high. */
+export const IMAGE_CLIP_MODELS: Record<ClipQuality, string> = {
+  regular: "fal-ai/kling-video/v2.5-turbo/standard/image-to-video",
+  high: "fal-ai/kling-video/v2.5-turbo/pro/image-to-video",
+};
 const NEGATIVE = "blur, distortion, low quality, text, captions, subtitles, watermark, logo";
 export type FalTicket = { request_id: string; status_url: string; response_url: string };
 
@@ -23,10 +27,10 @@ const auth = (e: Env) => {
   return { Authorization: `Key ${key}` };
 };
 /**
- * How a picture or clip is made: a clip from `image` (a capability link to the picture it starts from) and `seconds`
- * long (5 or 10); a picture with `model` and, for GPT Image, `quality`.
+ * How a picture or clip is made: a clip from `image` (a capability link to the picture it starts from), `seconds`
+ * long (5 or 10) and of `clipQuality` (regular unless said); a picture with `model` and, for GPT Image, `quality`.
  */
-export type FalOptions = { image?: string; seconds?: number; model?: string; quality?: ImageQuality };
+export type FalOptions = { image?: string; seconds?: number; clipQuality?: ClipQuality; model?: string; quality?: ImageQuality };
 /** The model and its input (pure, for tests). Pictures are portrait 9:16 for short-form; no text is drawn in them. */
 export function falRequest(kind: "image" | "clip", prompt: string, options: FalOptions = {}) {
   const text = `${prompt.trim()} No text, captions, logos or watermarks in the picture.`;
@@ -42,7 +46,7 @@ export function falRequest(kind: "image" | "clip", prompt: string, options: FalO
   }
   // Clips are silent: the post's music and voice play over them. From a picture, the clip keeps its shape.
   const common = { prompt: text, duration: String(options.seconds === 10 ? 10 : CLIP_SECONDS), negative_prompt: NEGATIVE, cfg_scale: 0.5 };
-  if (options.image) return { model: IMAGE_CLIP_MODEL, body: { ...common, image_url: options.image } };
+  if (options.image) return { model: IMAGE_CLIP_MODELS[options.clipQuality ?? "regular"], body: { ...common, image_url: options.image } };
   return { model: CLIP_MODEL, body: { ...common, aspect_ratio: "9:16" } };
 }
 /** The operator's picture quality (FAL_IMAGE_QUALITY), when it is one GPT Image knows. */

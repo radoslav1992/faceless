@@ -101,3 +101,6 @@
   .tl-timecode { min-width: 0; }
 }
 
+
+/* A button whose label may need two lines in the narrow inspector. */
+.btn.wrap { white-space: normal; text-align: left; justify-content: flex-start; border-radius: 14px; }

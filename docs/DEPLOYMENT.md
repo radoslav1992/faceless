@@ -81,7 +81,7 @@ the Worker reads (`Env` in `server/types.ts`); `.dev.vars.example` lists them fo
 | `STRIPE_PRICE_STARTER_YEARLY`, `STRIPE_PRICE_DAILY_YEARLY`, `STRIPE_PRICE_DOUBLE_YEARLY`, `STRIPE_PRICE_STUDIO_YEARLY` | text | Yearly price IDs (section 3) |
 | `STRIPE_AUTOMATIC_TAX` | text | `true` when Stripe Tax is set up: tax, tax ID collection and a required billing address at checkout |
 | `TEXT_MODEL` | text | Optional Workers AI model for scripts and picture descriptions (default `openai/gpt-6-luna`) |
-| `FAL_KEY` | secret | AI pictures (`openai/gpt-image-2.5/flare/text-to-image`) and clips (`fal-ai/kling-video/v2.5-turbo/pro/image-to-video`) |
+| `FAL_KEY` | secret | AI pictures (`openai/gpt-image-2.5/flare/text-to-image`) and clips: `fal-ai/kling-video/v2.5-turbo/standard/image-to-video` at regular quality (720p) and `…/pro/image-to-video` at high quality (1080p) |
 | `FAL_IMAGE_MODEL` | text | Optional picture model: `openai/gpt-image-2.5/sunburst/text-to-image`, `fal-ai/nano-banana-2` or `fal-ai/flux/schnell` (cheapest); anything else uses the default |
 | `FAL_IMAGE_QUALITY` | text | Optional GPT Image 2.5 quality: `low`, `medium`, `high` (default), `xhigh` or `max`. Each step up costs more per picture |
 | `ELEVENLABS_API_KEY` | secret | Narration (`eleven_v4` with timestamps), forced alignment, and Scribe v2 transcription of uploads (the files are uploaded to ElevenLabs from storage, so nothing there depends on ElevenLabs reaching `SITE_URL`). Admin → Voices lists the account's voices to import, so the key needs the Voices read permission (and Text to Speech, Speech to Text, Forced Alignment). A key without Speech to Text shows as `SPEECH_PERMISSION` under Admin → Operations |
@@ -102,12 +102,13 @@ Overview shows which of these are configured.
    | Plan | Monthly price | Variable | Yearly price | Variable | Credits a month |
    | --- | --- | --- | --- | --- | --- |
    | Starter | $19 / month | `STRIPE_PRICE_STARTER` | $168 / year | `STRIPE_PRICE_STARTER_YEARLY` | 30 |
-   | Daily | $35 / month | `STRIPE_PRICE_DAILY` | $288 / year | `STRIPE_PRICE_DAILY_YEARLY` | 60 |
-   | Double | $59 / month | `STRIPE_PRICE_DOUBLE` | $492 / year | `STRIPE_PRICE_DOUBLE_YEARLY` | 120 |
+   | Creator | $35 / month | `STRIPE_PRICE_DAILY` | $288 / year | `STRIPE_PRICE_DAILY_YEARLY` | 60 |
+   | Pro | $59 / month | `STRIPE_PRICE_DOUBLE` | $492 / year | `STRIPE_PRICE_DOUBLE_YEARLY` | 120 |
    | Studio | $149 / month | `STRIPE_PRICE_STUDIO` | $1,248 / year | `STRIPE_PRICE_STUDIO_YEARLY` | 350 |
 
    A subscription's plan is recognised by these IDs, or by a price's lookup key or `metadata.plan` set to `starter`,
-   `daily`, `double` or `studio`. Checkout allows promotion codes.
+   `daily` (Creator), `double` (Pro) or `studio`. Checkout allows promotion codes. Name the products like the plans
+   (Starter, Creator, Pro, Studio): Checkout, receipts and the billing portal show the product's name.
 2. **Credit packs need no products.** They are one-time Checkout payments with inline `price_data`
    (`creditPacks` in `shared/plans.ts`): 10 credits for $8, 40 for $28 and 150 for $90, named "N credits — Hookstreak Shorts".
 3. **Webhook.** Add an endpoint at `${SITE_URL}/api/billing/webhook` with these events and put its signing secret into

@@ -286,7 +286,7 @@ describe("connecting accounts", () => {
     expect(s.sqlite.prepare("SELECT external_id,status,name FROM social_accounts").all()).toEqual([{ external_id: "UC1", status: "active", name: "Channel UC1" }]);
   });
 
-  it("has no practical limit on Daily and higher plans", async () => {
+  it("has no practical limit on Creator and higher plans", async () => {
     const s = setup({}, "daily");
     for (let i = 0; i < 5; i++) addAccount(s, "tiktok", `open-${i}`);
     mockFetch(tiktokRoutes("open-new"));

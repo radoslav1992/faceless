@@ -13,8 +13,8 @@ import "./post.css";
 // shared/story.ts), stills moving as the renderer moves them, each transition approximated with CSS over the same frames
 // as FFmpeg's xfade, and the subtitles drawn by the caption engine. With reduced motion, scenes simply cut.
 
-/** A scene's picture: a made or chosen image or clip, or the description of an AI picture still to make. */
-export type ScenePicture = { url: string; kind: "image" | "video"; loop?: boolean; poster?: string } | { pending: string };
+/** A scene's picture: a made or chosen image or clip, or what is still to make or choose (`label`: AI picture, AI clip…). */
+export type ScenePicture = { url: string; kind: "image" | "video"; loop?: boolean; poster?: string } | { pending: string; label?: string };
 
 const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 type Look = { opacity: number; transform: string; clip: string; mask: string };
@@ -122,7 +122,7 @@ export function StoryPreview({ segments, scenes, pictures, captions, headline = 
         return (
           <div key={`${seg.scene}:${"url" in pic ? pic.url : "pending"}`} ref={(el) => { layers.current[k] = el; }} className="sp-layer">
             {"pending" in pic
-              ? <div className="sp-pending"><span>Scene {seg.scene + 1} · AI picture</span><p>{pic.pending || "Describe this picture"}</p></div>
+              ? <div className="sp-pending"><span>Scene {seg.scene + 1} · {pic.label ?? "AI picture"}</span><p>{pic.pending || "Describe this picture"}</p></div>
               : pic.kind === "video"
                 ? <video src={pic.url} poster={pic.poster} muted playsInline loop={!!pic.loop} preload="auto" />
                 : <img src={pic.url} alt="" />}

@@ -114,7 +114,7 @@ function terms(op: Operator): Section[] {
           <p>
             Credits pay for the AI work in your videos. Each plan adds its credits every month, also when it is billed yearly. A new video costs 1 credit
             per started {SECONDS_PER_CREDIT} seconds, with its script, narration and pictures included. Bringing a scene to life as a short AI clip costs{" "}
-            {CLIP_CREDITS} credit per {CLIP_SECONDS} seconds of clip. In a video already made, new narration costs 1 credit per started{" "}
+            {CLIP_CREDITS.regular} credit per {CLIP_SECONDS} seconds of clip, or {CLIP_CREDITS.high} credits in high quality. In a video already made, new narration costs 1 credit per started{" "}
             {SECONDS_PER_CREDIT} seconds (your own recording is free) and new pictures 1 credit for every {PICTURES_PER_CREDIT} pictures or part of that;
             changes to text, subtitles, music and timing are free. A clip of one of your videos costs 1 credit per started{" "}
             {HIGHLIGHT_SECONDS_PER_CREDIT} seconds of it, and editing it is free unless you move it mostly onto other footage. Videos up to 10 minutes
