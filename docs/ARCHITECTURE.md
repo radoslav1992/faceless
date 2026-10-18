@@ -19,7 +19,8 @@ Each request passes, in order:
    `/api/v1/*` and `/mcp`). API answers without their own caching get `Cache-Control: no-store`.
 2. **One public address**: a request on another host is redirected (308, method and body kept) to the same path on
    `SITE_URL`; `*.workers.dev` and localhost are left alone (`canonicalUrl` in `server/config.ts`).
-3. **Body limits**: 8 MiB + 1 KiB for an upload part, 60 MB for an administrator's library upload, 1 MiB otherwise.
+3. **Body limits**: 8 MiB + 1 KiB for an upload part, 60 MB for an administrator's library upload, 30 MB for the
+   samples AI describes a library file from (`/api/admin/library/describe`), 1 MiB otherwise.
 4. **API key routes**, mounted before the Origin check (they use no cookies, so no CSRF risk): the REST API at
    `/api/v1` and the MCP server at `/mcp` (`server/api.ts`).
 5. **Origin check**: every non-GET/HEAD request to `/api/*` must carry `Origin` equal to `SITE_URL`'s origin, except

@@ -56,11 +56,14 @@ app.use("*", async (c, next) => {
   if (target) return c.redirect(target, 308);
   await next();
 });
-// Upload parts are 8 MiB; everything else is small JSON.
+// Upload parts are 8 MiB; library uploads up to 60 MB; the samples AI describes a library file from (Admin → Library:
+// up to 8 frames or a minute of a track, as base64 JSON) up to 30 MB; everything else is small JSON.
 const PART_PATH = /^\/api\/media\/uploads\/[^/]+\/parts\/\d+$/;
 const ADMIN_UPLOAD = /^\/api\/admin\/library(\/[^/]+)?\/(file|thumb)$/;
+const DESCRIBE_PATH = "/api/admin/library/describe";
 app.use("/api/*", async (c, next) => {
-  const max = PART_PATH.test(c.req.path) ? 8 * 1024 * 1024 + 1024 : ADMIN_UPLOAD.test(c.req.path) ? 60 * 1024 * 1024 : 1024 * 1024;
+  const max = PART_PATH.test(c.req.path) ? 8 * 1024 * 1024 + 1024 : ADMIN_UPLOAD.test(c.req.path) ? 60 * 1024 * 1024
+    : c.req.path === DESCRIBE_PATH ? 30 * 1024 * 1024 : 1024 * 1024;
   return bodyLimit({ maxSize: max, onError: (c) => c.json({ error: "The file or request is too large." }, 413) })(c, next);
 });
 // The REST API and the MCP server authenticate with an API key, not a session cookie: no Origin check (no CSRF risk
