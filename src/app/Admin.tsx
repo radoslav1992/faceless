@@ -7,6 +7,7 @@ import { BillingTab, OperationsTab } from "./AdminOps";
 import { VoicesTab } from "./AdminVoices";
 import { LibraryTab } from "./AdminLibrary";
 import { ExamplesTab } from "./AdminExamples";
+import { AvatarsTab } from "./AdminAvatars";
 import "./pages.css";
 
 type Overview = {
@@ -14,15 +15,15 @@ type Overview = {
   config: Record<string, boolean>;
 };
 type Message = { id: string; name: string; email: string; topic: string; message: string; created_at: number };
-type Tab = "overview" | "operations" | "billing" | "voices" | "library" | "examples" | "messages";
-const tabIds: Tab[] = ["overview", "operations", "billing", "voices", "library", "examples", "messages"];
+type Tab = "overview" | "operations" | "billing" | "voices" | "avatars" | "library" | "examples" | "messages";
+const tabIds: Tab[] = ["overview", "operations", "billing", "voices", "avatars", "library", "examples", "messages"];
 const topics: Record<string, string> = { question: "Question", billing: "Billing", withdrawal: "Withdrawal (14 days)", partnership: "Partnership", abuse: "Report abuse", other: "Other" };
 const flagNames: Record<string, string> = {
-  media: "Media pipeline", fal: "fal.ai (AI images & clips)", elevenlabs: "ElevenLabs (voices)", stripe: "Stripe keys",
+  media: "Media pipeline", fal: "fal.ai (AI images & clips)", elevenlabs: "ElevenLabs (voices)", heygen: "HeyGen (presenters)", stripe: "Stripe keys",
   billing: "Billing open", tokens: "Token encryption", tiktok: "TikTok", instagram: "Instagram", youtube: "YouTube",
 };
 
-/** Administration (admins only): health, operations, billing tools, the shared library, style examples and contact messages. */
+/** Administration (admins only): health, operations, billing tools, voices and presenters, the shared library, style examples and contact messages. */
 export function AdminPage() {
   const { user } = useAuth();
   if (!user?.admin) return <Navigate to="/app" replace />;
@@ -38,13 +39,13 @@ function AdminConsole() {
       <div className="page-head">
         <div>
           <h1>Admin</h1>
-          <p>Service health and operations, withdrawals and free months, narration voices, the shared library, style examples and contact messages.</p>
+          <p>Service health and operations, withdrawals and free months, narration voices, presenters, the shared library, style examples and contact messages.</p>
         </div>
       </div>
       <div style={{ marginBottom: 20 }}>
         <Tabs label="Admin sections" idBase="admin" value={tab} onChange={(t) => setParams(t === "overview" ? {} : { tab: t }, { replace: true })} items={[
           { id: "overview", label: "Overview" }, { id: "operations", label: "Operations" }, { id: "billing", label: "Billing" },
-          { id: "voices", label: "Voices" }, { id: "library", label: "Library" }, { id: "examples", label: "Examples" }, { id: "messages", label: "Messages" },
+          { id: "voices", label: "Voices" }, { id: "avatars", label: "Presenters" }, { id: "library", label: "Library" }, { id: "examples", label: "Examples" }, { id: "messages", label: "Messages" },
         ]} />
       </div>
       <div {...tabPanel("admin", tab)}>
@@ -52,6 +53,7 @@ function AdminConsole() {
         {tab === "operations" && <OperationsTab />}
         {tab === "billing" && <BillingTab />}
         {tab === "voices" && <VoicesTab />}
+        {tab === "avatars" && <AvatarsTab />}
         {tab === "library" && <LibraryTab />}
         {tab === "examples" && <ExamplesTab />}
         {tab === "messages" && <MessagesTab />}

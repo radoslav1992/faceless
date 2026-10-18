@@ -39,8 +39,8 @@ and the maintenance cron.
 - **Editing.** Any video can be changed before it posts: the words of each scene (on a timeline of the voice, with
   draggable scene edges, split and merge), each scene's picture (a new AI picture, an AI clip made from it, the owner's
   own image or video, or a clip or picture searched in the shared library), transitions, the on-screen title,
-  subtitles, music and the post text. The voice can be an AI voice or the owner's own recording, timed by its
-  transcript or by forced alignment of its script.
+  subtitles, music, an optional AI presenter on camera (HeyGen, lip-synced to the AI voice) and the post text. The
+  voice can be an AI voice or the owner's own recording, timed by its transcript or by forced alignment of its script.
   The editor shows the exact credit price before anything is made.
 - **Clips from long videos** (`shared/highlights.ts`, `server/highlights.ts`). The owner uploads a podcast, interview,
   stream or webinar (up to 10 minutes on the free trial, 2 hours and 2 GB on paid plans), or imports it from a link to
@@ -101,7 +101,8 @@ trend data.
 - **Rendering**: a pool of three FFmpeg/libass containers (`renderer/`, Python 3.12), reached through the
   `MediaRenderer` Durable Object.
 - **AI**: Workers AI for scripts and picture descriptions; fal for pictures (GPT Image 2.5 Flare) and clips
-  (Kling image-to-video); ElevenLabs for voices (`eleven_v4`), forced alignment and Scribe transcription.
+  (Kling image-to-video); ElevenLabs for voices (`eleven_v4`), forced alignment and Scribe transcription; HeyGen
+  (optional) for on-screen presenters lip-synced to the ElevenLabs voice.
 - **Payments and mail**: Stripe (subscriptions, credit packs, Customer Portal); Cloudflare Email Sending.
 
 Contracts the client and the Worker share live in `shared/` (plans and credits, series settings and schedules,
@@ -173,7 +174,8 @@ server/                Worker
   publishing.ts        scheduling, the publishing cron, media links for the networks
   publish-workflow.ts  Publication: posts one video exactly once
   social/              TikTok, YouTube and Instagram clients, token sealing
-  providers/           fal and ElevenLabs
+  providers/           fal, ElevenLabs and HeyGen
+  avatars.ts           presenters' avatars (Admin → Presenters) and HeyGen's copies
   billing.ts           plans, usage windows, Stripe checkout, credit packs, webhook, reconciliation
   plan-grants.ts, withdrawals.ts   free months and 14-day withdrawals (admin)
   api.ts               API keys, REST API (/api/v1), MCP server (/mcp)

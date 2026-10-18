@@ -41,6 +41,8 @@ FAL_IMAGE_QUALITY=
 ELEVENLABS_API_KEY=
 # Optional JSON replacing the ElevenLabs voice behind a public voice, e.g. {"george":"<voice id>"} (server/voices.ts).
 ELEVENLABS_VOICES=
+# Optional: on-screen AI presenters (HeyGen API v3, Admin → Presenters); none are offered without it.
+HEYGEN_API_KEY=
 # Turns on rendering (needs the renderer container) and AI generation, and the series autopilot.
 MEDIA_ENABLED=false
 

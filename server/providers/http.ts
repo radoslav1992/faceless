@@ -22,10 +22,10 @@ export function falQueueUrl(value: string) {
   if (url.origin !== "https://queue.fal.run" || url.username || url.password || !url.pathname.includes("/requests/")) throw new ProviderError("PROVIDER_URL");
   return url.href;
 }
-/** Hosts provider outputs are downloaded from (fal and its storage/CDNs). */
+/** Hosts provider outputs are downloaded from (fal, HeyGen and their storage/CDNs). */
 export function outputUrl(value: string) {
   const url = new URL(value);
-  const allowed = ["fal.media", "falserverless.io", "fal.run", "amazonaws.com", "storage.googleapis.com", "cloudfront.net"];
+  const allowed = ["fal.media", "falserverless.io", "fal.run", "amazonaws.com", "storage.googleapis.com", "cloudfront.net", "heygen.ai", "heygen.com"];
   if (url.protocol !== "https:" || url.username || url.password || (url.port && url.port !== "443") || !allowed.some((h) => url.hostname === h || url.hostname.endsWith("." + h)))
     throw new ProviderError("PROVIDER_URL");
   return url.href;

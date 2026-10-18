@@ -8,7 +8,11 @@ import { rate } from "./security";
 import { allowance, type Allowance } from "./billing";
 import { scheduleEpisode } from "./publishing";
 import { voiceUsable } from "./voices";
-import { isHighlight, referencedAssets, referencedLibrary, specCredits, specHook, specSchema, visualPart, type HighlightSpec, type Spec } from "../shared/formats";
+import { avatarFor } from "./avatars";
+import { heygenEnabled } from "./providers/heygen";
+import {
+  isHighlight, presenterNeeded, referencedAssets, referencedLibrary, specCredits, specHook, specSchema, visualPart, type HighlightSpec, type Spec, type StorySpec,
+} from "../shared/formats";
 import { storyScript, STORY_MAX_CHARS, STORY_MAX_SECONDS } from "../shared/story";
 import { creditsLabel } from "../shared/credits";
 
@@ -18,10 +22,11 @@ import { creditsLabel } from "../shared/credits";
 export const videos = new Hono<App>();
 
 /**
- * Every file, library item and voice the spec uses exists and is the owner's (or shared). The voice must be one that
- * is offered, or `keptVoice`: the one the video (or its series) already has, which keeps working once hidden.
+ * Every file, library item, voice and presenter the spec uses exists and is the owner's (or shared). The voice must be
+ * one that is offered, or `keptVoice`: the one the video (or its series) already has, which keeps working once hidden;
+ * the presenter's avatar likewise (`keptAvatar`).
  */
-export async function checkReferences(env: Env, userId: string, spec: Spec, keptVoice?: string | null) {
+export async function checkReferences(env: Env, userId: string, spec: Spec, keptVoice?: string | null, keptAvatar?: string | null) {
   const assets = referencedAssets(spec);
   if (assets.length) {
     const found = (await env.DB.prepare(`SELECT id FROM media_assets WHERE user_id=? AND status='ready' AND id IN (${assets.map(() => "?").join(",")})`)
@@ -49,6 +54,22 @@ export async function checkReferences(env: Env, userId: string, spec: Spec, kept
     if (!a || !/^(audio|video)\//.test(a.mime) || a.meta.includes('"hasAudio":false')) throw new HTTPException(400, { message: "Choose your voiceover: one of your audio or video files with sound." });
     if (a.duration > STORY_MAX_SECONDS + 0.5) throw new HTTPException(400, { message: "A video can be up to 3 minutes long. Choose a shorter recording." });
   }
+  if (spec.presenter) await checkPresenter(env, spec, keptAvatar);
+}
+/**
+ * A presenter speaks the AI voice over the scenes (never over a background clip), as an avatar that is offered (or the
+ * video's own, `keptAvatar`) in the quality chosen. A new presenter video needs the presenter service.
+ */
+async function checkPresenter(env: Env, spec: StorySpec, keptAvatar?: string | null) {
+  const p = spec.presenter!;
+  if (spec.narration.kind !== "voice") throw new HTTPException(400, { message: "A presenter speaks the AI voice. Choose an AI voice for the narration, or remove the presenter." });
+  if (spec.backdrop) throw new HTTPException(400, { message: "A presenter can't be shown over a background clip. Remove one of them." });
+  const avatar = await avatarFor(env, p.avatarId);
+  if (!avatar || (!avatar.active && avatar.id !== keptAvatar)) throw new HTTPException(400, { message: "Choose one of the presenters offered." });
+  // A presenter video already made for it (or not shown in any scene) needs nothing new.
+  if (!presenterNeeded(spec)) return;
+  if (!heygenEnabled(env)) throw new HTTPException(503, { message: "On-screen presenters aren't available right now. Remove the presenter, or try again later." });
+  if (!avatar.qualities.includes(p.quality)) throw new HTTPException(400, { message: "This presenter isn't offered in that quality. Choose the other one." });
 }
 /** A clip's video is one of the owner's own uploads, and its moment lies within it. */
 async function checkSource(env: Env, userId: string, spec: HighlightSpec) {
@@ -197,15 +218,19 @@ videos.post("/", async (c) => {
   canCreate(a, await newVideoCredits(c.env, user.id, spec));
   return c.json(await createVideo(c.env, user, spec, a, d.idempotencyKey), 201);
 });
-/** The browser never sets the recorded voice or a clip's tracking; they only come from the server's own runs. */
+/** The browser never sets the recorded voice, the presenter's video or a clip's tracking: only the server's runs do. */
 function stripGenerated(spec: Spec): Spec {
-  const { generated: _g, tracked: _t, ...rest } = spec as Spec & { generated?: unknown; tracked?: unknown };
+  const { generated: _g, presented: _p, tracked: _t, ...rest } = spec as Spec & { generated?: unknown; presented?: unknown; tracked?: unknown };
   return rest as Spec;
 }
-/** What the server owns of the stored spec (the paid recording, a clip's tracking), carried into an edit. */
-function serverParts(stored: Spec) {
-  const s = stored as Spec & { generated?: unknown; tracked?: unknown };
-  return { ...(s.generated ? { generated: s.generated } : {}), ...(s.tracked ? { tracked: s.tracked } : {}) };
+/**
+ * What the server owns of the stored spec (the paid recording, the presenter's video while the edit keeps a presenter,
+ * a clip's tracking), carried into the edit `next`.
+ */
+function serverParts(stored: Spec, next: Spec) {
+  const s = stored as Spec & { generated?: unknown; presented?: unknown; tracked?: unknown };
+  const presenter = !isHighlight(next) && !!next.presenter;
+  return { ...(s.generated ? { generated: s.generated } : {}), ...(s.presented && presenter ? { presented: s.presented } : {}), ...(s.tracked ? { tracked: s.tracked } : {}) };
 }
 videos.get("/:id", async (c) => {
   const user = c.get("user");
@@ -222,10 +247,11 @@ videos.put("/:id", async (c) => {
   const d = z.object({ spec: specSchema, idempotencyKey: z.uuid() }).parse(await c.req.json());
   const stored = json<Spec>(v.spec, d.spec);
   if ((stored.format || "story") !== d.spec.format) throw new HTTPException(400, { message: "A video can't change its type. Make a new one instead." });
-  // The paid recording stays with the video while its words and voice do not change (and a clip's tracking while its
-  // moment does not).
-  const spec = { ...stripGenerated(d.spec), ...serverParts(stored) } as Spec;
-  await checkReferences(c.env, user.id, spec, !isHighlight(stored) && stored.narration?.kind === "voice" ? stored.narration.voiceId : null);
+  // The paid recording stays with the video while its words and voice do not change, the presenter's video while its
+  // avatar, quality and recording do not (and a clip's tracking while its moment does not).
+  const spec = { ...stripGenerated(d.spec), ...serverParts(stored, d.spec) } as Spec;
+  await checkReferences(c.env, user.id, spec, !isHighlight(stored) && stored.narration?.kind === "voice" ? stored.narration.voiceId : null,
+    !isHighlight(stored) ? stored.presenter?.avatarId : null);
   if (visualPart(spec) === visualPart(stored) && v.render_status === "ready") {
     await c.env.DB.prepare("UPDATE videos SET spec=?,caption=?,title=?,updated_at=? WHERE id=?").bind(JSON.stringify(spec), spec.caption, spec.title, now(), v.id).run();
     return c.json({ video: videoView({ ...v, spec: JSON.stringify(spec), caption: spec.caption, title: spec.title }, true), rendering: false });

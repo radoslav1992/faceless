@@ -546,6 +546,11 @@ function privacy(op: Operator): Section[] {
                   <td>The narration text, and audio whose words are timed or transcribed — the AI narration, or a recording or video with sound that you upload</td>
                 </tr>
                 <tr>
+                  <th scope="row">HeyGen</th>
+                  <td>AI presenters that speak your video's narration on camera — only when you add a presenter</td>
+                  <td>The AI narration of that video (HeyGen deletes its copy of the presenter video once we have saved it)</td>
+                </tr>
+                <tr>
                   <th scope="row">TikTok, Meta (Instagram), Google (YouTube)</th>
                   <td>Publishing your videos and reading their stats, and importing a video of your own YouTube channel when you choose one — only when you connect an account</td>
                   <td>The videos you post, their titles and captions, and the account tokens</td>

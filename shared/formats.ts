@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { captionStyles, type CaptionStyle } from "./captions";
-import { clipCredits, highlightCredits, pictureCredits, speechSeconds, videoCredits, voiceCredits, type ClipQuality } from "./credits";
+import { clipCredits, highlightCredits, pictureCredits, presenterCredits, speechSeconds, videoCredits, voiceCredits, type ClipQuality } from "./credits";
+import { presenterScene, presenterSchema } from "./presenter";
 import { defaultLook, textLookSchema } from "./overlay";
 import { videoKinds } from "./templates";
 import { HIGHLIGHT_MAX_SECONDS, HIGHLIGHT_MIN_SECONDS, layoutSchema } from "./highlights";
@@ -14,8 +15,8 @@ import {
 // - "story": a narrated video (shared/story.ts) whose scenes reference media by ID (the owner's uploads, the shared
 //   library, AI pictures and clips once made) or ask for AI media with a description;
 // - "highlight": a clip of one of the owner's long videos (shared/highlights.ts), cut, framed and captioned.
-// The server owns `generated` (a story's recorded voice and its word timings) and `tracked` (where a clip's people
-// are): an edit from the browser never sets them.
+// The server owns `generated` (a story's recorded voice and its word timings), `presented` (its presenter's video) and
+// `tracked` (where a clip's people are): an edit from the browser never sets them.
 
 const uuid = z.uuid();
 /** A library track or an own upload (audio), at a volume. */
@@ -68,7 +69,11 @@ export const storySpec = z.object({
   headline: headlineSchema.nullable().default(null),
   backdrop: backdropSchema.nullable().default(null),
   music: musicSchema,
+  /** An on-screen presenter speaking the AI voice (shared/presenter.ts); needs the AI voice and no background clip. */
+  presenter: presenterSchema.nullable().default(null),
   generated: generatedVoice.optional(),
+  /** Server-owned: the presenter's video, made for `key` (presenterKey: the avatar, its quality and the words) from the recording `voiceAssetId`. */
+  presented: z.object({ key: z.string().max(300), assetId: uuid, voiceAssetId: uuid }).optional(),
   /** Post text (TikTok description, Instagram caption, YouTube description). */
   caption: z.string().trim().max(2200).default(""),
   hashtags: z.array(hashtag).max(15).default([]),
@@ -131,6 +136,24 @@ export function narrationCurrent(spec: StorySpec) {
   return spec.narration.kind === "voice" && !!spec.generated?.voiceAssetId && spec.generated.key === narrationKey(spec.narration.voiceId, storyScript(spec.scenes));
 }
 
+/** What a presenter video is made from: the avatar, its quality and the AI voice's words (a change needs a new one). */
+export const presenterKey = (spec: StorySpec) =>
+  spec.presenter && spec.narration.kind === "voice"
+    ? `${spec.presenter.avatarId}:${spec.presenter.quality}:${narrationKey(spec.narration.voiceId, storyScript(spec.scenes))}` : "";
+/**
+ * The presenter's video is made for the video's current avatar, quality and words, from the recording it keeps (no
+ * new one is paid). A new recording always needs a new presenter video: the lips follow the recording.
+ */
+export const presenterCurrent = (spec: StorySpec) =>
+  !!spec.presenter && narrationCurrent(spec) && !!spec.presented && spec.presented.key === presenterKey(spec) && spec.presented.voiceAssetId === spec.generated?.voiceAssetId;
+/** Whether scene `index` of a story shows its presenter instead of a picture. */
+export const showsPresenter = (spec: StorySpec, index: number) =>
+  !!spec.presenter && !spec.backdrop && presenterScene(spec.presenter.layout, spec.scenes[index], index);
+/** Whether the video shows its presenter at all (in "Presenter + pictures", scenes with chosen media keep them). */
+export const presenterShown = (spec: StorySpec) => spec.scenes.some((_, i) => showsPresenter(spec, i));
+/** Whether the video needs a new presenter video (paid): it shows a presenter that has none for its avatar, quality and words. */
+export const presenterNeeded = (spec: StorySpec) => presenterShown(spec) && !presenterCurrent(spec);
+
 /**
  * An AI picture or clip to make: its asset goes to `key` of the scene at `path`. A clip `from` a picture is made from
  * the asset in that field of the same scene (made earlier in the same run); `seconds`: its length.
@@ -141,20 +164,23 @@ export function pendingMedia(spec: Spec): PendingMedia[] {
   const out: PendingMedia[] = [];
   // A clip of a long video asks for no AI media; a background clip replaces the pictures of every scene.
   if (isHighlight(spec) || spec.backdrop) return out;
+  // A scene the presenter speaks on shows no picture.
   spec.scenes.forEach((s, i) => {
-    if ((s.source === "image" || s.source === "clip") && !s.imageId)
+    if ((s.source === "image" || s.source === "clip") && !s.imageId && !showsPresenter(spec, i))
       out.push({ kind: "image", prompt: scenePrompt(s.description, spec.subject, spec.style), path: ["scenes", i], key: "imageId" });
   });
   spec.scenes.forEach((s, i) => {
-    if (s.source === "clip" && !s.clipId) out.push({ kind: "clip", prompt: clipPrompt(s.description), path: ["scenes", i], key: "clipId", from: "imageId", seconds: s.clipSeconds, quality: s.clipQuality });
+    if (s.source === "clip" && !s.clipId && !showsPresenter(spec, i))
+      out.push({ kind: "clip", prompt: clipPrompt(s.description), path: ["scenes", i], key: "clipId", from: "imageId", seconds: s.clipSeconds, quality: s.clipQuality });
   });
   return out;
 }
 /**
  * Credits to make a video ready. A new video costs its length (narration and every picture included, `seconds`: the
  * owner's recording when it narrates); a made one only what an edit asks for again: new narration for changed words,
- * new pictures. AI clips are paid by their length either way. A clip of a long video costs its moment's length, and
- * again only when an edit (from `before`, the stored spec) moves it mostly onto other footage.
+ * new pictures. AI clips are paid by their length either way, and a presenter by the voice's length whenever it has no
+ * video for the current avatar, quality and words. A clip of a long video costs its moment's length, and again only
+ * when an edit (from `before`, the stored spec) moves it mostly onto other footage.
  */
 export function specCredits(spec: Spec, initial: boolean, seconds?: number, before?: Spec) {
   // A clip: its moment's length when it is new, or moved mostly onto other footage of the video; other edits are free.
@@ -166,9 +192,10 @@ export function specCredits(spec: Spec, initial: boolean, seconds?: number, befo
   }
   const pending = pendingMedia(spec);
   const clips = clipCredits(pending.filter((m) => m.kind === "clip").map((m) => ({ seconds: m.seconds ?? 5, quality: m.quality })));
-  if (initial) return videoCredits(seconds ?? spokenSeconds(spec)) + clips;
+  const presenter = spec.presenter && presenterNeeded(spec) ? presenterCredits(spokenSeconds(spec), spec.presenter.quality) : 0;
+  if (initial) return videoCredits(seconds ?? spokenSeconds(spec)) + clips + presenter;
   const voice = spec.narration.kind === "voice" && !narrationCurrent(spec) ? voiceCredits(storyScript(spec.scenes)) : 0;
-  return voice + pictureCredits(pending.filter((m) => m.kind === "image").length) + clips;
+  return voice + pictureCredits(pending.filter((m) => m.kind === "image").length) + clips + presenter;
 }
 export { voiceCredits, speechSeconds };
 
@@ -190,6 +217,7 @@ export function referencedAssets(spec: Spec): string[] {
     return [...new Set(ids.filter((x): x is string => !!x))];
   }
   if (spec.narration.kind === "upload") ids.push(spec.narration.assetId);
+  ids.push(spec.presented?.assetId);
   for (const s of spec.scenes) ids.push(s.imageId, s.clipId, s.assetId);
   if (spec.music?.assetId) ids.push(spec.music.assetId);
   if (spec.backdrop?.assetId) ids.push(spec.backdrop.assetId);

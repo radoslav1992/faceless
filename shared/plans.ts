@@ -1,4 +1,4 @@
-import { CLIP_CREDITS, CLIP_SECONDS, HIGHLIGHT_SECONDS_PER_CREDIT, PICTURES_PER_CREDIT, SECONDS_PER_CREDIT, SPEECH_CREDIT_SECONDS } from "./credits";
+import { CLIP_CREDITS, CLIP_SECONDS, HIGHLIGHT_SECONDS_PER_CREDIT, PICTURES_PER_CREDIT, PRESENTER_CREDITS, PRESENTER_SECONDS, SECONDS_PER_CREDIT, SPEECH_CREDIT_SECONDS } from "./credits";
 
 // Plans: the source of truth for prices and limits. Credits are the one currency: a new video costs one credit per
 // started 30 seconds (shared/credits.ts), so "up to N videos" assumes one-minute videos. The server enforces credits
@@ -125,6 +125,7 @@ export const planIncludes = [
 export const tariffs: readonly { name: string; text: string }[] = [
   { name: "New video", text: `1 credit per started ${SECONDS_PER_CREDIT} seconds: a one-minute video is 2 credits, script, narration and every picture included.` },
   { name: "Animated scenes", text: `${CLIP_CREDITS.regular} credit per ${CLIP_SECONDS} seconds to bring a scene's picture to life with AI motion, or ${CLIP_CREDITS.high} in high quality (1080p). Optional.` },
+  { name: "On-screen presenter", text: `An AI presenter speaking your video's narration: ${PRESENTER_CREDITS.regular} credit per ${PRESENTER_SECONDS} seconds of narration, or ${PRESENTER_CREDITS.high} in high quality. Optional.` },
   { name: "New pictures", text: `1 credit per ${PICTURES_PER_CREDIT} pictures redone in a made video.` },
   { name: "New narration", text: `1 credit per started ${SECONDS_PER_CREDIT} seconds when you change the words of a made video. Your own recording is free.` },
   { name: "Clips from your videos", text: `1 credit per started ${HIGHLIGHT_SECONDS_PER_CREDIT} seconds of each clip: cut, framed on the speaker and captioned.` },

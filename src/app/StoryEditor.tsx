@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Film, Image as ImageIcon, Library, Merge, RefreshCw, Scissors, Sparkles, Star, Trash2, Type, Wand2 } from "lucide-react";
-import { api, fileUrl, useVoices, type Asset, type LibraryItem } from "../lib";
+import { api, fileUrl, useAvatars, useVoices, type Asset, type LibraryItem } from "../lib";
 import { Switch } from "../ui";
 import { CaptionStylePicker, EditorSection } from "./CaptionPickers";
 import { LibraryPicker, MediaPicker, PlayButton, useOfferedVoice, usePreviewAudio, VoiceSelect } from "./pickers";
 import { StoryPreview, type ScenePicture } from "./StoryPreview";
 import { StoryTimeline } from "./StoryTimeline";
 import { StoryStylePicker } from "./StoryStyles";
+import { PresenterSection } from "./presenter-ui";
 import {
   clockText, mergeScenes, moveEdge, segmentsOf, splitScene, toggleKey, useStoryClock, useStoryPlayer, type UploadTiming,
 } from "./story-model";
-import { narrationCurrent, pendingMedia, specCredits, type StorySpec } from "../../shared/formats";
+import { narrationCurrent, pendingMedia, presenterCurrent, presenterNeeded, showsPresenter, specCredits, spokenSeconds, type StorySpec } from "../../shared/formats";
+import { presenterLayoutInfo, presenterQualityInfo } from "../../shared/presenter";
 import {
   clipFor, normWord, storyLengths, storyScript, storyStyles, storyTransitions, textWords, transitionInfo, STORY_MAX_CHARS, STORY_MAX_SCENES, STORY_MAX_SECONDS,
   type SceneSource, type StoryScene, type StoryStyle, type StoryTransition,
@@ -18,13 +20,16 @@ import {
 import { styledCaptions } from "../../shared/captions";
 import { overlayItems } from "../../shared/overlay";
 import { FRAME } from "../../shared/render";
-import { CLIP_CREDITS, CLIP_SECONDS, PICTURES_PER_CREDIT, clipCredits, clipQualities, creditsLabel, pictureCredits, speechSeconds, videoCredits, voiceCredits, type ClipQuality } from "../../shared/credits";
+import {
+  CLIP_CREDITS, CLIP_SECONDS, PICTURES_PER_CREDIT, clipCredits, clipQualities, creditsLabel, pictureCredits, presenterCredits, speechSeconds, videoCredits, voiceCredits, type ClipQuality,
+} from "../../shared/credits";
 import { headlineFor } from "../../shared/headline";
 import "./story.css";
 
 // The video editor: the preview and the selected scene, the timeline of the whole voice, the on-screen title, the
-// subtitles, the background clip, the music, and the plan with its exact price. Nothing is paid until the video is
-// made: then its run makes what is still missing (the voice, AI pictures, AI clips), refunded if it fails.
+// presenter, the subtitles, the background clip, the music, and the plan with its exact price. Nothing is paid until
+// the video is made: then its run makes what is still missing (the voice, AI pictures, AI clips, the presenter),
+// refunded if it fails.
 
 type Known = { url: string; kind: "image" | "video"; duration: number; name: string };
 /** What the editor knows of a library clip or picture. */
@@ -90,11 +95,20 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
   const audio = usePreviewAudio();
   const scene = spec.scenes[Math.min(selected, spec.scenes.length - 1)];
   const timed = clock.timing.scenes;
-  const pictures = useMemo(() => spec.scenes.map((s, i) => (spec.backdrop && backdrop
+  const { byId: avatarById } = useAvatars();
+  const avatar = spec.presenter ? avatarById(spec.presenter.avatarId) : undefined;
+  // The presenter's scenes play its video at the voice's time (made for these words), else show the avatar.
+  const presenterPicture = useMemo((): ScenePicture | null => {
+    if (!spec.presenter) return null;
+    if (presenterCurrent(spec)) return { url: fileUrl(spec.presented!.assetId), kind: "video", synced: true };
+    return avatar?.preview ? { url: avatar.preview, kind: "image" } : { pending: `${avatar?.name ?? "The presenter"} speaks this scene`, label: "Presenter" };
+  }, [spec, avatar]);
+  const pictures = useMemo(() => spec.scenes.map((s, i): ScenePicture => (spec.backdrop && backdrop
     ? { url: backdrop.url, kind: "video" as const, loop: true }
-    : media.picture(s, timed[i].end - timed[i].start))), [spec.scenes, spec.backdrop, backdrop, media, timed]);
-  // An AI clip's still is the picture it was made from.
-  const thumbs = useMemo(() => spec.scenes.map((s, i) => (s.imageId && (s.source === "image" || s.source === "clip") ? fileUrl(s.imageId) : "url" in pictures[i] && pictures[i].kind === "image" ? (pictures[i] as { url: string }).url : null)), [spec.scenes, pictures]);
+    : presenterPicture && showsPresenter(spec, i) ? presenterPicture : media.picture(s, timed[i].end - timed[i].start))), [spec, backdrop, media, timed, presenterPicture]);
+  // An AI clip's still is the picture it was made from; the presenter's is the avatar.
+  const thumbs = useMemo(() => spec.scenes.map((s, i) => (showsPresenter(spec, i) ? avatar?.preview ?? null
+    : s.imageId && (s.source === "image" || s.source === "clip") ? fileUrl(s.imageId) : "url" in pictures[i] && pictures[i].kind === "image" ? (pictures[i] as { url: string }).url : null)), [spec, pictures, avatar]);
   const audioUrl = spec.narration.kind === "upload" ? fileUrl(spec.narration.assetId) : narrationCurrent(spec) ? fileUrl(spec.generated!.voiceAssetId) : null;
   const realWords = clock.source !== "recording" || clock.said.length > 0;
   const captions = useMemo(() => (spec.captions.enabled && realWords && clock.timing.words.length ? styledCaptions(clock.timing.words, spec.captions.style) : null),
@@ -132,7 +146,7 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
             : clock.source === "recording" && !clock.said.length ? "No word timings yet: scenes are spread over the recording and no subtitles are shown." : "The preview plays the voice with the scenes, transitions and subtitles in sync."}</p>
         </div>
         <SceneInspector spec={spec} index={selected} scene={scene} seconds={timed[selected] ? timed[selected].end - timed[selected].start : 0}
-          known={media.known} onChange={setScene} pick={setPicker} initial={initial} allClips={allClips}
+          known={media.known} onChange={setScene} pick={setPicker} initial={initial} allClips={allClips} presenter={avatar?.name ?? "The presenter"}
           onSplit={(at) => setScenes(splitScene(spec.scenes, selected, at))}
           onMerge={() => setScenes(mergeScenes(spec.scenes, selected))}
           onDelete={() => { setScenes(spec.scenes.filter((_, i) => i !== selected)); setSelected(Math.max(0, selected - 1)); }} />
@@ -164,6 +178,7 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
           </div>
         )}
       </EditorSection>
+      <PresenterSection spec={spec} onChange={onChange} />
       <EditorSection title="Background clip" hint="One clip loops behind the whole video instead of a picture per scene (storytime). No AI pictures are made."
         action={spec.backdrop
           ? <button type="button" className="btn sm ghost" onClick={() => onChange({ ...spec, backdrop: null })}>Use pictures</button>
@@ -197,8 +212,10 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
 }
 
 /** The selected scene: its words (key words, split), its picture (source, description, price) and its way in. */
-function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, onSplit, onMerge, onDelete, initial, allClips }: {
+function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, onSplit, onMerge, onDelete, initial, allClips, presenter }: {
   spec: StorySpec; index: number; scene: StoryScene; seconds: number; known: Record<string, Known>; initial: boolean;
+  /** The presenter's name (shown on its scenes). */
+  presenter: string;
   /** The scenes still showing an AI picture, what turning them all into AI clips costs, and doing it. */
   allClips: { count: number; credits: (quality: ClipQuality) => number; apply: (quality: ClipQuality) => void };
   onChange: (patch: Partial<StoryScene>) => void; pick: (p: "image" | "video" | "library") => void;
@@ -241,6 +258,12 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
       </div>
       <hr />
       <span className="small strong-label">Picture of scene {index + 1}</span>
+      {showsPresenter(spec, index) && (
+        <p className="notice small presenter-note">
+          {presenter} speaks this scene on camera.{spec.presenter!.layout === "mix" ? " Choose My media or Library to show a picture of yours instead." : ""}
+        </p>
+      )}
+      {!(showsPresenter(spec, index) && spec.presenter!.layout === "full") && <>
       <div className="seg small-seg story-sources" role="group" aria-label="Where the picture comes from">
         {(["image", "clip", "own", "library"] as const).map((s) => {
           const Icon = sourceIcons[s], cost = price(s);
@@ -299,6 +322,7 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
           <button type="button" className="btn sm" onClick={() => pick("library")}><Library size={14} aria-hidden="true" /> {lib ? (lib.kind === "image" ? "Change picture" : "Change clip") : "Choose clip or picture"}</button>
         </div>
       )}
+      </>}
       <hr />
       <label className="field"><span className="small">Transition in</span>
         <select className="select" value={scene.transition} disabled={index === 0} onChange={(e) => onChange({ transition: e.target.value as StoryTransition })}>
@@ -320,6 +344,7 @@ export function storyPrice(spec: StorySpec, initial: boolean, recordingSeconds?:
   const voiceAgain = spec.narration.kind === "voice" && !narrationCurrent(spec);
   return {
     script, pictures, clips, seconds,
+    presenter: spec.presenter && presenterNeeded(spec) ? presenterCredits(spokenSeconds(spec), spec.presenter.quality) : 0,
     video: initial ? videoCredits(seconds) : 0,
     voice: !initial && voiceAgain ? voiceCredits(script) : 0,
     redo: initial ? 0 : pictureCredits(pictures),
@@ -332,17 +357,25 @@ function StoryPlan({ spec, creditsLeft, music, initial, recordingSeconds }: { sp
   const missing = spec.backdrop ? -1 : spec.scenes.findIndex((s) => (s.source === "image" || s.source === "clip") && !s.imageId && s.description.trim().length < 3);
   const unchosen = spec.backdrop ? -1 : spec.scenes.findIndex((s) => (s.source === "own" && !s.assetId) || (s.source === "library" && !s.libraryId));
   const { byId } = useVoices();
+  const { byId: avatarById } = useAvatars();
   const voiceName = spec.narration.kind === "voice" ? byId((spec.narration as { voiceId: string }).voiceId)?.name ?? "" : "";
+  const presenter: [string, string, number | null][] = spec.presenter ? [[
+    `On-screen presenter${avatarById(spec.presenter.avatarId) ? ` · ${avatarById(spec.presenter.avatarId)!.name}` : ""}`,
+    p.presenter ? `${presenterQualityInfo[spec.presenter.quality].name} quality, ${presenterLayoutInfo[spec.presenter.layout].name.toLowerCase()}` : "unchanged",
+    p.presenter,
+  ]] : [];
   const rows: [string, string, number | null][] = initial
     ? [
       [`New video · about ${clockText(p.seconds)}`, `${spec.narration.kind === "voice" ? `AI voice ${voiceName}` : "your recording"}, ${spec.backdrop ? "a background clip" : `${p.pictures} AI pictures in ${storyStyles[spec.style].name}`}`, p.video],
       ["Animated scenes", p.clips.length ? p.clips.map((c) => `${c.seconds} s${c.quality === "high" ? " HQ" : ""}`).join(", ") : "none", p.clipCredits],
+      ...presenter,
       ["Subtitles, transitions" + (music ? ", music" : ""), "rendering", 0],
     ]
     : [
       [`New narration${voiceName ? ` · ${voiceName}` : ""}`, p.voice ? `${p.script.length.toLocaleString("en-US")} characters` : "unchanged", p.voice],
       [`New pictures · ${storyStyles[spec.style].name}`, p.pictures ? `${p.pictures} to make` : "none", p.redo],
       ["Animated scenes", p.clips.length ? p.clips.map((c) => `${c.seconds} s${c.quality === "high" ? " HQ" : ""}`).join(", ") : "none", p.clipCredits],
+      ...presenter,
       ["Subtitles, transitions, timing" + (music ? ", music" : ""), "rendering", 0],
     ];
   return (

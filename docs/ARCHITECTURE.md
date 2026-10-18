@@ -58,8 +58,8 @@ handler runs `maintenance()` every minute.
 
 `migrations/0001_initial.sql`, `0002_clips.sql` (runs of kind `speech`), `0003_voices.sql` (narration voices) and
 `0004_library.sql` (library pictures, descriptions and the AI mark), `0005_style_examples.sql` (each style's example
-video), `0006_example_previews.sql` (the examples' short previews) and `0007_library_categories.sql` (library items'
-genre or category); D1 always enforces foreign keys.
+video), `0006_example_previews.sql` (the examples' short previews), `0007_library_categories.sql` (library items'
+genre or category) and `0008_avatars.sql` (the presenters' avatars); D1 always enforces foreign keys.
 
 | Area | Tables |
 | --- | --- |
@@ -135,6 +135,25 @@ fetch the new one. `GET /api/public/voices` lists the offered voices (the app's 
 chosen one with its sample, `VoicePicker` every voice with a play button, filtered by gender and accent; the API's
 `/types` and `list_video_types`). A new video or series must use an offered voice; one that already has a voice keeps
 it once hidden (`voiceUsable` with the kept voice), and a template whose voice was hidden gets the default.
+
+**Presenters** (`shared/presenter.ts`, `server/avatars.ts`, `avatars` table, Admin → Presenters in
+`src/app/AdminAvatars.tsx`; ported from rech-bg's HeyGen avatars). An on-screen AI presenter speaks a narrated video's
+ElevenLabs voice, lip-synced by HeyGen. Administrators add HeyGen's stock avatars (`GET /api/admin/avatars/stock` pages
+`/v3/avatars/looks?ownership=public`, 50 at a time, its previews proxied because the page's policy allows only our own
+images; `POST /api/admin/avatars/stock`) or link one of the account's own by its look ID (`POST
+/api/admin/avatars/link`), each after confirming that the HeyGen plan (and, for an own avatar, the person in it) allows
+offering it. Each keeps a copy of its preview (`avatars/<id>/preview.<ext>`, served at
+`/api/public/avatars/:id/preview`) and the engines HeyGen lists for it, which decide its qualities: regular (Avatar IV)
+and high (Avatar V); `POST /api/admin/avatars/:id/check` reads them again. They are renamed, ordered and hidden like
+voices; one a video has can't be deleted, and a hidden one keeps working for those videos. `GET /api/public/avatars`
+lists the offered ones (none without `HEYGEN_API_KEY`). The spec's `presenter` is `{ avatarId, quality, layout }`:
+layout `mix` puts it on the first scene and every other scene with an AI picture or clip (the owner's or a library's
+media stays), `full` on every scene; those scenes need no picture. It needs the AI voice and no background clip. One
+presenter video is made for the whole voice (server-owned `presented`: the avatar, quality and words it was made for,
+and the recording it follows), so timing, layout and pictures change for free; new words, a new voice, another avatar
+or quality make it again. It costs 1 credit per started 5 seconds of the voice in regular quality and 3 in high
+(`presenterCredits`, HeyGen bills about $0.04 and $0.12 a second), on top of the video. Not offered for series or the
+API yet.
 
 **Library** (`server/library.ts`, `library_items`, Admin → Library in `src/app/AdminLibrary.tsx` and
 `server/routes/admin-library.ts`). Music, clips and pictures shared by everyone, with a name, a description, a genre
@@ -252,6 +271,13 @@ D1 batch, so the credits are reserved by the triggers before any work starts. It
    of the script, forced alignment of the WAV with the script times it; if that fails, the voice's own timings are
    matched to the script by their letters. A voice without any timings still makes a video: its scenes are spread over
    it and it has no subtitles.
+   **Presenter** (when the video has one and no presenter video for its avatar, quality and recording): HeyGen API v3
+   (`server/providers/heygen.ts`) animates the avatar lip-synced to that WAV, which it reads through a capability link
+   (`POST /v3/videos`, type `avatar`, engine `avatar_iv` for regular quality and `avatar_v` for high, 1080p, the
+   avatar's own shape, an `Idempotency-Key` of the run). The workflow polls it (every 20 s, up to 50 minutes), stores
+   the MP4 as an `ai_clip` asset of the video (`{"ai":true,"presenter":true}`), writes `presented` into the spec and
+   asks HeyGen to delete its copy (`DELETE /v3/videos/{id}`; a failed delete waits in `cleanup_tasks` as
+   `heygen/video/<id>` and the hourly maintenance retries it for two weeks).
 4. **Render**: `planRender` (`server/render-plan.ts`) turns the spec into a `compose` payload and the workflow submits
    it to a container and polls it (every 8 s, up to about 40 minutes).
 5. **Save**: the MP4 and its JPEG **cover** are stored as `render` and `cover` assets, the video becomes `ready`, and
@@ -259,9 +285,9 @@ D1 batch, so the credits are reserved by the triggers before any work starts. It
 6. **Ready** (`videoReady`): an approved series episode is scheduled on its series' accounts, and the owner is
    e-mailed when the series sends notices.
 
-**Paid calls are made once.** Before each fal or ElevenLabs call a claim is stored in `runs.provider`, and the ticket
-right after; a retried step polls the existing job instead of paying again, and a claim without a ticket (the answer
-was lost) fails the run (`GENERATION_UNCERTAIN`, `VOICE_FAILED`). On any failure the workflow stops the render, marks
+**Paid calls are made once.** Before each fal, ElevenLabs or HeyGen call a claim is stored in `runs.provider`, and the
+ticket right after; a retried step polls the existing job instead of paying again, and a claim without a ticket (the
+answer was lost) fails the run (`GENERATION_UNCERTAIN`, `VOICE_FAILED`, `AVATAR_UNCERTAIN`). On any failure the workflow stops the render, marks
 the run failed with a short code (the trigger refunds its credits), stores a plain message on the video and, for a
 series episode, e-mails the owner once. Maintenance re-dispatches runs whose workflow never started and fails (and
 refunds) runs older than 3 hours.
@@ -275,7 +301,9 @@ after it was created, and only for the owner's files (`media/<user>/…`) or the
 its first word, on the 1/30 s frame grid, and lasts at least half a second. Transitions (FFmpeg `xfade`: fade, fade
 through black, dissolve, slides, wipes, circle, zoom; "auto" is a calm varied sequence) are an even number of frames
 centred on their scene edge, shortened to fit 40% of the shorter scene, so the segments less their overlaps add up to
-the voice exactly. A storytime loops its background clip under the whole voice instead. The voice is one track from 0;
+the voice exactly. A storytime loops its background clip under the whole voice instead. A presenter's scenes cut its
+video at the same second of the voice (`trim` = where the segment starts on the output clock), so its lips stay in
+time across cuts and transitions; it is cropped to fill the frame. The voice is one track from 0;
 subtitles are burned in as ASS from real word timings only (never estimates); the headline is drawn on top for its
 seconds; music loops, fades and is lowered under the voice; free-trial videos get a small watermark with the product
 name. The cover is taken once the first words (and the headline) are on screen. Output is 1080×1920 at 30 fps, at most

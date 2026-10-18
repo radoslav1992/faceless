@@ -7,6 +7,7 @@ import { failRun } from "./content-workflow";
 import { failAsset } from "./media";
 import { dispatchSeries } from "./series";
 import { makePreviews } from "./examples";
+import { deleteHeyGenCopies } from "./avatars";
 import { refreshMetrics } from "./metrics";
 import { applyRetention } from "./retention";
 import { describeError } from "./error-report";
@@ -38,6 +39,7 @@ export async function maintenance(e: Env, at = Date.now()) {
   if (minute % 5 === 2) await stage("stats", () => refreshMetrics(e));
   if (hourly) {
     await stage("cleanup", () => drainCleanup(e));
+    await stage("heygen", () => deleteHeyGenCopies(e));
     await stage("uploads", () => expireUploads(e));
     await stage("reviews", () => reviewRuns(e));
     await stage("retention", () => applyRetention(e));
@@ -80,13 +82,13 @@ export async function reconcileRuns(e: Env) {
 
 /**
  * Deletes the R2 files of deleted rows (exact keys and prefixes), a batch at a time. Anything outside the media,
- * library and style example folders is refused: nothing is deleted and the row moves to the operations view for a
- * manual check.
+ * library, style example and avatar folders is refused: nothing is deleted and the row moves to the operations view
+ * for a manual check. (HeyGen copies waiting for deletion, `heygen/…`, are handled by deleteHeyGenCopies.)
  */
 export async function drainCleanup(e: Env) {
-  const tasks = (await e.DB.prepare("SELECT prefix FROM cleanup_tasks ORDER BY created_at LIMIT 50").all<{ prefix: string }>()).results;
+  const tasks = (await e.DB.prepare("SELECT prefix FROM cleanup_tasks WHERE prefix NOT LIKE 'heygen/%' ORDER BY created_at LIMIT 50").all<{ prefix: string }>()).results;
   for (const { prefix } of tasks) {
-    if (!/^(media|library|examples)\/[A-Za-z0-9._/-]+$/.test(prefix) || prefix.includes("..")) {
+    if (!/^(media|library|examples|avatars)\/[A-Za-z0-9._/-]+$/.test(prefix) || prefix.includes("..")) {
       console.error("Storage cleanup refused");
       await flagForReview(e, "cleanup", prefix, null, "refused");
       await e.DB.prepare("DELETE FROM cleanup_tasks WHERE prefix=?").bind(prefix).run();

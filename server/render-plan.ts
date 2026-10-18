@@ -4,7 +4,7 @@ import { overlayItems, revealSeconds, type TextLook } from "../shared/overlay";
 import { motionFor } from "../shared/layers";
 import { FPS, storySegments, storyTiming, type StoryScene } from "../shared/story";
 import { FRAME, type ComposePayload, type ComposeSegment } from "../shared/render";
-import { trackKey, type HighlightSpec, type Spec, type StorySpec } from "../shared/formats";
+import { presenterCurrent, showsPresenter, trackKey, type HighlightSpec, type Spec, type StorySpec } from "../shared/formats";
 import { cutWords, keptDuration, windowCuts } from "../shared/cuts";
 import { clipWords } from "../shared/speech";
 import { trackWindow } from "../shared/track";
@@ -75,9 +75,9 @@ function sceneSegment(ctx: PlanContext, inputs: Inputs, scene: StoryScene, secon
 }
 
 /**
- * A narrated video: a picture per scene on the voiceover's clock with a transition centred on every scene edge (the
- * segments overlap by them, so they add up to the voice exactly) — or one background clip looping under the whole
- * voice — the voice as one track, subtitles over it all, music under it, and the headline on top.
+ * A narrated video: a picture per scene (or its presenter speaking) on the voiceover's clock with a transition centred
+ * on every scene edge (the segments overlap by them, so they add up to the voice exactly) — or one background clip
+ * looping under the whole voice — the voice as one track, subtitles over it all, music under it, and the headline on top.
  */
 export function planRender(spec: Spec, ctx: PlanContext): Plan {
   return spec.format === "highlight" ? planHighlight(spec, ctx) : planStory(spec, ctx);
@@ -96,8 +96,18 @@ function planStory(spec: StorySpec, ctx: PlanContext): Plan {
     else if (clip.kind === "video") segments = fillWithClip(inputs.add(clip.key), clip.duration, round(d));
     else throw new Error("MEDIA_INPUT");
   } else {
-    segments = storySegments(timing, spec.scenes.map((s) => s.transition)).map((part) => {
-      const segment = sceneSegment(ctx, inputs, spec.scenes[part.scene], part.frames / FPS, part.scene);
+    const parts = storySegments(timing, spec.scenes.map((s) => s.transition));
+    // The presenter's scenes show its video at the same moment of the voice it speaks (a segment starts on the output
+    // clock where it starts in the voice), so the lips stay in time; it is cropped to the frame.
+    const shown = parts.filter((part) => showsPresenter(spec, part.scene));
+    if (shown.length && !presenterCurrent(spec)) throw new Error("MEDIA_INPUT");
+    const presenter = shown.length ? need(ctx, spec.presented?.assetId) : null;
+    if (presenter && presenter.kind !== "video") throw new Error("MEDIA_INPUT");
+    segments = parts.map((part) => {
+      const seconds = part.frames / FPS;
+      const segment: ComposeSegment = presenter && showsPresenter(spec, part.scene)
+        ? { kind: "video", input: inputs.add(presenter.key), trim: round(part.from / FPS), duration: seconds, audio: 0 }
+        : sceneSegment(ctx, inputs, spec.scenes[part.scene], seconds, part.scene);
       return part.transition ? { ...segment, transition: { kind: part.transition.kind, duration: part.transition.frames / FPS } } : segment;
     });
   }

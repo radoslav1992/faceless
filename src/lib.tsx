@@ -7,6 +7,7 @@ import type { TemplateId, VideoKind } from "../shared/templates";
 import type { PlatformId } from "../shared/social";
 import type { Moment, MomentRequest } from "../shared/highlights";
 import type { Voice } from "../shared/voices";
+import type { Avatar } from "../shared/presenter";
 
 // The app's API client, signed-in state and shared types. Every request goes to /api on this site.
 
@@ -97,6 +98,20 @@ export function useVoices() {
   return { voices: list, loading: voices === null, byId: (id: string) => list.find((v) => v.id === id), fallback: list.find((v) => v.default)?.id ?? list[0]?.id ?? null };
 }
 export const reloadVoices = () => { voicesRequest = null; };
+let avatarsRequest: Promise<Avatar[]> | null = null;
+/** The presenters' avatars offered (Admin → Presenters; none while presenters aren't set up), loaded once per page. */
+export function useAvatars() {
+  const [avatars, setAvatars] = useState<Avatar[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    avatarsRequest ??= api<{ avatars: Avatar[] }>("/public/avatars").then((r) => r.avatars).catch((e) => { avatarsRequest = null; throw e; });
+    avatarsRequest.then((a) => { if (live) setAvatars(a); }).catch(() => { if (live) setAvatars([]); });
+    return () => { live = false; };
+  }, []);
+  const list = avatars || [];
+  return { avatars: list, loading: avatars === null, byId: (id: string) => list.find((a) => a.id === id) };
+}
+export const reloadAvatars = () => { avatarsRequest = null; };
 export const put = <T = any,>(path: string, data: unknown = {}) => api<T>(path, { method: "PUT", body: JSON.stringify(data) });
 export const patch = <T = any,>(path: string, data: unknown = {}) => api<T>(path, { method: "PATCH", body: JSON.stringify(data) });
 export const del = <T = any,>(path: string, data?: unknown) => api<T>(path, { method: "DELETE", ...(data !== undefined && { body: JSON.stringify(data) }) });

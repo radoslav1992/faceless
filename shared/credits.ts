@@ -14,6 +14,15 @@ export type ClipQuality = (typeof clipQualities)[number];
 export const CLIP_CREDITS: Record<ClipQuality, number> = { regular: 1, high: 2 };
 export const CLIP_SECONDS = 5;
 /**
+ * An on-screen presenter (shared/presenter.ts): an avatar who speaks the whole AI voice, lip-synced, per started 5
+ * seconds of the voice 1 credit at regular quality and 3 at high quality — in step with what the avatar service
+ * charges for them (about $0.04 and $0.12 a second).
+ */
+export const presenterQualities = ["regular", "high"] as const;
+export type PresenterQuality = (typeof presenterQualities)[number];
+export const PRESENTER_CREDITS: Record<PresenterQuality, number> = { regular: 1, high: 3 };
+export const PRESENTER_SECONDS = 5;
+/**
  * A clip of a long video (shared/highlights.ts): one credit per started minute of its moment. Edits are free while
  * the clip keeps at least half of its moment; moved to other footage, it costs a new clip.
  */
@@ -34,6 +43,9 @@ export const pictureCredits = (count: number) => (count > 0 ? Math.ceil(count / 
 export const clipCredits = (clips: { seconds: number; quality?: ClipQuality }[]) =>
   clips.reduce((n, c) => n + CLIP_CREDITS[c.quality ?? "regular"] * Math.ceil(c.seconds / CLIP_SECONDS), 0);
 
+/** A presenter speaking a voice of `seconds`. */
+export const presenterCredits = (seconds: number, quality: PresenterQuality) =>
+  PRESENTER_CREDITS[quality] * Math.max(1, Math.ceil(seconds / PRESENTER_SECONDS - 1e-9));
 /** A clip of a moment `seconds` long. */
 export const highlightCredits = (seconds: number) => Math.max(1, Math.ceil(seconds / HIGHLIGHT_SECONDS_PER_CREDIT - 1e-9));
 /** Transcribing a video of `seconds` (shown before it is charged). */
