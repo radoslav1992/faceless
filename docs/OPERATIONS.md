@@ -34,13 +34,18 @@ under `/api/admin` answers 404 to anyone else.
   reads by network, transcriptions); accounts to reconnect by network; Stripe (the nightly reconciliation, renewals
   overdue, the last webhook event, free months running); work set aside for a manual check (section 5).
 - **Billing**: *Withdrawal within 14 days* (section 6) and *Free month of a plan* (section 7).
+- **Voices**: the narration voices people choose, each with a sample they play first. Add voices from the ElevenLabs
+  account (with ElevenLabs' details and sample), then rename, describe, order, hide or make one the default. **Make a
+  sample** (the waveform button) has ElevenLabs speak a text of yours, or the standard one ("Hi, I'm George…", about
+  ten seconds of a story), with the same model as the videos, in place of the sample the voice had; **Make the missing
+  samples** does it for every voice without one. ElevenLabs bills a character per character (about 160 a sample).
 - **Library**: the shared music, clips and pictures people search and pick from. Upload (kind, file up to 50 MB or
   a 20 MB picture, name, description, tags with suggestions, the AI mark) or **Add from my media** (your uploads and
   the AI pictures and clips made for your videos, with their name, prompt as the description and the AI mark; the
   details open right after to check). Preview, edit the name, description, tags and AI mark, switch off or delete; the
   list shows what each item is used by. People search by name, description and tag, so describe what an item shows
   or sounds like. Music is picked by its mood tags (`calm`, `upbeat`, `inspiring`, `dark`, `epic`, `mysterious`,
-  `playful`, `ambient`); clips loop behind storytime videos and, like pictures, can be any scene's picture. Videos that
+  `playful`, `ambient`), and people can also listen to the tracks and choose one themselves; clips loop behind storytime videos and, like pictures, can be any scene's picture. Videos that
   show an item marked as AI-made are disclosed as AI-made when they're posted. Switched-off or deleted items leave new
   videos; made videos keep their render.
 - **Examples**: a real video for each faceless style, played on its card in Create, on the home page and on its tool

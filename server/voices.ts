@@ -18,10 +18,15 @@ export type VoiceRow = {
   id: string; provider_id: string; name: string; description: string; gender: Voice["gender"]; accent: string; age: string; preview_key: string | null;
   active: number; is_default: number; sort: number; created_at: number; updated_at: number;
 };
-export const voiceView = (r: VoiceRow): Voice => ({
-  id: r.id, name: r.name, description: r.description, gender: r.gender, accent: r.accent, age: r.age,
-  preview: r.preview_key ? `/api/public/voices/${r.id}/preview` : null, default: !!r.is_default,
-});
+/** A sample made in Admin → Voices has a key of its own, named in its address so browsers fetch a new one. */
+const sampleVersion = (key: string) => key.match(/\/sample-([a-f0-9]{8})\.mp3$/)?.[1];
+export const voiceView = (r: VoiceRow): Voice => {
+  const version = r.preview_key && sampleVersion(r.preview_key);
+  return {
+    id: r.id, name: r.name, description: r.description, gender: r.gender, accent: r.accent, age: r.age,
+    preview: r.preview_key ? `/api/public/voices/${r.id}/preview${version ? `?v=${version}` : ""}` : null, default: !!r.is_default,
+  };
+};
 
 /** The voices people can choose, in the administrators' order. */
 export async function activeVoices(env: Env): Promise<Voice[]> {

@@ -125,7 +125,12 @@ gender, accent and age from the labels; its sample is copied to R2 (`voices/<id>
 `/api/public/voices/:id/preview`). Its public ID (made of its name, or chosen) never changes: specs and series keep
 it, and the ElevenLabs voice behind it can be replaced. Administrators rename, describe, order, hide and choose the
 default (`PATCH /api/admin/voices/:id`; the default is always offered); only a voice no series or video uses can be
-deleted. `GET /api/public/voices` lists the offered voices (the app's voice pickers, with a sample to play; the API's
+deleted. They also make each voice's **sample** (`POST /api/admin/voices/:id/sample`, `speakSample` in
+`server/providers/elevenlabs.ts`): their text, else `sampleText` in `shared/voices.ts` ("Hi, I'm George…", about ten
+seconds of a story), spoken as an MP3 by the narration's model so it sounds as the videos will, stored as
+`voices/<id>/sample-<8 hex>.mp3` in place of the one before; the key is in the sample's address (`?v=`), so browsers
+fetch the new one. `GET /api/public/voices` lists the offered voices (the app's voice pickers: `VoiceSelect` shows the
+chosen one with its sample, `VoicePicker` every voice with a play button, filtered by gender and accent; the API's
 `/types` and `list_video_types`). A new video or series must use an offered voice; one that already has a voice keeps
 it once hidden (`voiceUsable` with the kept voice), and a template whose voice was hidden gets the default.
 
@@ -140,6 +145,10 @@ the active items (all of them, folded to lowercase without accents, a plural mat
 be in the name, description or tags, name matches first, then tags, then descriptions; `?ids=` returns particular
 items (the editor's scenes). Music is a track, a background a clip, a scene a clip or a picture (`checkReferences`).
 An item marked as AI-made makes the video that shows it AI-made (`compose.synthetic`), like the owner's AI pictures.
+People hear tracks before choosing them: `MusicChoice` (Create, a series) offers a mood the writer picks a track of
+(`musicCatalog`) or a track chosen in `LibraryPicker`, where every track has a play button, and shows the chosen one
+with its own; the draft then gets `musicTrackId`, the writer's only music, which plays whatever the mood says. The
+editor's music section plays the video's track.
 
 **Style examples** (`server/examples.ts`, `style_examples`, Admin → Examples in `src/app/AdminExamples.tsx`). One real
 video per faceless style, played on the style's card in Create, the app's home, the home page's gallery and coverflow,

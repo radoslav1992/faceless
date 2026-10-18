@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import worker from "../server/index";
 import { defaultVoice, elevenVoice, offeredVoice, providerVoiceId, voiceUsable } from "../server/voices";
+import { sampleText } from "../shared/voices";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 
 // Narration voices managed in Admin → Voices: the twelve voices offered before are in the table, administrators import
-// voices from their ElevenLabs account (with ElevenLabs' details and sample), rename, describe, order, hide them and
-// choose the default; hidden voices stay with the videos and series that have them.
+// voices from their ElevenLabs account (with ElevenLabs' details and sample), rename, describe, order, hide them,
+// choose the default and make each one's sample; hidden voices stay with the videos and series that have them.
 
 afterEach(() => vi.unstubAllGlobals());
 const SAMPLE = "https://storage.googleapis.com/eleven-public-prod/premade/voices/abc/sample.mp3";
@@ -100,6 +101,49 @@ describe("voices", () => {
     expect(await providerVoiceId(env, "will")).toBe("pNInz6obpgDQGcFmaJgB");
     expect((await admin("PATCH", "/api/admin/voices/eric", { providerId: "pNInz6obpgDQGcFmaJgB" })).status).toBe(409);
     expect((await admin("PATCH", "/api/admin/voices/nobody", { name: "X" })).status).toBe(404);
+  });
+
+  it("get samples made by administrators with ElevenLabs, each replacing the one before", async () => {
+    const { env, admin, user, offered } = await setup();
+    // An MP3 as ElevenLabs sends it: an ID3 tag, then frames.
+    const mp3 = (n: number) => new Uint8Array([0x49, 0x44, 0x33, ...new Array(2000).fill(n)]);
+    const asked: any[] = [];
+    let answer = () => new Response(mp3(asked.length), { headers: { "Content-Type": "audio/mpeg" } });
+    vi.stubGlobal("fetch", async (url: string, init: any = {}) => {
+      expect([url, init.method, init.headers["xi-api-key"]]).toEqual(["https://api.elevenlabs.io/v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb?output_format=mp3_44100_128", "POST", "el"]);
+      asked.push(JSON.parse(init.body));
+      return answer();
+    });
+    const samples = async () => (await env.MEDIA.list({ prefix: "voices/george/" })).objects.map((o: { key: string }) => o.key);
+    // The standard text, in the narration's model.
+    const first = await admin("POST", "/api/admin/voices/george/sample", {});
+    expect(first.status).toBe(200);
+    expect(asked).toEqual([{ text: sampleText("George"), model_id: "eleven_v4" }]);
+    expect(sampleText("George")).toMatch(/^Hi, I'm George\. /);
+    expect(first.data.voice.preview).toMatch(/^\/api\/public\/voices\/george\/preview\?v=[a-f0-9]{8}$/);
+    expect((await offered()).find((v) => v.id === "george").preview).toBe(first.data.voice.preview);
+    const played = await call(worker, env, "GET", first.data.voice.preview);
+    expect([played.status, played.headers.get("Content-Type")]).toEqual([200, "audio/mpeg"]);
+    // An administrator's own text: a new address (browsers fetch it again), and the old file is gone.
+    const second = await admin("POST", "/api/admin/voices/george/sample", { text: "  A night on the lighthouse.  " });
+    expect(asked.at(-1).text).toBe("A night on the lighthouse.");
+    expect(second.data.voice.preview).not.toBe(first.data.voice.preview);
+    expect(await samples()).toEqual([`voices/george/sample-${second.data.voice.preview.split("v=")[1]}.mp3`]);
+    // ElevenLabs refusing, or answering with something that isn't an MP3, keeps the sample there was.
+    answer = () => new Response("{}", { status: 401 });
+    expect((await admin("POST", "/api/admin/voices/george/sample", {})).data.error).toMatch(/^ElevenLabs refused/);
+    answer = () => new Response("<html>oops</html>".padEnd(2000), { headers: { "Content-Type": "audio/mpeg" } });
+    expect((await admin("POST", "/api/admin/voices/george/sample", {})).status).toBe(502);
+    expect((await offered()).find((v) => v.id === "george").preview).toBe(second.data.voice.preview);
+    expect(await samples()).toHaveLength(1);
+    // Too long, an unknown voice, not an administrator, no ElevenLabs key: nothing is asked of ElevenLabs.
+    const calls = asked.length;
+    expect((await admin("POST", "/api/admin/voices/george/sample", { text: "x".repeat(401) })).status).toBe(400);
+    expect((await admin("POST", "/api/admin/voices/nobody/sample", {})).status).toBe(404);
+    expect((await user("POST", "/api/admin/voices/george/sample", {})).status).toBe(404);
+    env.ELEVENLABS_API_KEY = "";
+    expect((await admin("POST", "/api/admin/voices/george/sample", {})).status).toBe(503);
+    expect(asked).toHaveLength(calls);
   });
 
   it("hidden are refused for new videos and series, kept by the ones that have them, and deleted only when unused", async () => {
