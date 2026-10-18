@@ -23,8 +23,9 @@ and `npx wrangler deploy` as the deploy command (a full deploy, so the container
 Apply the schema once, and again whenever a file lands in `migrations/` — before the code that needs it is deployed
 (`0002_clips.sql` lets a long video be transcribed for credits, a run of kind `speech`, and indexes clips by their
 video; `0003_voices.sql` creates the narration voices managed in Admin → Voices, with the twelve voices offered
-before; `0004_library.sql` rebuilds `library_items` with its rows to add pictures, descriptions and the AI mark; the
-code already running keeps working on all three):
+before; `0004_library.sql` rebuilds `library_items` with its rows to add pictures, descriptions and the AI mark;
+`0005_style_examples.sql` creates each style's example video and `0006_example_previews.sql` adds the columns of their
+short previews; the code already running keeps working on each):
 
 ```sh
 npm run db:remote     # wrangler d1 migrations apply faceless --remote

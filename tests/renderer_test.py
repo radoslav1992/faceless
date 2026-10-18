@@ -1,7 +1,8 @@
 """Run with `python3 tests/renderer_test.py` from the repository root; needs ffmpeg and ffprobe (as in renderer/Dockerfile).
 
 The renderer's functions run in this process. Its inputs come from a local HTTP server that stands in for the site
-(SOURCE_ORIGIN), on the capability paths the Worker hands out (/api/render-inputs/<job>/<n>, /api/upload-inputs/<id>).
+(SOURCE_ORIGIN), on the capability paths the Worker hands out (/api/render-inputs/<job>/<n>, /api/upload-inputs/<id>)
+and the public style example videos (/api/public/examples/<id>/video).
 """
 import http.client
 import importlib.util
@@ -55,10 +56,10 @@ class Site:
                 path = self.path.split('?', 1)[0]
                 if path == f'/api/render-inputs/{JOB}/98':
                     self.send_response(302); self.send_header('Location', site.url('photo.jpg')); self.end_headers(); return
-                m = re.fullmatch(rf'/api/render-inputs/{JOB}/([0-9]+)|/api/upload-inputs/([a-f0-9-]+)', path)
+                m = re.fullmatch(rf'/api/render-inputs/{JOB}/([0-9]+)|/api/(?:upload-inputs/([a-f0-9-]+)|public/examples/([a-f0-9-]+)/video)', path)
                 name = None
                 if m and m.group(1) and int(m.group(1)) < len(site.names): name = site.names[int(m.group(1))]
-                if m and m.group(2): name = next((n for n in site.names if site.upload_id(n) == m.group(2)), None)
+                if m and (m.group(2) or m.group(3)): name = next((n for n in site.names if site.upload_id(n) == (m.group(2) or m.group(3))), None)
                 if not name: self.send_response(404); self.send_header('Content-Length', '0'); self.end_headers(); return
                 data = (site.dir / name).read_bytes()
                 self.send_response(200); self.send_header('Content-Length', str(len(data))); self.end_headers(); self.wfile.write(data)
@@ -76,6 +77,9 @@ class Site:
 
     def upload_url(self, name):
         return f'{self.origin}/api/upload-inputs/{self.upload_id(name)}'
+
+    def example_url(self, name):
+        return f'{self.origin}/api/public/examples/{self.upload_id(name)}/video'
 
 def setUpModule():
     global FIXTURES, WORK
@@ -101,6 +105,11 @@ def setUpModule():
     make('green.mp4', '-f','lavfi','-i','color=c=0x00ff00:s=640x360:r=30:d=2','-f','lavfi','-i','testsrc=s=160x120:r=30:d=2',
          '-f','lavfi','-i','sine=frequency=600:duration=2','-filter_complex',"[0][1]overlay=x='t*200':y=120[v]",'-map','[v]','-map','2:a',
          '-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-c:a','aac','-shortest')
+    # A style example as compose makes them: 9:16, AI-marked, with sound; red for 5 seconds, then blue.
+    make('example.mp4', '-f','lavfi','-i','color=c=red:s=720x1280:r=30:d=5','-f','lavfi','-i','color=c=blue:s=720x1280:r=30:d=5',
+         '-f','lavfi','-i','sine=frequency=440:duration=10','-filter_complex','[0][1]concat=n=2:v=1:a=0[v]','-map','[v]','-map','2:a',
+         '-c:v','libx264','-preset','ultrafast','-threads','1','-pix_fmt','yuv420p','-c:a','aac','-shortest',
+         '-metadata','comment=AI-generated (synthetic media) - Hookstreak Shorts')
     make('big.mp4', '-f','lavfi','-i','color=c=gray:s=4096x2304:r=30:d=0.1','-c:v','libx264','-threads','1','-preset','ultrafast','-pix_fmt','yuv420p')
     # A WebM written as a stream (as browsers and screen recorders do) stores no length.
     with open(FIXTURES.dir / 'recorded.webm', 'wb') as out:
@@ -744,6 +753,49 @@ class CutsTest(RendererTest):
         self.requests = len(FIXTURES.requests)
         for bad in (5, 7201, '600', True):
             self.assert_fails({'operation': 'inspect', 'url': FIXTURES.url('long.wav'), 'maxSeconds': bad}, 'MEDIA_INVALID')
+
+class PreviewTest(RendererTest):
+    """The short, silent preview a style card plays in place of the example's full video."""
+    def test_the_first_seconds_small_silent_and_marked_like_the_example(self):
+        job = run({'operation': 'preview', 'url': FIXTURES.example_url('example.mp4'), 'seconds': 8})
+        self.assertEqual((job['status'], job['files']), ('completed', 1), job)
+        self.assert_outputs_only(job)
+        out = job['outputs'][0]
+        info = ffprobe(out)
+        self.assertEqual([(s['codec_type'], s['codec_name'], s['width'], s['height'], s['pix_fmt']) for s in info['streams']],
+                         [('video', 'h264', 540, 960, 'yuv420p')], 'no sound')
+        self.assertAlmostEqual(float(info['format']['duration']), 8, delta=0.1)
+        self.assertAlmostEqual(job['duration'], 8, delta=0.1)
+        # The opening of the example: red, then blue from its fifth second.
+        self.assertTrue(near(pixel(out, 1, 270, 480), (255, 0, 0)))
+        self.assertTrue(near(pixel(out, 7, 270, 480), (0, 0, 255)))
+        self.assert_ai_marked(out)
+        # The index comes first, so a card starts playing before the whole file has arrived; and it is small.
+        data = Path(out).read_bytes()
+        self.assertLess(data.index(b'moov'), data.index(b'mdat'))
+        self.assertLess(len(data), 1_300_000)
+        self.assertEqual(FIXTURES.requests[-1].split('?')[0], f'/api/public/examples/{FIXTURES.upload_id("example.mp4")}/video')
+
+    def test_a_short_wide_unmarked_video_fits_the_frame_and_stays_unmarked(self):
+        job = run({'operation': 'preview', 'url': FIXTURES.example_url('clip.mp4'), 'seconds': 8})
+        self.assertEqual(job['status'], 'completed', job)
+        out = job['outputs'][0]
+        video = ffprobe(out)['streams'][0]
+        self.assertEqual((video['width'], video['height']), (540, 304))
+        self.assertAlmostEqual(job['duration'], 2, delta=0.1)
+        tags = ffprobe(out, '-export_xmp', '1')['format'].get('tags', {})
+        self.assertNotIn('comment', tags)
+        self.assertNotIn(b'trainedAlgorithmicMedia', Path(out).read_bytes())
+        self.assert_decodes(out)
+
+    def test_bad_payloads_fail_before_any_download_and_pictures_are_refused(self):
+        url = FIXTURES.example_url('example.mp4')
+        for seconds in (0, 16, '8', True, None):
+            self.assert_fails({'operation': 'preview', 'url': url, 'seconds': seconds}, 'MEDIA_INVALID')
+        poster = url.replace('/video', '/poster')
+        for bad in (poster, url.replace(FIXTURES.origin, 'https://example.com'), f'{FIXTURES.origin}/api/public/examples/../video'):
+            self.assert_fails({'operation': 'preview', 'url': bad, 'seconds': 8}, 'MEDIA_INVALID')
+        self.assert_fails({'operation': 'preview', 'url': FIXTURES.example_url('photo.jpg'), 'seconds': 8}, 'MEDIA_FORMAT', network=True)
 
 def detector_ready():
     """The face detector needs OpenCV and the YuNet model (both in the renderer image; YUNET_MODEL points elsewhere)."""

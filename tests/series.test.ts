@@ -206,7 +206,9 @@ describe("the cron", () => {
     };
     const later = insert("Later", {}, t + MAKE_AHEAD.autopilot + 3600);
     const review = insert("Review", { review: true }, t + MAKE_AHEAD.autopilot + 3600);
-    const missed = insert("Missed", {}, t - LATE_GRACE - 60);
+    // Its next slot is half a day away, beyond the make-ahead time whatever the hour the test runs at.
+    const halfDay = new Date((t + 12 * HOUR) * 1000).toISOString().slice(11, 16);
+    const missed = insert("Missed", { schedule: { times: [halfDay] } }, t - LATE_GRACE - 60);
     env.CONTENT.created.length = 0;
     await dispatchSeries(env);
     const started = env.CONTENT.created.map((c: any) => c.params.episode.seriesId);

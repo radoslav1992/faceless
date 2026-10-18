@@ -7,8 +7,9 @@ The payloads and the HTTP API are described in shared/render.ts:
   DELETE /jobs/:id          -> forgets the job (stops it if running)
 Operations: 'compose' (segments + voice + music + burned ASS -> MP4, optional JPEG cover), 'stills' (one JPEG per
 slide; carousel slides place a picture in a rounded box on a page colour and a logo over it), 'inspect' (what an
-uploaded file is), 'track' (where the speaker is in a part of a video, and the two people seen most, for clips) and
-'youtube' (one video of the person's own YouTube channel, by its ID, with yt-dlp: only on the download container).
+uploaded file is), 'track' (where the speaker is in a part of a video, and the two people seen most, for clips),
+'preview' (the first seconds of a style example, small and silent, for the style cards) and 'youtube' (one video of the
+person's own YouTube channel, by its ID, with yt-dlp: only on the download container).
 One job runs at a time; inputs are downloaded only from SOURCE_ORIGIN (a YouTube video only from YouTube, by its ID).
 """
 import bisect, json, math, os, re, shutil, struct, subprocess, tempfile, threading, time, urllib.error, urllib.request
@@ -19,7 +20,7 @@ from xml.sax.saxutils import escape, quoteattr
 
 JOBS = {}
 LOCK = threading.Lock()
-OPERATIONS = ('compose', 'stills', 'inspect', 'track', 'youtube')
+OPERATIONS = ('compose', 'stills', 'inspect', 'track', 'preview', 'youtube')
 MAX_BODY = 2 * 1024 * 1024          # bytes of a POST /jobs payload
 MAX_BYTES = 2 * 1024 * 1024 * 1024  # bytes of one downloaded input (long videos for clips, ~1.9 GB uploads)
 MAX_SIDE = 4096                     # pixels on either side of an input picture
@@ -66,11 +67,13 @@ CLEAR = 1.25            # how much more a face's lips must move than the next fa
 SYNC = 1.3              # how much more a speaking face's lips move while someone talks than in the pauses
 MAX_TURNS = 4000
 MAX_PANES = 2           # windows of a clip's picture stacked in the frame (two speakers; a screen and a camera)
+PREVIEW_SIZE = (540, 960)  # a style example's preview: half the 9:16 frame, at most 1.2 Mbit/s (about 1 MB for 8 seconds)
+MAX_PREVIEW = 15           # seconds
 # The caption fonts (renderer/fonts, the same files the browser preview uses); libass loads them before system fonts.
 FONTS_DIR = os.environ.get('FONTS_DIR', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts'))
 CURRENT = threading.local()  # the job this worker thread processes, so a cancel can stop its FFmpeg
 
-INPUT_PATH = re.compile(r'/api/(render-inputs/[a-f0-9-]{36}/[0-9]{1,2}|upload-inputs/[a-f0-9-]{36})')
+INPUT_PATH = re.compile(r'/api/(render-inputs/[a-f0-9-]{36}/[0-9]{1,2}|upload-inputs/[a-f0-9-]{36}|public/examples/[a-f0-9-]{36}/video)')
 INPUT_QUERY = re.compile(r'token=[A-Za-z0-9._~-]{1,512}')
 COLOR = re.compile(r'#[0-9a-fA-F]{6}')
 VIDEO_CONTAINERS = {'mov', 'mp4', 'matroska', 'webm'}
@@ -216,7 +219,8 @@ def write_ass(job, name, text):
     return path
 
 def input_url(url, origin):
-    """Inputs come only from short-lived capability URLs on this site (SOURCE_ORIGIN), on the two input paths."""
+    """Inputs come only from this site (SOURCE_ORIGIN): short-lived capability URLs on the two input paths, and the
+    public style example videos."""
     if not isinstance(url, str) or len(url) > 2048 or not re.fullmatch(r'[\x21-\x7e]+', url): raise ValueError('Invalid input URL')
     if not origin: raise ValueError('Download refused: SOURCE_ORIGIN is not set')
     parsed = urlparse(url)
@@ -768,6 +772,25 @@ def inspect(job, payload, origin):
     job.update(status='completed', duration=round(media['duration'], 3), files=0, outputs=[],
                meta={k: media[k] for k in ('kind', 'width', 'height', 'hasAudio')})
 
+def preview(job, payload, origin):
+    """The first `seconds` of a style example's video, scaled to fit 540 x 960 and without sound, for the style cards
+    (they play muted). It carries the AI marking when the example does (its comment tag, as compose writes it)."""
+    url = input_url(payload.get('url'), origin)
+    length = checked(lambda: number(payload['seconds'], 1, MAX_PREVIEW))
+    source, output = os.path.join(job['dir'], 'input0'), os.path.join(job['dir'], 'output0.mp4')
+    download(url, source)
+    if classify(source)['kind'] != 'video': raise ValueError('Unsupported format: not a video')
+    tags = {k.lower(): v for k, v in ((probe(source).get('format') or {}).get('tags') or {}).items()}
+    marked = str(tags.get('comment', '')).startswith('AI-generated')
+    width, height = PREVIEW_SIZE
+    command(['ffmpeg','-nostdin','-v','error','-threads','1','-protocol_whitelist','file,pipe','-t',f'{length:.3f}','-i',source,
+             '-map','0:v:0','-an','-sn','-dn','-vf',f'scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1',
+             '-c:v','libx264','-preset','veryfast','-crf','28','-maxrate','1200k','-bufsize','2400k','-threads','1','-pix_fmt','yuv420p',
+             '-r',str(FPS),*(AI_TAGS if marked else []),'-movflags','+faststart',output], timeout=300)
+    if not os.path.exists(output) or not os.path.getsize(output): raise ValueError('Media processing failed: no preview')
+    if marked: mark_ai(output)
+    job.update(status='completed', duration=round(media_duration(output, probe(output)), 3), files=1, outputs=[output])
+
 def follow_crop(points, width, height):
     """"Follow the speaker": crops a picture wider than the frame to the frame's shape around the path of
     shared/track.ts (t on the segment's own clock; the crop's centre as a share of the width; linear between points,
@@ -1233,6 +1256,7 @@ def process(job, payload, id=None):
         elif operation == 'stills': stills(job, payload, origin)
         elif operation == 'inspect': inspect(job, payload, origin)
         elif operation == 'track': track(job, payload, origin)
+        elif operation == 'preview': preview(job, payload, origin)
         elif operation == 'youtube': youtube(job, payload, origin)
         else: raise ValueError('Invalid operation')
     except Exception as e:

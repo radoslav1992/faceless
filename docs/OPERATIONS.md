@@ -47,7 +47,10 @@ under `/api/admin` answers 404 to anyone else.
   page (the home page's hero shows real examples once three styles have one). Make a video in the style, then choose
   it from the style's list (videos of the style's own type come first); it is copied, so deleting the video later
   keeps the example. Replace or remove it at any time; a style without one shows its drawing. Choose videos up to
-  100 MB that show the style at its best, and only ones that are yours to show.
+  100 MB that show the style at its best, and only ones that are yours to show. A minute or two after a choice the
+  renderer makes the small preview the cards play (the first 8 seconds, about 1 MB); the card says "Making its
+  preview…" until then. If it fails three times (`Example preview failed` in Workers Logs, with the renderer's reason)
+  the cards play the full video; choose the video again to retry.
 - **Messages**: the last 100 contact-form messages; abuse reports are red, billing and withdrawal requests amber. Each
   message is also e-mailed to `ADMIN_EMAILS`.
 
