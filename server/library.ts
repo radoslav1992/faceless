@@ -11,13 +11,14 @@ export const library = new Hono<App>();
 export const libraryKinds = ["music", "clip", "image"] as const;
 export type LibraryKind = (typeof libraryKinds)[number];
 export type LibraryRow = {
-  id: string; kind: LibraryKind; name: string; description: string; tags: string; object_key: string; thumb_key: string | null; mime: string;
+  id: string; kind: LibraryKind; name: string; description: string; category: string; tags: string; object_key: string; thumb_key: string | null; mime: string;
   bytes: number; duration: number; width: number; height: number; ai: number; source_asset: string | null; active: number; created_at: number;
 };
 export const splitTags = (tags: string) => String(tags || "").split(",").map((t) => t.trim()).filter(Boolean);
 export function libraryView(r: LibraryRow) {
   return {
-    id: r.id, kind: r.kind, name: r.name, description: r.description || "", tags: splitTags(r.tags), duration: r.duration, width: r.width, height: r.height,
+    id: r.id, kind: r.kind, name: r.name, description: r.description || "", category: r.category || "", tags: splitTags(r.tags), duration: r.duration,
+    width: r.width, height: r.height,
     ai: !!r.ai, url: `/api/library/${r.id}/file`,
     // A picture is its own thumbnail when it has none.
     thumb: r.thumb_key ? `/api/library/${r.id}/thumb` : r.kind === "image" ? `/api/library/${r.id}/file` : null,
@@ -31,14 +32,14 @@ export function searchTerms(q: string) {
   return fold(q).split(/[^\p{L}\p{N}]+/u).filter(Boolean).slice(0, 8).map((t) => (t.length > 3 && t.endsWith("s") && !t.endsWith("ss") ? t.slice(0, -1) : t));
 }
 /**
- * How well an item matches every term of a search (0: not every term is in its name, description or tags). Name
- * matches count most, then tags, then the description.
+ * How well an item matches every term of a search (0: not every term is in its name, genre or category, description
+ * or tags). Name matches count most, then the genre or category, then tags, then the description.
  */
-export function searchScore(r: Pick<LibraryRow, "name" | "description" | "tags">, terms: string[]) {
-  const name = fold(r.name), tags = fold(r.tags), description = fold(r.description || "");
+export function searchScore(r: Pick<LibraryRow, "name" | "description" | "tags"> & { category?: string }, terms: string[]) {
+  const name = fold(r.name), category = fold(r.category || ""), tags = fold(r.tags), description = fold(r.description || "");
   let score = 0;
   for (const t of terms) {
-    const s = (name.includes(t) ? 4 : 0) + (tags.includes(t) ? 2 : 0) + (description.includes(t) ? 1 : 0);
+    const s = (name.includes(t) ? 4 : 0) + (category.includes(t) ? 3 : 0) + (tags.includes(t) ? 2 : 0) + (description.includes(t) ? 1 : 0);
     if (!s) return 0;
     score += s;
   }

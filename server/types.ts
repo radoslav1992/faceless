@@ -44,6 +44,8 @@ export interface Env {
   STRIPE_AUTOMATIC_TAX?: string;
   /** Workers AI text model for episode scripts and picture descriptions. */
   TEXT_MODEL?: string;
+  /** Multimodal model that suggests library items' details from a picture, clip frames or a part of a track (server/describe.ts). */
+  DESCRIBE_MODEL?: string;
   FAL_KEY?: string;
   /** fal model for scene pictures: GPT Image 2.5 Flare by default, or its Sunburst variant, "fal-ai/nano-banana-2" or "fal-ai/flux/schnell". */
   FAL_IMAGE_MODEL?: string;

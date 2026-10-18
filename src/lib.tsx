@@ -54,7 +54,8 @@ export type Source = Asset & {
 export type LibraryKind = "music" | "clip" | "image";
 /** An item of the shared library (server/library.ts); `ai`: made with AI (videos using it are disclosed as AI-made). */
 export type LibraryItem = {
-  id: string; kind: LibraryKind; name: string; description: string; tags: string[]; duration: number; width: number; height: number; ai: boolean; url: string; thumb: string | null;
+  id: string; kind: LibraryKind; name: string; description: string; category: string; tags: string[]; duration: number; width: number; height: number; ai: boolean;
+  url: string; thumb: string | null;
 };
 export type { VideoKind };
 

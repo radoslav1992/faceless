@@ -407,7 +407,7 @@ export function MusicChoice({ label, mood, trackId, moodName, onChange, small = 
             : <span className="play-btn none" aria-hidden="true"><Music size={18} /></span>}
           <span className="grow" style={{ minWidth: 0 }}>
             <span className="name">{track?.name ?? (looked.loading ? "Loading…" : "No longer in the library")}</span>
-            {track && <span className="small muted">{seconds(track.duration)}{track.tags.length ? ` · ${track.tags.join(", ")}` : ""}</span>}
+            {track && <span className="small muted">{[track.category, seconds(track.duration), track.tags.join(", ")].filter(Boolean).join(" · ")}</span>}
           </span>
           <button type="button" className="btn sm" onClick={choose}>Change</button>
         </div>
@@ -840,7 +840,7 @@ export function LibraryPicker({ kind, title, onPick, onClose }: LibraryPickerPro
                 <span className="grow" style={{ minWidth: 0 }}>
                   <span className="name" style={{ display: "block" }}>{t.name}{t.ai && <span className="chip pick-ai">AI</span>}</span>
                   {t.description && <span className="small pick-description">{t.description}</span>}
-                  <span className="small muted">{seconds(t.duration)}{t.tags.length ? ` · ${t.tags.join(", ")}` : ""}</span>
+                  <span className="small muted">{[t.category, seconds(t.duration), t.tags.join(", ")].filter(Boolean).join(" · ")}</span>
                 </span>
                 {t.id === chosen?.id && <Check size={18} aria-hidden="true" />}
               </button>
@@ -854,7 +854,7 @@ export function LibraryPicker({ kind, title, onPick, onClose }: LibraryPickerPro
       )}
       {chosen && !music && (chosen.description || chosen.tags.length > 0) && (
         <p className="pick-detail small" aria-live="polite">
-          <strong>{chosen.name}</strong>{chosen.description && <> · {chosen.description}</>}{chosen.tags.length > 0 && <span className="muted"> · {chosen.tags.join(", ")}</span>}
+          <strong>{chosen.name}</strong>{chosen.category && <> · {chosen.category}</>}{chosen.description && <> · {chosen.description}</>}{chosen.tags.length > 0 && <span className="muted"> · {chosen.tags.join(", ")}</span>}
         </p>
       )}
       {pages > 1 && (
@@ -871,7 +871,7 @@ export function LibraryPicker({ kind, title, onPick, onClose }: LibraryPickerPro
 function LibraryTile({ item, tall, selected, onSelect, onPick }: { item: LibraryItem; tall: boolean; selected: boolean; onSelect: () => void; onPick: () => void }) {
   const { videoRef, handlers } = useHoverPlay();
   const video = item.kind === "clip";
-  const about = [item.name, video ? seconds(item.duration) : "picture", item.description, item.tags.join(", "), item.ai ? "made with AI" : ""].filter(Boolean).join(", ");
+  const about = [item.name, video ? seconds(item.duration) : "picture", item.category, item.description, item.tags.join(", "), item.ai ? "made with AI" : ""].filter(Boolean).join(", ");
   return (
     <button type="button" className={`pick-item${tall ? " tall" : ""}`} aria-pressed={selected} onClick={onSelect} onDoubleClick={onPick} {...(video ? handlers : {})}
       aria-label={about} title={item.description || item.name}>

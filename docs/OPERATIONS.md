@@ -40,10 +40,13 @@ under `/api/admin` answers 404 to anyone else.
   ten seconds of a story), with the same model as the videos, in place of the sample the voice had; **Make the missing
   samples** does it for every voice without one. ElevenLabs bills a character per character (about 160 a sample).
 - **Library**: the shared music, clips and pictures people search and pick from. Upload (kind, file up to 50 MB or
-  a 20 MB picture, name, description, tags with suggestions, the AI mark) or **Add from my media** (your uploads and
+  a 20 MB picture, name, genre for music or category for clips and pictures, description, tags with suggestions, the
+  AI mark; **Fill in with AI** suggests the details from the chosen file before you upload) or **Add from my media** (your uploads and
   the AI pictures and clips made for your videos, with their name, prompt as the description and the AI mark; the
-  details open right after to check). Preview, edit the name, description, tags and AI mark, switch off or delete; the
-  list shows what each item is used by. People search by name, description and tag, so describe what an item shows
+  details open right after to check). Preview, edit the name, genre or category, description, tags and AI mark (✨ on
+  an item has AI fill them in: it looks at the picture or frames of the clip, or listens to a minute of the track, and
+  nothing is saved until you check and save), switch off or delete; the list shows what each item is used by. If AI
+  can't describe a file, `Describe model failed` is logged; `DESCRIBE_MODEL` switches the model. People search by name, description and tag, so describe what an item shows
   or sounds like. Music is picked by its mood tags (`calm`, `upbeat`, `inspiring`, `dark`, `epic`, `mysterious`,
   `playful`, `ambient`), and people can also listen to the tracks and choose one themselves; clips loop behind storytime videos and, like pictures, can be any scene's picture. Videos that
   show an item marked as AI-made are disclosed as AI-made when they're posted. Switched-off or deleted items leave new
