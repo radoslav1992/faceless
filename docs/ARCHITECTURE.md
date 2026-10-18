@@ -56,8 +56,8 @@ handler runs `maintenance()` every minute.
 ## Data model
 
 `migrations/0001_initial.sql`, `0002_clips.sql` (runs of kind `speech`), `0003_voices.sql` (narration voices) and
-`0004_library.sql` (library pictures, descriptions and the AI mark) and `0005_style_examples.sql` (each style's example
-video); D1 always enforces foreign keys.
+`0004_library.sql` (library pictures, descriptions and the AI mark), `0005_style_examples.sql` (each style's example
+video) and `0006_example_previews.sql` (the examples' short previews); D1 always enforces foreign keys.
 
 | Area | Tables |
 | --- | --- |
@@ -79,7 +79,8 @@ Triggers keep the rules in the database, so no code path can skip them:
   `STORAGE_FULL`.
 - **Work in progress**: `video_busy`, `account_busy` and `user_busy` refuse deletes while a run or a publication is
   under way.
-- **Cleanup**: `media_cleanup`, `library_cleanup` and `user_cleanup` queue R2 keys or prefixes in `cleanup_tasks`;
+- **Cleanup**: `media_cleanup`, `library_cleanup`, `style_example_cleanup` and `user_cleanup` queue R2 keys or prefixes
+  in `cleanup_tasks`;
   `evidence_account_deleted` marks terms acceptances and checkout consents of a deleted account.
 
 Unique indexes that carry rules: `videos_series_slot` (one video per series slot), `one_active_run_per_video`,
@@ -146,9 +147,14 @@ its tool page, and in the home page's hero once three styles have one (else the 
 chooses one of their own finished videos (`PUT /api/admin/examples/:template`); its file and cover are copied under
 `examples/{id}/` (up to 100 MB), so deleting the video keeps the example, and a new choice gets a new id, deleting the
 old files through `cleanup_tasks`. `GET /api/public/examples` lists them (cached a minute) and their files are served
-with `immutable` caching. `src/examples.tsx` shows the cover at rest and plays the video muted and looping while the
-card is hovered or focused, and on touch screens (or the hero) while it is in view; with reduced motion only hovering
-plays it. A style without one shows its drawing (`StyleArt`, cropped to fill the 9:16 tile).
+with `immutable` caching. The cards play a **preview**: the maintenance stage `examples` (`makePreviews`) hands a new
+example to a free renderer (operation `preview`: the first 8 seconds of its public video, fitted to 540 × 960, silent,
+at most 1.2 Mbit/s, about 1 MB; AI-marked when the example is), asking for it every 4 seconds while it renders (a
+renderer left without requests for a minute sleeps), and stores it as `examples/{id}/preview-*.mp4`; a failure is tried
+again on the next passes, three times in all. Until a preview exists the cards play the full video, which stays at
+its own address. `src/examples.tsx` shows the cover at rest and plays the preview muted and looping while the card is
+hovered or focused, and on touch screens (or the hero) while it is in view; with reduced motion only hovering plays it.
+A style without one shows its drawing (`StyleArt`, cropped to fill the 9:16 tile).
 
 ## Writing
 
@@ -468,10 +474,10 @@ The cron (`server/maintenance.ts`) runs every minute; a stage that throws never 
 
 | When | Stages |
 | --- | --- |
-| Every minute | `publish` (`dispatchDue`); `series` (`dispatchSeries`, only with `MEDIA_ENABLED=true`) |
+| Every minute | `publish` (`dispatchDue`); `series` (`dispatchSeries`, only with `MEDIA_ENABLED=true`); last, after the stages below, `examples` (previews of new style examples, `makePreviews`, only with `MEDIA_ENABLED=true`; may wait up to a minute for the renderer) |
 | Minutes 0, 5, 10, … | `runs`: re-dispatch runs whose workflow never started, fail runs older than 3 hours, mark videos left "being made" without a run as failed |
 | Minutes 2, 7, 12, … | `stats`: video stats from the networks |
-| Minute 17 of every hour | `summary` first (the operator summary, `server/operations.ts`), then `cleanup` (R2 deletes, only under `media/` and `library/`), `uploads` (unfinished uploads after a day, stuck checks after an hour, failed uploads after a week), `reviews` (provider work a failed run may have left), `retention`, `contracts` (confirmation e-mails) |
+| Minute 17 of every hour | `summary` first (the operator summary, `server/operations.ts`), then `cleanup` (R2 deletes, only under `media/`, `library/` and `examples/`), `uploads` (unfinished uploads after a day, stuck checks after an hour, failed uploads after a week), `reviews` (provider work a failed run may have left), `retention`, `contracts` (confirmation e-mails) |
 | 03:17 UTC | also `stripe` (reconciliation) and `social-tokens` (Instagram renewals, ended connections marked expired) |
 
 The operator summary is e-mailed to `ADMIN_EMAILS` when it changes (or every 6 hours) and shown in Admin → Operations;

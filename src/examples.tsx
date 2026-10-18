@@ -4,8 +4,9 @@ import { api } from "./lib";
 // Style examples (Admin → Examples, server/examples.ts): a real video made with each faceless style, shown on its card
 // in place of the drawing. At rest a card shows the video's cover; it plays, muted and looping, while hovered or
 // focused, and on touch screens (or with `autoplay`) while it is in view. With reduced motion only hovering plays it.
+// Cards play the example's preview (its first 8 seconds, small and silent: about 1 MB), or the video until it exists.
 
-export type Example = { video: string; poster: string | null; duration: number };
+export type Example = { video: string; poster: string | null; preview: string | null; duration: number };
 let request: Promise<Record<string, Example>> | null = null;
 /** Each style's example by template id (empty until loaded, or when there are none), loaded once per page. */
 export function useExamples() {
@@ -50,10 +51,11 @@ export function ExampleVideo({ example, autoplay = false, className }: { example
       cleanups.push(() => { seen.disconnect(); video.pause(); });
     }
     return () => cleanups.forEach((f) => f());
-  }, [autoplay, example.video]);
+  }, [autoplay, example.video, example.preview]);
   // Without a cover, the first frame stands in for one.
+  const src = example.preview ?? example.video;
   return (
-    <video ref={ref} className={className} src={example.poster ? example.video : `${example.video}#t=0.1`} poster={example.poster ?? undefined}
+    <video ref={ref} className={className} src={example.poster ? src : `${src}#t=0.1`} poster={example.poster ?? undefined}
       muted loop playsInline preload={example.poster ? "none" : "metadata"} aria-hidden="true" tabIndex={-1} />
   );
 }

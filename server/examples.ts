@@ -4,19 +4,27 @@ import { z } from "zod";
 import type { App, Env } from "./types";
 import { MB, now, uid } from "./types";
 import { extOf, serveObject, storeStream } from "./storage";
+import { siteUrl } from "./config";
+import { releaseRender, renderFile, renderStatus, submitRender } from "./renderer";
+import type { RenderPayload } from "../shared/render";
 import { isTemplate, templates } from "../shared/templates";
 
 // Style examples: one real video per faceless style (shared/templates.ts), played on the style's card in Create, on
 // the home page and on the tool pages. Administrators choose one of their own finished videos for a style in
 // Admin → Examples; its file and cover are copied under examples/{id}/, so the example stays when the video is
-// deleted. A style without one shows its drawing.
+// deleted. A style without one shows its drawing. The cards play a short preview the renderer makes from it (the
+// first 8 seconds at 540 × 960, silent: about 1 MB in place of the whole video), and the full video until it exists.
 
 const LIMIT = 100 * MB;
-type ExampleRow = { template: string; id: string; video_key: string; poster_key: string | null; duration: number; source_video: string | null; created_at: number };
+type ExampleRow = {
+  template: string; id: string; video_key: string; poster_key: string | null; duration: number; source_video: string | null; created_at: number;
+  preview_key: string | null; preview_slot: number | null; preview_tries: number;
+};
 /** A choice's files never change (a new choice has a new id), so browsers keep them. */
 const FOREVER = "public, max-age=31536000, immutable";
 const exampleView = (r: ExampleRow) => ({
-  video: `/api/public/examples/${r.id}/video`, poster: r.poster_key ? `/api/public/examples/${r.id}/poster` : null, duration: r.duration,
+  video: `/api/public/examples/${r.id}/video`, poster: r.poster_key ? `/api/public/examples/${r.id}/poster` : null,
+  preview: r.preview_key ? `/api/public/examples/${r.id}/preview` : null, duration: r.duration,
 });
 const rows = async (env: Env) =>
   (await env.DB.prepare("SELECT * FROM style_examples").all<ExampleRow>()).results.filter((r) => isTemplate(r.template));
@@ -27,18 +35,68 @@ publicExamples.get("/api/public/examples", async (c) => {
   c.header("Cache-Control", "public, max-age=60");
   return c.json({ examples: Object.fromEntries((await rows(c.env)).map((r) => [r.template, exampleView(r)])) });
 });
-publicExamples.get("/api/public/examples/:id/:file{video|poster}", async (c) => {
-  const r = await c.env.DB.prepare("SELECT video_key,poster_key FROM style_examples WHERE id=?").bind(c.req.param("id")).first<Pick<ExampleRow, "video_key" | "poster_key">>();
-  const key = c.req.param("file") === "video" ? r?.video_key : r?.poster_key;
+publicExamples.get("/api/public/examples/:id/:file{video|poster|preview}", async (c) => {
+  const file = c.req.param("file") as "video" | "poster" | "preview";
+  const r = await c.env.DB.prepare("SELECT video_key,poster_key,preview_key FROM style_examples WHERE id=?").bind(c.req.param("id"))
+    .first<Pick<ExampleRow, "video_key" | "poster_key" | "preview_key">>();
+  const key = r?.[`${file}_key`];
   if (!key) throw new HTTPException(404, { message: "Not found." });
-  return serveObject(c.env, key, c.req.param("file") === "video" ? c.req.header("Range") : null, FOREVER);
+  return serveObject(c.env, key, file === "poster" ? null : c.req.header("Range"), FOREVER);
 });
+
+const PREVIEW_SECONDS = 8, PREVIEW_TRIES = 3, PREVIEW_LIMIT = 20 * MB, PREVIEW_POLLS = 12;
+const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+/**
+ * Maintenance (every minute while media is on): makes the previews of new examples, one renderer job each (its id is
+ * the example's), when a renderer is free. The pass asks for it every 4 seconds while it renders (a few seconds): a
+ * renderer left without requests for a minute goes to sleep, and its job with it. One still running after that is
+ * asked for again on the next pass. A preview that fails is tried again on the next passes, three times in all; until
+ * one exists the cards play the full video.
+ */
+export async function makePreviews(e: Env, wait = pause) {
+  if (!e.MEDIA_RENDERER) return;
+  const due = (await e.DB.prepare("SELECT id,preview_slot FROM style_examples WHERE preview_key IS NULL AND preview_tries<? ORDER BY created_at LIMIT 2")
+    .bind(PREVIEW_TRIES).all<Pick<ExampleRow, "id" | "preview_slot">>()).results;
+  for (const { id, preview_slot } of due) {
+    let slot = preview_slot;
+    if (slot === null) {
+      const payload: RenderPayload = { id, operation: "preview", url: `${siteUrl(e)}/api/public/examples/${id}/video`, seconds: PREVIEW_SECONDS };
+      // Every renderer is busy: people's videos come first, the rest waits for the next pass.
+      slot = await submitRender(e, payload, null, async () => {});
+      if (slot === null) return;
+      await e.DB.prepare("UPDATE style_examples SET preview_slot=? WHERE id=? AND preview_key IS NULL").bind(slot, id).run();
+    }
+    try {
+      let status = await renderStatus(e, slot, id);
+      for (let n = 1; status.status === "running" && n < PREVIEW_POLLS; n++) {
+        await wait(4000);
+        status = await renderStatus(e, slot, id);
+      }
+      if (status.status === "running") continue;
+      if (status.status === "failed") throw Object.assign(new Error(status.error || "MEDIA_PROCESSING_FAILED"), { detail: status.detail });
+      // A key of its own, so a pass that overlaps this one never deletes the file this one recorded.
+      const key = `examples/${id}/preview-${uid().slice(0, 8)}.mp4`;
+      await storeStream(e, key, await renderFile(e, slot, id, 0), PREVIEW_LIMIT, "video/mp4");
+      const saved = await e.DB.prepare("UPDATE style_examples SET preview_key=?,preview_slot=NULL WHERE id=? AND preview_key IS NULL").bind(key, id).run();
+      // Replaced or removed meanwhile (its folder is already queued for deletion), or recorded by another pass.
+      if (!saved.meta.changes) await e.MEDIA.delete(key);
+    } catch (error) {
+      console.error("Example preview failed", { id, error: (error as Error).message, detail: (error as { detail?: string }).detail });
+      await e.DB.prepare("UPDATE style_examples SET preview_slot=NULL,preview_tries=preview_tries+1 WHERE id=?").bind(id).run();
+    }
+    await releaseRender(e, slot, id);
+  }
+}
 
 /** Admin → Examples (mounted under the administrators' routes). */
 export const adminExamples = new Hono<App>();
+const adminView = (r: ExampleRow) => ({
+  template: r.template, ...exampleView(r), sourceVideoId: r.source_video, createdAt: r.created_at,
+  previewStatus: r.preview_key ? "ready" : r.preview_tries >= PREVIEW_TRIES ? "failed" : "making",
+});
 /** Every style's example, and the administrator's own finished videos to choose from (newest first). */
 adminExamples.get("/", async (c) => {
-  const examples = (await rows(c.env)).map((r) => ({ template: r.template, ...exampleView(r), sourceVideoId: r.source_video, createdAt: r.created_at }));
+  const examples = (await rows(c.env)).map(adminView);
   const videos = (await c.env.DB.prepare(
     `SELECT v.id,v.kind,v.title,v.hook,v.duration,v.video_asset,v.cover_asset,v.created_at FROM videos v
      JOIN media_assets a ON a.id=v.video_asset AND a.status='ready'
@@ -85,7 +143,7 @@ adminExamples.put("/:template", async (c) => {
     throw e;
   }
   const r = await c.env.DB.prepare("SELECT * FROM style_examples WHERE template=?").bind(template).first<ExampleRow>();
-  return c.json({ example: { template, ...exampleView(r!), sourceVideoId: r!.source_video, createdAt: r!.created_at }, name: templates[template].name });
+  return c.json({ example: adminView(r!), name: templates[template].name });
 });
 adminExamples.delete("/:template", async (c) => {
   await c.env.DB.prepare("DELETE FROM style_examples WHERE template=?").bind(c.req.param("template")).run();

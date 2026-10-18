@@ -3,7 +3,7 @@ import type { TransitionKind } from "./story";
 
 // The contract between the Worker and the private renderer container (renderer/server.py). The Worker turns a post
 // into one of these payloads (server/render-plan.ts); the renderer downloads every input from short-lived
-// capability URLs on this site, runs FFmpeg/libass and keeps the results until the Worker downloads them.
+// capability URLs on this site (a style example's preview: from the example's public address), runs FFmpeg/libass and keeps the results until the Worker downloads them.
 //
 // HTTP (container port 8080, reachable only through the Durable Object binding):
 //   POST   /jobs              body: RenderPayload → 202 {status:"running"} | 200 {status} (already known) | 429 busy
@@ -118,11 +118,19 @@ export type TrackPayload = { id: string; operation: "track"; url: string; start:
  * YOUTUBE_UNAVAILABLE (removed, region-blocked) or YOUTUBE_FAILED.
  */
 export type YoutubePayload = { id: string; operation: "youtube"; video: string; maxSeconds: number; maxBytes: number };
-export type RenderPayload = ComposePayload | StillsPayload | InspectPayload | TrackPayload | YoutubePayload;
+/**
+ * The first `seconds` (at most 15) of a style example's video (`url`: its public address), fitted to 540 × 960 and
+ * without sound, for the style cards: one MP4 comes back, AI-marked when the example is (server/examples.ts).
+ */
+export type PreviewPayload = { id: string; operation: "preview"; url: string; seconds: number };
+export type RenderPayload = ComposePayload | StillsPayload | InspectPayload | TrackPayload | PreviewPayload | YoutubePayload;
 
 export type RenderStatus = {
   status: "running" | "completed" | "failed";
-  /** compose: length of the video; inspect: length of the media (0 for images); track: length of the part measured. */
+  /**
+   * compose: length of the video; inspect: length of the media (0 for images); track: length of the part measured;
+   * preview: length of the preview.
+   */
   duration?: number;
   /** A short code (MEDIA_*), never a raw message. */
   error?: string;

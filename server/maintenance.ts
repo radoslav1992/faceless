@@ -6,15 +6,17 @@ import { dispatchRun } from "./videos";
 import { failRun } from "./content-workflow";
 import { failAsset } from "./media";
 import { dispatchSeries } from "./series";
+import { makePreviews } from "./examples";
 import { refreshMetrics } from "./metrics";
 import { applyRetention } from "./retention";
 import { describeError } from "./error-report";
 import { flagForReview, recordMaintenanceRun, recordStageFailures, reportAttention, reviewRuns } from "./operations";
 
-// Cron (every minute): due videos are published and series whose next slot is near get their episode started; every
-// five minutes stuck work is recovered and a batch of video stats is read from the networks; once an hour (minute 17)
-// the operator summary goes out first, then files are cleaned up, failed provider work is set aside for a check,
-// retention runs, contracts are confirmed and (at 03:17 UTC) Stripe is reconciled.
+// Cron (every minute): due videos are published, series whose next slot is near get their episode started and new
+// style examples get their previews; every five minutes stuck work is recovered and a batch of video stats is read
+// from the networks; once an hour (minute 17) the operator summary goes out first, then files are cleaned up, failed
+// provider work is set aside for a check, retention runs, contracts are confirmed and (at 03:17 UTC) Stripe is
+// reconciled.
 export async function maintenance(e: Env, at = Date.now()) {
   const d = new Date(at), minute = d.getUTCMinutes(), hourly = minute === 17, startedAt = now();
   // Per pass (passes can overlap): a stage that throws never skips the others, and is reported by the next summary.
@@ -46,6 +48,8 @@ export async function maintenance(e: Env, at = Date.now()) {
       await stage("social-tokens", () => refreshAccounts(e));
     }
   }
+  // After the rest: it may wait up to a minute for the renderer.
+  if (e.MEDIA_ENABLED === "true") await stage("examples", () => makePreviews(e));
   // Last: what failed (for the next summary) and, hourly, the run's time (for the operations view).
   if (failed.length) await recordStageFailures(e, [...failed]).catch(() => console.error("Maintenance stages not recorded"));
   if (hourly) await recordMaintenanceRun(e, startedAt, failed).catch(() => console.error("Maintenance run not recorded"));
@@ -75,13 +79,14 @@ export async function reconcileRuns(e: Env) {
 }
 
 /**
- * Deletes the R2 files of deleted rows (exact keys and prefixes), a batch at a time. Anything outside the media and
- * library folders is refused: nothing is deleted and the row moves to the operations view for a manual check.
+ * Deletes the R2 files of deleted rows (exact keys and prefixes), a batch at a time. Anything outside the media,
+ * library and style example folders is refused: nothing is deleted and the row moves to the operations view for a
+ * manual check.
  */
 export async function drainCleanup(e: Env) {
   const tasks = (await e.DB.prepare("SELECT prefix FROM cleanup_tasks ORDER BY created_at LIMIT 50").all<{ prefix: string }>()).results;
   for (const { prefix } of tasks) {
-    if (!/^(media|library)\/[A-Za-z0-9._/-]+$/.test(prefix) || prefix.includes("..")) {
+    if (!/^(media|library|examples)\/[A-Za-z0-9._/-]+$/.test(prefix) || prefix.includes("..")) {
       console.error("Storage cleanup refused");
       await flagForReview(e, "cleanup", prefix, null, "refused");
       await e.DB.prepare("DELETE FROM cleanup_tasks WHERE prefix=?").bind(prefix).run();

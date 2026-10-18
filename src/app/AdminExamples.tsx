@@ -11,7 +11,9 @@ import { kindInfo, templateIds, templates, type TemplateId, type VideoKind } fro
 // Admin → Examples (server/examples.ts): one of the administrator's finished videos for each faceless style, played on
 // the style's card in Create, on the home page and on its tool page. A style without one shows its drawing.
 
-type AdminExample = Example & { template: string; sourceVideoId: string | null; createdAt: number };
+type AdminExample = Example & { template: string; sourceVideoId: string | null; createdAt: number; previewStatus: "making" | "ready" | "failed" };
+/** The short preview the cards play (made a minute or two after a choice). */
+const previewText = { making: "Making its preview…", ready: "", failed: "No preview: the cards play the full video." };
 type OwnVideo = { id: string; kind: string; title: string; duration: number; createdAt: number; url: string; cover: string | null };
 
 const kindName = (kind: string) => (kind in kindInfo ? kindInfo[kind as VideoKind].name : kind === "highlight" ? "Clip" : kind);
@@ -40,8 +42,9 @@ export function ExamplesTab() {
   return (
     <div className="stack" style={{ gap: 18 }}>
       <p className="muted" style={{ margin: 0 }}>
-        Choose one of your finished videos for each style. Its card in Create, on the home page and on its tool page plays it; the home page shows real
-        examples once three styles have one. To make one, <Link className="text-link" to="/app/create">create a video</Link> in that style.
+        Choose one of your finished videos for each style. Its card in Create, on the home page and on its tool page plays its first 8 seconds (a
+        small preview made a minute or two after you choose); the home page shows real examples once three styles have one. To make one,{" "}
+        <Link className="text-link" to="/app/create">create a video</Link> in that style.
       </p>
       {!data.videos.length && <Empty icon={<Film />} title="No finished videos yet">Make a video in a style, then choose it here as that style's example.</Empty>}
       <div className="example-grid">
@@ -60,6 +63,7 @@ export function ExamplesTab() {
               )}
               <strong>{t.name}</strong>
               <small className="muted">{kindInfo[t.kind].name}</small>
+              {example && previewText[example.previewStatus] && <small className="muted">{previewText[example.previewStatus]}</small>}
               <label className="field">
                 <span className="sr-only">Example for {t.name}</span>
                 <select className="select" value="" disabled={busy !== null || !videos.length} onChange={(e) => e.target.value && change(id, e.target.value)}>
