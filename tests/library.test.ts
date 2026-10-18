@@ -218,6 +218,16 @@ describe("library", () => {
     // Nothing was saved.
     expect(sqlite.prepare("SELECT COUNT(*) AS n FROM library_items").get()).toEqual({ n: 0 });
 
+    // Samples as large as the browser makes them (a minute of a track is a 2.6 MB WAV, 3.5 MB as base64; frames of a
+    // clip up to 8 × 1.6 MB) are taken; the API's 1 MB limit for other requests does not apply.
+    reply = { name: "Long Track", description: "A long ambient track.", category: "Ambient", tags: ["ambient"] };
+    const minute = new Uint8Array(44 + 60 * 22050 * 2);
+    minute.set([..."RIFF"].map((c) => c.charCodeAt(0)), 0);
+    minute.set([..."WAVE"].map((c) => c.charCodeAt(0)), 8);
+    expect((await describe({ kind: "music", name: "long", duration: 180, audio: Buffer.from(minute).toString("base64") })).status).toBe(200);
+    const frame = Buffer.from(new Uint8Array(1_600_000).fill(7).map((v, i) => (i < 3 ? [0xff, 0xd8, 0xff][i] : v))).toString("base64");
+    expect((await describe({ kind: "clip", name: "big", duration: 30, frames: new Array(8).fill(frame) })).status).toBe(200);
+
     // Administrators read a switched-off item's file (to describe it); people don't.
     const off = (await upload({ kind: "clip", name: "Old", duration: "5" }, new Uint8Array(200).fill(9), "video/mp4")).data.id;
     await admin("PATCH", `/api/admin/library/${off}`, { active: false });
