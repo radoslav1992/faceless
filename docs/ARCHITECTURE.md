@@ -57,7 +57,8 @@ handler runs `maintenance()` every minute.
 
 `migrations/0001_initial.sql`, `0002_clips.sql` (runs of kind `speech`), `0003_voices.sql` (narration voices) and
 `0004_library.sql` (library pictures, descriptions and the AI mark), `0005_style_examples.sql` (each style's example
-video) and `0006_example_previews.sql` (the examples' short previews); D1 always enforces foreign keys.
+video), `0006_example_previews.sql` (the examples' short previews) and `0007_library_categories.sql` (library items'
+genre or category); D1 always enforces foreign keys.
 
 | Area | Tables |
 | --- | --- |
@@ -135,16 +136,26 @@ chosen one with its sample, `VoicePicker` every voice with a play button, filter
 it once hidden (`voiceUsable` with the kept voice), and a template whose voice was hidden gets the default.
 
 **Library** (`server/library.ts`, `library_items`, Admin → Library in `src/app/AdminLibrary.tsx` and
-`server/routes/admin-library.ts`). Music, clips and pictures shared by everyone, with a name, a description and tags.
+`server/routes/admin-library.ts`). Music, clips and pictures shared by everyone, with a name, a description, a genre
+(music) or category (clips and pictures; `shared/library.ts` suggests a list, administrators may write their own) and
+tags.
 Administrators upload them (a picture's size is read from its header on the server; a clip's or track's length and a
 thumbnail come from the browser) or copy one of their own media files (`POST /api/admin/library/from-media`: an upload,
 or an AI picture or clip made for one of their videos, with its name, its prompt as the description and the AI mark;
 `source_asset` keeps it from being added twice), then rename, describe, tag, mark as AI-made, switch off or delete
 them; the list shows how many videos and series use each item. `GET /api/library?kind=clip,image&q=&tag=` searches
 the active items (all of them, folded to lowercase without accents, a plural matching its singular): every word must
-be in the name, description or tags, name matches first, then tags, then descriptions; `?ids=` returns particular
+be in the name, genre or category, description or tags, name matches first, then the genre or category, then tags,
+then descriptions; `?ids=` returns particular
 items (the editor's scenes). Music is a track, a background a clip, a scene a clip or a picture (`checkReferences`).
 An item marked as AI-made makes the video that shows it AI-made (`compose.synthetic`), like the owner's AI pictures.
+**Filled in by AI** (✨ in the upload form, on every item and in its editor): the administrator's browser makes small
+samples of the file (the picture or 6 frames spread over a clip as JPEGs of at most 720 to 1024 pixels, or a minute of a
+track as a mono 22 kHz WAV, so any format and size works), `POST /api/admin/library/describe` checks them (JPEG or WAV,
+fitting the kind, under 1.6 or 8 MB) and `describeMedia` (`server/describe.ts`) has a multimodal model, `DESCRIBE_MODEL`
+(default `google/gemini-2.5-flash` through the Workers AI binding), suggest a name, description, genre or category from
+the list and tags (for music, moods from the app's list first). Nothing is saved: the suggestions fill the form to check.
+`GET /api/admin/library/:id/file` serves an item's file to administrators even when it is switched off.
 People hear tracks before choosing them: `MusicChoice` (Create, a series) offers a mood the writer picks a track of
 (`musicCatalog`) or a track chosen in `LibraryPicker`, where every track has a play button, and shows the chosen one
 with its own; the draft then gets `musicTrackId`, the writer's only music, which plays whatever the mood says. The

@@ -4,13 +4,16 @@ import { z } from "zod";
 import type { App, Env } from "../types";
 import { MB, now, uid } from "../types";
 import { json } from "../db";
-import { extOf, head, imageFits, imageInfo, storeStream } from "../storage";
+import { extOf, head, imageFits, imageInfo, serveObject, storeStream } from "../storage";
 import { libraryKinds, libraryView, splitTags, type LibraryKind, type LibraryRow } from "../library";
+import { describeMedia } from "../describe";
+import { CATEGORY_MAX } from "../../shared/library";
 
 // Admin → Library: the shared music, clips and pictures people search and pick from (server/library.ts). Items are
 // uploaded, or copied from the administrator's own media (an upload, or an AI picture or clip they made for a video)
-// with its details: its name, its prompt as the description, whether AI made it. Name, description, tags and the AI
-// mark are edited here; an item is switched off (no longer offered) or deleted.
+// with its details: its name, its prompt as the description, whether AI made it. Name, description, genre or category,
+// tags and the AI mark are edited here, written or suggested by AI (POST /describe); an item is switched off (no
+// longer offered) or deleted.
 export const adminLibrary = new Hono<App>();
 
 const mimes: Record<LibraryKind, string[]> = {
@@ -28,6 +31,7 @@ const LENGTH = "Library clips and tracks must be between half a second and 10 mi
 const fields = {
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(500),
+  category: z.string().trim().max(CATEGORY_MAX),
   tags: z.string().trim().max(300),
 };
 /** Tags as stored: trimmed, comma-separated, each once (as first written). */
@@ -72,7 +76,7 @@ adminLibrary.get("/", async (c) => {
 // file in one request.
 adminLibrary.put("/file", async (c) => {
   const q = z.object({
-    kind: z.enum(libraryKinds), name: fields.name, description: fields.description.default(""), tags: fields.tags.default(""),
+    kind: z.enum(libraryKinds), name: fields.name, description: fields.description.default(""), category: fields.category.default(""), tags: fields.tags.default(""),
     ai: z.enum(["0", "1"]).default("0"),
     duration: z.coerce.number().min(0).max(600).default(0),
     width: z.coerce.number().int().min(0).max(4096).default(0), height: z.coerce.number().int().min(0).max(4096).default(0),
@@ -99,8 +103,8 @@ adminLibrary.put("/file", async (c) => {
     }
     ({ width, height } = info);
   }
-  await c.env.DB.prepare("INSERT INTO library_items(id,kind,name,description,tags,object_key,mime,bytes,duration,width,height,ai,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(id, q.kind, q.name, q.description, tidyTags(q.tags), key, mime, bytes, q.kind === "image" ? 0 : q.duration, width, height, Number(q.ai), now()).run();
+  await c.env.DB.prepare("INSERT INTO library_items(id,kind,name,description,category,tags,object_key,mime,bytes,duration,width,height,ai,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    .bind(id, q.kind, q.name, q.description, q.category, tidyTags(q.tags), key, mime, bytes, q.kind === "image" ? 0 : q.duration, width, height, Number(q.ai), now()).run();
   return c.json({ id, item: adminView(await row(c.env, id)) }, 201);
 });
 
@@ -167,6 +171,42 @@ adminLibrary.post("/from-media", async (c) => {
   return c.json({ id, item: adminView(await row(c.env, id)) }, 201);
 });
 
+/** Base64 of a sample the browser made, as bytes, when it is of its kind (`magic`) and not too large. */
+function sample(text: string, max: number, magic: (b: Uint8Array) => boolean) {
+  let bytes: Uint8Array;
+  try {
+    bytes = Uint8Array.from(atob(text), (ch) => ch.charCodeAt(0));
+  } catch {
+    return null;
+  }
+  return bytes.length && bytes.length <= max && magic(bytes) ? bytes : null;
+}
+const isJpeg = (b: Uint8Array) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
+const isWav = (b: Uint8Array) => new TextDecoder().decode(b.subarray(0, 4)) === "RIFF" && new TextDecoder().decode(b.subarray(8, 12)) === "WAVE";
+/**
+ * Suggests a file's name, description, genre or category and tags with a multimodal model (server/describe.ts), from
+ * samples the administrator's browser made: the picture or frames of the clip as JPEGs, a part of the track as a WAV.
+ * Nothing is saved; the suggestions fill the upload or edit form.
+ */
+adminLibrary.post("/describe", async (c) => {
+  const d = z.object({
+    kind: z.enum(libraryKinds), name: z.string().trim().max(200).default(""), duration: z.number().min(0).max(600).default(0),
+    frames: z.array(z.string().max(2_200_000)).max(8).default([]), audio: z.string().max(11_200_000).optional(),
+  }).parse(await c.req.json());
+  const frames = d.frames.map((f) => sample(f, 1.6 * MB, isJpeg));
+  const audio = d.audio === undefined ? null : sample(d.audio, 8 * MB, isWav);
+  const wanted = d.kind === "music" ? !!audio && !frames.length : !audio && frames.length > 0 && (d.kind === "clip" || frames.length === 1);
+  if (!wanted || frames.some((f) => !f) || (d.audio !== undefined && !audio)) throw new HTTPException(400, { message: "These samples can't be described. Reload the page and try again." });
+  const suggestion = await describeMedia(c.env, { kind: d.kind, name: d.name, duration: d.duration, frames: frames as Uint8Array[], audio });
+  if (!suggestion) throw new HTTPException(503, { message: "The AI couldn't describe this right now. Try again in a minute, or fill it in yourself." });
+  return c.json({ suggestion });
+});
+/** An item's file whether it is offered or switched off (people only get offered ones), to preview or describe it. */
+adminLibrary.get("/:id/file", async (c) => {
+  const r = await row(c.env, c.req.param("id"));
+  return serveObject(c.env, r.object_key, c.req.header("Range"), "private, no-store");
+});
+
 /** A poster image for a clip (a frame the admin's browser captured) or a smaller one for a picture. */
 adminLibrary.put("/:id/thumb", async (c) => {
   const bytes = new Uint8Array(await c.req.arrayBuffer());
@@ -180,12 +220,14 @@ adminLibrary.put("/:id/thumb", async (c) => {
 });
 adminLibrary.patch("/:id", async (c) => {
   const d = z.object({
-    name: fields.name.optional(), description: fields.description.optional(), tags: fields.tags.optional(), active: z.boolean().optional(), ai: z.boolean().optional(),
+    name: fields.name.optional(), description: fields.description.optional(), category: fields.category.optional(), tags: fields.tags.optional(),
+    active: z.boolean().optional(), ai: z.boolean().optional(),
   }).parse(await c.req.json());
   await row(c.env, c.req.param("id"));
-  await c.env.DB.prepare("UPDATE library_items SET name=COALESCE(?,name),description=COALESCE(?,description),tags=COALESCE(?,tags),active=COALESCE(?,active),ai=COALESCE(?,ai) WHERE id=?")
-    .bind(d.name ?? null, d.description ?? null, d.tags === undefined ? null : tidyTags(d.tags), d.active === undefined ? null : Number(d.active),
-      d.ai === undefined ? null : Number(d.ai), c.req.param("id")).run();
+  await c.env.DB.prepare(
+    "UPDATE library_items SET name=COALESCE(?,name),description=COALESCE(?,description),category=COALESCE(?,category),tags=COALESCE(?,tags),active=COALESCE(?,active),ai=COALESCE(?,ai) WHERE id=?",
+  ).bind(d.name ?? null, d.description ?? null, d.category ?? null, d.tags === undefined ? null : tidyTags(d.tags), d.active === undefined ? null : Number(d.active),
+    d.ai === undefined ? null : Number(d.ai), c.req.param("id")).run();
   return c.json({ ok: true, item: adminView(await row(c.env, c.req.param("id"))) });
 });
 adminLibrary.delete("/:id", async (c) => {

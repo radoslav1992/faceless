@@ -3,13 +3,15 @@ import { readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import worker from "../server/index";
 import { searchScore, searchTerms } from "../server/library";
+import { fitSuggestion } from "../server/describe";
 import { mediaName } from "../server/routes/admin-library";
 import { planRender } from "../server/render-plan";
 import { call, signedIn, SITE, subscribe, testEnv } from "./helpers";
 
 // The shared library: music, clips and pictures administrators add (uploads, or their own uploads and AI media with its
-// details), describe and tag in Admin → Library, and people search by name, description and tag. Items made with AI
-// say so, and videos that use one are disclosed as AI-made.
+// details), describe, give a genre or category and tag in Admin → Library (by hand, or filled in by a multimodal model),
+// and people search by name, genre or category, description and tag. Items made with AI say so, and videos that use
+// one are disclosed as AI-made.
 
 /** A PNG's bytes: its signature and IHDR size, then filler. */
 function png(width: number, height: number, bytes = 200) {
@@ -140,6 +142,88 @@ describe("library", () => {
     expect((await search(`ids=${cafe},${hidden}`)).items.map((i: any) => i.id)).toEqual([cafe]);
     expect(searchTerms("Waves, glass & Café!")).toEqual(["wave", "glass", "cafe"]);
     expect(searchScore({ name: "Ocean", description: "", tags: "" }, ["ocean", "night"])).toBe(0);
+  });
+
+  it("has a genre or category, written by hand, that people search by", async () => {
+    const { admin, user, upload } = await setup();
+    const track = await upload({ kind: "music", name: "Night drive", category: "Synthwave", tags: "calm", duration: "90" }, new Uint8Array(200), "audio/mpeg");
+    expect(track.data.item).toMatchObject({ name: "Night drive", category: "Synthwave" });
+    const clip = (await upload({ kind: "clip", name: "Rain on glass", duration: "10" }, new Uint8Array(200), "video/mp4")).data.id;
+    expect((await admin("PATCH", `/api/admin/library/${clip}`, { category: "Weather" })).data.item.category).toBe("Weather");
+    expect((await admin("PATCH", `/api/admin/library/${clip}`, { category: "x".repeat(41) })).status).toBe(400);
+    expect((await user("GET", "/api/library?kind=music&q=synthwave")).data.items.map((i: any) => [i.name, i.category])).toEqual([["Night drive", "Synthwave"]]);
+    expect((await user("GET", "/api/library?kind=clip&q=weather")).data.items.map((i: any) => i.id)).toEqual([clip]);
+    // A genre counts more than a tag, less than the name.
+    expect(searchScore({ name: "Night drive", description: "", category: "Synthwave", tags: "synthwave" }, ["synthwave"])).toBe(5);
+  });
+
+  it("fills in a file's details with a multimodal model from the samples the browser made, saving nothing", async () => {
+    const { env, admin, user, upload, sqlite } = await setup();
+    const calls: { model: string; input: any }[] = [];
+    let reply: unknown = { name: "Neon City Rain", description: "Rain falls on a neon-lit street at night.", category: "city", tags: ["Rain", "neon", "night", "rain"] };
+    env.AI.run = async (model: string, input: any) => {
+      calls.push({ model, input });
+      if (reply instanceof Error) throw reply;
+      return { candidates: [{ content: { parts: [{ text: "thinking…", thought: true }, { text: "```json\n" + JSON.stringify(reply) + "\n```" }] } }] };
+    };
+    const jpeg = (n: number) => btoa(String.fromCharCode(0xff, 0xd8, 0xff, 0xe0, ...new Array(n).fill(7)));
+    const wav = () => {
+      const b = new Uint8Array(400);
+      b.set([..."RIFF"].map((c) => c.charCodeAt(0)), 0);
+      b.set([..."WAVE"].map((c) => c.charCodeAt(0)), 8);
+      return btoa(String.fromCharCode(...b));
+    };
+    const describe = (body: object) => admin("POST", "/api/admin/library/describe", body);
+
+    // A clip: its frames, in order, to Gemini, with the name as data and the categories to choose from.
+    const clip = await describe({ kind: "clip", name: "IMG 2041", duration: 12.4, frames: [jpeg(50), jpeg(60)] });
+    expect(clip.status).toBe(200);
+    expect(clip.data.suggestion).toEqual({ name: "Neon City Rain", description: "Rain falls on a neon-lit street at night.", category: "City", tags: ["rain", "neon", "night"] });
+    const { model, input } = calls[0];
+    expect(model).toBe("google/gemini-2.5-flash");
+    expect(input.contents[0].parts).toEqual([
+      { text: JSON.stringify({ name: "IMG 2041", seconds: 12 }) },
+      { inlineData: { mimeType: "image/jpeg", data: jpeg(50) } },
+      { inlineData: { mimeType: "image/jpeg", data: jpeg(60) } },
+    ]);
+    expect(input.systemInstruction.parts[0].text).toMatch(/frames taken across it[\s\S]*Nature, Ocean, Space, City/);
+    expect(input.generationConfig.responseMimeType).toBe("application/json");
+
+    // A track: a part of it as WAV; moods from the app's list come first and a genre from its list.
+    reply = { name: "Late Night Lo-fi", description: "Mellow beats with soft keys.", category: "LO-FI", tags: ["piano", "Calm", "slow", "ambient"] };
+    const track = await describe({ kind: "music", name: "track01", duration: 184, audio: wav() });
+    expect(track.data.suggestion).toEqual({ name: "Late Night Lo-fi", description: "Mellow beats with soft keys.", category: "Lo-fi", tags: ["calm", "ambient", "piano", "slow"] });
+    expect(calls[1].input.contents[0].parts[1]).toEqual({ inlineData: { mimeType: "audio/wav", data: wav() } });
+    expect(calls[1].input.systemInstruction.parts[0].text).toMatch(/Ambient, Lo-fi, Cinematic[\s\S]*1 to 3 moods from this list that fit \(calm, upbeat/);
+    env.DESCRIBE_MODEL = "google/gemini-3.7-flash";
+    await describe({ kind: "image", name: "", frames: [jpeg(10)] });
+    expect(calls[2].model).toBe("google/gemini-3.7-flash");
+
+    // Samples that don't fit the kind, or aren't JPEGs or a WAV, never reach the model.
+    const asked = calls.length;
+    for (const body of [
+      { kind: "music", frames: [jpeg(10)] }, { kind: "music", audio: jpeg(10) }, { kind: "clip", audio: wav() }, { kind: "image", frames: [jpeg(10), jpeg(10)] },
+      { kind: "clip", frames: [btoa("GIF89a" + "x".repeat(20))] }, { kind: "clip", frames: ["not base64!"] }, { kind: "clip", frames: [] },
+      { kind: "clip", frames: new Array(9).fill(jpeg(5)) },
+    ]) expect((await describe(body)).status, JSON.stringify(body).slice(0, 60)).toBe(400);
+    expect((await user("POST", "/api/admin/library/describe", { kind: "image", frames: [jpeg(10)] })).status).toBe(404);
+    expect(calls).toHaveLength(asked);
+    // The model failing or answering nonsense: a message to fill it in by hand.
+    for (const r of [new Error("down"), { nothing: true }]) {
+      reply = r;
+      expect((await describe({ kind: "image", frames: [jpeg(10)] })).data.error).toMatch(/couldn't describe this right now/);
+    }
+    expect(fitSuggestion("image", { name: "", description: "", category: "Nature", tags: [] })).toBeNull();
+    expect(fitSuggestion("image", { name: "Moon", description: "", category: "Not a category", tags: ["a,b", "#moon"] })).toEqual({ name: "Moon", description: "", category: "", tags: ["ab", "moon"] });
+    // Nothing was saved.
+    expect(sqlite.prepare("SELECT COUNT(*) AS n FROM library_items").get()).toEqual({ n: 0 });
+
+    // Administrators read a switched-off item's file (to describe it); people don't.
+    const off = (await upload({ kind: "clip", name: "Old", duration: "5" }, new Uint8Array(200).fill(9), "video/mp4")).data.id;
+    await admin("PATCH", `/api/admin/library/${off}`, { active: false });
+    expect((await admin("GET", `/api/admin/library/${off}/file`)).status).toBe(200);
+    expect((await user("GET", `/api/library/${off}/file`)).status).toBe(404);
+    expect((await user("GET", `/api/admin/library/${off}/file`)).status).toBe(404);
   });
 
   it("is used where it fits: music for music, a clip behind a story, a clip or picture in a scene", async () => {
