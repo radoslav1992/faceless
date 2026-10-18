@@ -1,4 +1,5 @@
 import type { StoryStyle } from "./story";
+import type { MusicMood } from "./series";
 
 // Video types and the gallery of faceless styles built on them. A video type ("kind") decides how a video is written
 // and drawn; a template is a ready-made starting point (a niche and its look) people pick in Create, for a series or on
@@ -28,7 +29,7 @@ export type Template = {
   name: string; category: CategoryId; kind: VideoKind; short: string; brief: string;
   /** Example topics (shown as suggestions; the first one is the prompt field's placeholder). */
   examples: readonly string[];
-  style: StoryStyle; voice: string; seconds: number; music: string; popular?: boolean;
+  style: StoryStyle; voice: string; seconds: number; music: MusicMood; popular?: boolean;
   /** A public tool page (/tools/<slug>) with its own title and description. */
   tool?: { slug: string; title: string; description: string; icon: string };
 };

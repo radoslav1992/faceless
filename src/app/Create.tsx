@@ -7,9 +7,9 @@ import { StyleArt } from "../art";
 import { ExampleVideo, useExamples } from "../examples";
 import { StoryStylePicker } from "./StoryStyles";
 import { VideoEditor } from "./EditVideo";
-import { creditBlock, CreditBlockNotice, useOfferedVoice, VoiceSelect } from "./pickers";
+import { creditBlock, CreditBlockNotice, MusicChoice, useOfferedVoice, VoiceSelect } from "./pickers";
 import { categories, isTemplate, templateIds, templates, type CategoryId, type TemplateId } from "../../shared/templates";
-import { languages, musicMoods } from "../../shared/series";
+import { languages, type MusicMood } from "../../shared/series";
 import { specCredits, type StorySpec } from "../../shared/formats";
 import { storyStyles, type StoryStyle } from "../../shared/story";
 import { creditsLabel, videoCredits } from "../../shared/credits";
@@ -56,11 +56,11 @@ function Gallery({ onPick }: { onPick: (id: TemplateId) => void }) {
 
 type Form = {
   prompt: string; script: string; title: string; animal: string; object: string; seconds: number;
-  language: string; voiceId: string; style: StoryStyle; music: string; subject: string;
+  language: string; voiceId: string; style: StoryStyle; music: MusicMood; musicTrackId: string | null; subject: string;
 };
 const formFor = (id: TemplateId, prompt = ""): Form => {
   const t = templates[id];
-  return { prompt, script: "", title: "", animal: "", object: "", seconds: t.seconds, language: "en", voiceId: t.voice, style: t.style, music: t.music, subject: "" };
+  return { prompt, script: "", title: "", animal: "", object: "", seconds: t.seconds, language: "en", voiceId: t.voice, style: t.style, music: t.music, musicTrackId: null, subject: "" };
 };
 
 export function Create() {
@@ -102,6 +102,7 @@ export function Create() {
       const { spec: draft } = await post<{ spec: StorySpec }>("/story/draft", {
         template, prompt: form.prompt, script: form.script, title: form.title, mashup: { animal: form.animal, object: form.object },
         seconds: form.seconds, language: form.language, voiceId: form.voiceId, style: form.style, music: form.music, subject: form.subject,
+        ...(form.musicTrackId && { musicTrackId: form.musicTrackId }),
       });
       setSpec(draft);
       window.scrollTo({ top: 0 });
@@ -209,15 +210,12 @@ export function Create() {
             <label className="field"><span>Narration language</span>
               <select className="select" value={form.language} onChange={(e) => set({ language: e.target.value })}>{languages.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</select>
             </label>
-            <label className="field"><span>Voice</span>
+            <div className="field"><span>Voice</span>
               <VoiceSelect value={form.voiceId} onChange={(voiceId) => set({ voiceId })} />
-            </label>
+            </div>
           </div>
-          <label className="field"><span>Music</span>
-            <select className="select" value={form.music} onChange={(e) => set({ music: e.target.value })}>
-              {musicMoods.map((m) => <option key={m} value={m}>{m === "auto" ? "Pick one that fits" : m === "none" ? "No music" : m[0].toUpperCase() + m.slice(1)}</option>)}
-            </select>
-          </label>
+          <MusicChoice label="Music" mood={form.music} trackId={form.musicTrackId} onChange={({ mood, trackId }) => set({ music: mood, musicTrackId: trackId })}
+            moodName={(m) => (m === "auto" ? "Pick one that fits" : m === "none" ? "No music" : m[0].toUpperCase() + m.slice(1))} />
           {t.kind !== "backdrop" && (
             <label className="field"><span>Main character <span className="muted small">(optional)</span></span>
               <input className="input" maxLength={300} value={form.subject} placeholder="A curious orange fox with a blue scarf" onChange={(e) => set({ subject: e.target.value })} />

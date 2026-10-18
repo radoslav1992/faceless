@@ -3,7 +3,7 @@ import { Film, Image as ImageIcon, Library, Merge, RefreshCw, Scissors, Sparkles
 import { api, fileUrl, useVoices, type Asset, type LibraryItem } from "../lib";
 import { Switch } from "../ui";
 import { CaptionStylePicker, EditorSection } from "./CaptionPickers";
-import { LibraryPicker, MediaPicker, useOfferedVoice, VoiceSelect } from "./pickers";
+import { LibraryPicker, MediaPicker, PlayButton, useOfferedVoice, usePreviewAudio, VoiceSelect } from "./pickers";
 import { StoryPreview, type ScenePicture } from "./StoryPreview";
 import { StoryTimeline } from "./StoryTimeline";
 import { StoryStylePicker } from "./StoryStyles";
@@ -87,6 +87,7 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
   const media = useStoryMedia(spec);
   const [selected, setSelected] = useState(0);
   const [picker, setPicker] = useState<null | "image" | "video" | "library">(null);
+  const audio = usePreviewAudio();
   const scene = spec.scenes[Math.min(selected, spec.scenes.length - 1)];
   const timed = clock.timing.scenes;
   const pictures = useMemo(() => spec.scenes.map((s, i) => (spec.backdrop && backdrop
@@ -176,9 +177,10 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
       {spec.music && (
         <EditorSection title="Music" hint="Plays under the whole voice, lowered so every word stays clear."
           action={<button type="button" className="btn sm ghost" onClick={() => onChange({ ...spec, music: null })}>Remove</button>}>
-          <div className="row wrap" style={{ gap: 8 }}>
-            <span className="small">{music}</span>
-            <button type="button" className="btn sm" onClick={onMusic}>Swap</button>
+          <div className="music-track">
+            <PlayButton playing={audio.playing === "music"} onClick={() => audio.toggle("music", `/api/library/${spec.music!.trackId}/file`)} label={music || "the music"} />
+            <span className="grow small name">{music}</span>
+            <button type="button" className="btn sm" onClick={() => { audio.stop(); onMusic(); }}>Swap</button>
           </div>
           <label className="field story-volume"><span className="small">Volume: {Math.round(spec.music.volume * 100)}%</span>
             <input type="range" min={0} max={1} step={0.05} value={spec.music.volume} onChange={(e) => onChange({ ...spec, music: { ...spec.music!, volume: Number(e.target.value) } })} />
@@ -382,9 +384,9 @@ export function StoryInputs({ input, onInput, recording, timing, aligning, align
         <div className="card flat stack">
           <span className="label">Voiceover</span>
           {input.mode === "voice" ? (
-            <label className="field"><span className="small">Voice <span className="muted">(a new voice is recorded again)</span></span>
+            <div className="field"><span className="small">Voice <span className="muted">(a new voice is recorded again)</span></span>
               <VoiceSelect value={input.voiceId} onChange={(voiceId) => set({ voiceId })} />
-            </label>
+            </div>
           ) : <span className="small story-file">{recording?.name || "Your recording"}{recording?.duration ? ` · ${clockText(recording.duration)}` : ""}</span>}
         </div>
       ) : <div className="card flat stack">
@@ -395,9 +397,9 @@ export function StoryInputs({ input, onInput, recording, timing, aligning, align
         </div>
         {input.mode === "voice" ? (
           <div className="story-voice-fields">
-            <label className="field"><span className="small">Voice</span>
+            <div className="field"><span className="small">Voice</span>
               <VoiceSelect value={input.voiceId} onChange={(voiceId) => set({ voiceId })} />
-            </label>
+            </div>
             <label className="field"><span className="small">Length</span>
               <select className="select" value={input.seconds} onChange={(e) => set({ seconds: Number(e.target.value) })}>
                 {storyLengths.map(([s, name]) => <option key={s} value={s}>{name}</option>)}

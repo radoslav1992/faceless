@@ -56,6 +56,28 @@ export async function speak(e: Env, voiceId: string, text: string, language = "e
   return { audio: wav(pcm, 24000), seconds, words };
 }
 
+/**
+ * A voice's sample (Admin → Voices): `text` spoken as an MP3 by the narration's model, so it sounds as the videos will.
+ * Billed by ElevenLabs like any speech (a character per character).
+ */
+export async function speakSample(e: Env, providerVoice: string, text: string) {
+  const key = e.ELEVENLABS_API_KEY?.trim();
+  if (!key) throw new ProviderError("VOICE_UNAVAILABLE");
+  const r = await providerFetch(`${SPEECH_URL}/${encodeURIComponent(providerVoice)}?output_format=mp3_44100_128`, {
+    method: "POST", headers: { "xi-api-key": key, "Content-Type": "application/json", Accept: "audio/mpeg" },
+    body: JSON.stringify({ text, model_id: SPEECH_MODEL }), signal: AbortSignal.timeout(60000),
+  }).catch((error) => { throw error instanceof ProviderError ? error : new ProviderError("VOICE_FAILED"); });
+  if (!r.ok) {
+    await r.body?.cancel();
+    throw new ProviderError(r.status === 401 || r.status === 402 ? "VOICE_UNAVAILABLE" : r.status === 429 ? "VOICE_BUSY" : "VOICE_FAILED");
+  }
+  const audio = new Uint8Array(await r.arrayBuffer());
+  // An MP3 starts with an ID3 tag or a frame sync; anything else (an error page) is not a sample.
+  const mp3 = (audio[0] === 0x49 && audio[1] === 0x44 && audio[2] === 0x33) || (audio[0] === 0xff && (audio[1] & 0xe0) === 0xe0);
+  if (audio.length < 1000 || audio.length > 5 * 1024 * 1024 || !mp3) throw new ProviderError("VOICE_FAILED");
+  return audio;
+}
+
 // The forced-alignment answer (ElevenLabs ForcedAlignmentResponseModel): characters and words, each {text, start, end}.
 const alignmentOutput = z.object({ words: z.array(z.object({ text: z.unknown(), start: z.unknown(), end: z.unknown() }).partial()) });
 const round = (n: number) => Math.round(n * 100) / 100;

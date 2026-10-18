@@ -758,4 +758,39 @@ describe("planning and writing through the API", () => {
     expect(own.data.spec.scenes.map((x: any) => x.description)[0]).toBe("Picture 1 of the octopus");
     expect((await call(worker, env, "POST", "/api/story/draft", { template: "script" }, user.cookie)).status).toBe(400);
   });
+
+  it("plays the library track the owner chose in Create, whatever the writer or the mood says", async () => {
+    const { env, sqlite, user } = await setup();
+    const track = (name: string, tags: string, active = 1) => {
+      const id = crypto.randomUUID();
+      sqlite.prepare("INSERT INTO library_items(id,kind,name,tags,object_key,mime,bytes,duration,active,created_at) VALUES (?,'music',?,?,?,'audio/mpeg',1000,60,?,1)")
+        .run(id, name, tags, `library/${id}/track.mp3`, active);
+      return id;
+    };
+    const calm = track("Still water", "calm"), drums = track("Big drums", "epic"), hidden = track("Old tune", "calm", 0);
+    const lists: any[] = [];
+    let pick = "music1";
+    env.AI.run = async (_model: string, input: any) => {
+      lists.push(JSON.parse(input.input).music);
+      return answer({
+        topic: "Octopus hearts", caption: "Nature is weird.", hashtags: [], title: "Three hearts", headline: "", subject: "", music: pick,
+        scenes: said.map((x, n) => ({ text: x[0], picture: `Picture ${n + 1}`, keys: [] })),
+      });
+    };
+    const draft = (body: object) => call(worker, env, "POST", "/api/story/draft", { template: "facts", prompt: "octopus facts", seconds: 20, ...body }, user.cookie);
+    // A mood: the writer chooses among the tracks of that mood.
+    expect((await draft({ music: "calm" })).data.spec.music).toEqual({ trackId: calm, volume: 0.25 });
+    expect(lists.at(-1).map((m: any) => m.name)).toEqual(["Still water"]);
+    // A chosen track is the writer's only music, and plays even when the writer answers another code or the mood
+    // says "No music".
+    pick = "music2";
+    for (const music of ["auto", "calm", "none"]) {
+      const spec = (await draft({ music, musicTrackId: drums })).data.spec;
+      expect(spec.music).toEqual({ trackId: drums, volume: 0.25 });
+      expect(lists.at(-1).map((m: any) => m.name)).toEqual(["Big drums"]);
+    }
+    // Only an active library track.
+    for (const musicTrackId of [hidden, crypto.randomUUID()]) expect((await draft({ musicTrackId })).data.error).toMatch(/no longer in the library/);
+    expect((await draft({ musicTrackId: "drums" })).status).toBe(400);
+  });
 });

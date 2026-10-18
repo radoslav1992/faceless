@@ -9,6 +9,8 @@
  *     onPick(asset: Asset) — called once with the chosen, ready asset. The picker does not close itself:
  *       unmount it in onPick (onClose is not called).
  *     onClose() — Cancel, Escape or a click on the backdrop.
+ * - <VoicePicker value onPick(id) onClose /> — every voice offered (Admin → Voices) with a play button for its sample,
+ *     filtered by gender and accent; VoiceSelect opens it.
  * - <LibraryPicker kind title? onPick onClose />
  *     kind: "clip" | "music" | "image" | "scene" (a clip or a picture) — the shared library (GET /api/library?kind=&q=).
  *     A search over names, descriptions and tags (on the server), tag filter chips (every chosen tag must match), 12
@@ -29,6 +31,11 @@
  * - <DropZone onFiles disabled? label? className?>children</DropZone> — accepts files dropped on its area.
  * - ACCEPT[type], mediaTypeOf(file)
  *
+ * Fields
+ * - <VoiceSelect value onChange label? /> — the chosen voice with its sample's play button; "Change" opens VoicePicker.
+ * - <MusicChoice label mood trackId moodName onChange small? /> — a mood the writer picks a track for, or a library
+ *     track chosen (and heard) in LibraryPicker, shown with its play button.
+ *
  * Other helpers
  * - <Tabs label value onChange items idBase? /> — ARIA tabs with arrow-key navigation; pair with tabPanel(idBase, value).
  * - useHoverPlay() → { videoRef, handlers } — a muted preview that plays while the pointer or focus is on its card.
@@ -38,14 +45,15 @@
  * - useSignedInUser(), creditBlock(user, cost), assetKindLabel(kind), formatDate(unix), ago(unix), Empty, GridSkeleton.
  */
 import {
-  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
+  useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState,
   type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode,
 } from "react";
 import { Link } from "react-router-dom";
-import { AlertCircle, Check, CheckCircle2, ChevronLeft, ChevronRight, Music, Pause, Play, Search, Upload, UploadCloud } from "lucide-react";
+import { AlertCircle, Check, CheckCircle2, ChevronLeft, ChevronRight, Mic, Music, Pause, Play, Search, Upload, UploadCloud } from "lucide-react";
 import { Modal, Spinner, useToast } from "../ui";
 import { errorText, newKey, seconds, uploadFile, useApi, useAuth, useVoices, bytes as formatBytes, type Asset, type LibraryItem, type LibraryKind, type User } from "../lib";
-import { voiceLabel } from "../../shared/voices";
+import type { Voice } from "../../shared/voices";
+import { musicMoods, type MusicMood } from "../../shared/series";
 import { planById } from "../../shared/plans";
 import "./pages.css";
 
@@ -254,22 +262,101 @@ export function PlayButton({ playing, onClick, label }: { playing: boolean; onCl
 
 /* ------------------------------------------------------------------------------------------------ voices */
 
+/** "Warm storyteller · British" */
+const voiceAbout = (v: Voice) => [v.description, v.accent].filter(Boolean).join(" · ");
+/** A voice's sample to play, or a quiet placeholder for one without. */
+function VoiceSample({ voice, audio }: { voice: Voice | undefined; audio: ReturnType<typeof usePreviewAudio> }) {
+  if (!voice?.preview) return <span className="play-btn none" title="No sample yet" aria-hidden="true"><Mic size={18} /></span>;
+  return <PlayButton playing={audio.playing === voice.id} onClick={() => audio.toggle(voice.id, voice.preview!)} label={`a sample of ${voice.name}`} />;
+}
 /**
- * The narration voice: the voices offered (Admin → Voices) and the current one when it no longer is (a video or
- * series keeps a voice hidden since), with a play button for the chosen voice's sample.
+ * The narration voice: the chosen one with a play button for its sample, and Change, which opens VoicePicker (every
+ * voice offered, each with its sample). A video or series keeps its voice when it is no longer offered.
  */
-export function VoiceSelect({ value, onChange, id }: { value: string; onChange: (id: string) => void; id?: string }) {
+export function VoiceSelect({ value, onChange, label = "Voice" }: { value: string; onChange: (id: string) => void; label?: string }) {
   const { voices, loading, byId } = useVoices();
   const audio = usePreviewAudio();
+  const [open, setOpen] = useState(false);
   const current = byId(value);
+  const name = current?.name ?? (loading ? "Loading voices…" : `${value[0]?.toUpperCase()}${value.slice(1)}`);
+  const about = current ? voiceAbout(current) : loading ? "" : "No longer offered";
   return (
-    <span className="voice-select">
-      <select id={id} className="select" value={value} onChange={(e) => { audio.stop(); onChange(e.target.value); }}>
-        {!current && <option value={value}>{loading ? "Loading voices…" : `${value[0]?.toUpperCase()}${value.slice(1)} (no longer offered)`}</option>}
-        {voices.map((v) => <option key={v.id} value={v.id}>{voiceLabel(v)}</option>)}
-      </select>
-      {current?.preview && <PlayButton playing={audio.playing === current.id} onClick={() => audio.toggle(current.id, current.preview!)} label={`a sample of ${current.name}`} />}
-    </span>
+    <div className="voice-select">
+      <VoiceSample voice={current} audio={audio} />
+      <button type="button" className="voice-choose" disabled={loading || !voices.length} onClick={() => { audio.stop(); setOpen(true); }}
+        aria-label={`${label}: ${name}${about ? `, ${about}` : ""}. Change`} aria-haspopup="dialog">
+        <span className="grow" style={{ minWidth: 0 }}>
+          <span className="name">{name}</span>
+          {about && <span className="small muted about">{about}</span>}
+        </span>
+        <span className="small accent-text voice-change" aria-hidden="true">Change</span>
+      </button>
+      {open && <VoicePicker value={value} onClose={() => setOpen(false)} onPick={(id) => { setOpen(false); onChange(id); }} />}
+    </div>
+  );
+}
+const genderNames = { female: "Female", male: "Male", neutral: "Neutral" } as const;
+/** Every voice offered (Admin → Voices) with its sample to play, filtered by gender and accent. */
+export function VoicePicker({ value, onPick, onClose }: { value: string; onPick: (id: string) => void; onClose: () => void }) {
+  const { voices, loading } = useVoices();
+  const audio = usePreviewAudio();
+  const [chosen, setChosen] = useState(value);
+  const [gender, setGender] = useState<Voice["gender"]>("");
+  const [accent, setAccent] = useState("");
+  const close = useStableCallback(() => { audio.stop(); onClose(); });
+  const pick = (id: string) => { audio.stop(); onPick(id); };
+  const genders = (["female", "male", "neutral"] as const).filter((g) => voices.some((v) => v.gender === g));
+  const accents = [...new Set(voices.map((v) => v.accent).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const shown = voices.filter((v) => (!gender || v.gender === gender) && (!accent || v.accent === accent));
+  const selected = voices.find((v) => v.id === chosen);
+  return (
+    <Modal title="Choose a voice" onClose={close} wide footer={
+      <>
+        <button type="button" className="btn" onClick={close}>Cancel</button>
+        <button type="button" className="btn primary" disabled={!selected} onClick={() => selected && pick(selected.id)}>
+          <Check size={16} aria-hidden="true" />{selected ? `Use ${selected.name}` : "Use this voice"}
+        </button>
+      </>
+    }>
+      <p className="small muted" style={{ margin: "0 0 12px" }}>Play a sample to hear a voice. The whole video is narrated in the voice you choose.</p>
+      {(genders.length > 1 || accents.length > 1) && (
+        <div className="tag-filter">
+          {genders.length > 1 && (
+            <span className="filter-group" role="group" aria-label="Voice">
+              <button type="button" className="chip button" aria-pressed={!gender} onClick={() => setGender("")}>All</button>
+              {genders.map((g) => <button key={g} type="button" className="chip button" aria-pressed={gender === g} onClick={() => setGender(gender === g ? "" : g)}>{genderNames[g]}</button>)}
+            </span>
+          )}
+          {accents.length > 1 && (
+            <span className="filter-group" role="group" aria-label="Accent">
+              {accents.map((a) => <button key={a} type="button" className="chip button tag-chip" aria-pressed={accent === a} onClick={() => setAccent(accent === a ? "" : a)}>{a}</button>)}
+            </span>
+          )}
+        </div>
+      )}
+      {loading ? <div className="stack">{Array.from({ length: 6 }, (_, i) => <div key={i} className="skeleton" style={{ height: 58 }} />)}</div> : !shown.length ? (
+        <div className="empty">
+          <h3>No voice is all of these</h3>
+          <button type="button" className="btn" onClick={() => { setGender(""); setAccent(""); }}>Clear filters</button>
+        </div>
+      ) : (
+        <ul className="pick-rows list-plain">
+          {shown.map((v) => (
+            <li key={v.id} className={`pick-row${v.id === chosen ? " selected" : ""}`}>
+              <VoiceSample voice={v} audio={audio} />
+              <button type="button" className="choose" aria-pressed={v.id === chosen} onClick={() => setChosen(v.id)} onDoubleClick={() => pick(v.id)}>
+                <span className="grow" style={{ minWidth: 0 }}>
+                  <span className="name" style={{ display: "block" }}>{v.name}</span>
+                  {v.description && <span className="small pick-description">{v.description}</span>}
+                  <span className="small muted">{[v.gender ? genderNames[v.gender] : "", v.accent, v.age].filter(Boolean).join(" · ") || (v.preview ? "" : "No sample yet")}</span>
+                </span>
+                {v.id === chosen && <Check size={18} aria-hidden="true" />}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Modal>
   );
 }
 /** For something new: when `value` is not an offered voice (a template's voice hidden since), the default voice. */
@@ -279,6 +366,57 @@ export function useOfferedVoice(value: string, onChange: (id: string) => void, e
   useEffect(() => {
     if (enabled && !loading && fallback && !voices.some((v) => v.id === value)) change(fallback);
   }, [enabled, loading, fallback, voices, value, change]);
+}
+
+/* ------------------------------------------------------------------------------------------------ music */
+
+/**
+ * Background music: a mood the writer picks a library track for (`moodName` names each: "Pick one that fits", "No
+ * music", "Calm"…), or a library track chosen in LibraryPicker, where every track can be heard first; a chosen track is
+ * shown with its own play button.
+ */
+export function MusicChoice({ label, mood, trackId, moodName, onChange, small = false }: {
+  label: string; mood: MusicMood; trackId: string | null; moodName: (m: MusicMood) => string;
+  onChange: (music: { mood: MusicMood; trackId: string | null }) => void; small?: boolean;
+}) {
+  const id = useId();
+  const audio = usePreviewAudio();
+  const [picking, setPicking] = useState(false);
+  // The track just picked; one chosen before (a series being edited) is looked up.
+  const [picked, setPicked] = useState<LibraryItem | null>(null);
+  const looked = useApi<{ items: LibraryItem[] }>(trackId && picked?.id !== trackId ? `/library?ids=${trackId}` : null);
+  const track = picked?.id === trackId ? picked : looked.data?.items.find((i) => i.id === trackId) ?? null;
+  // Tracks to choose from: the library may have none yet.
+  const library = useApi<{ items: LibraryItem[] }>("/library?kind=music&limit=1");
+  const tracks = !!trackId || !!library.data?.items.length;
+  const choose = () => { audio.stop(); setPicking(true); };
+  return (
+    <div className="field">
+      <span className={small ? "small" : undefined}><label htmlFor={id}>{label}</label></span>
+      <select id={id} className="select" value={trackId ? "track" : mood} onChange={(e) => {
+        audio.stop();
+        if (e.target.value === "track") setPicking(true);
+        else onChange({ mood: e.target.value as MusicMood, trackId: null });
+      }}>
+        {musicMoods.map((m) => <option key={m} value={m}>{moodName(m)}</option>)}
+        {tracks && <option value="track">{trackId ? `Track: ${track?.name ?? "chosen in the library"}` : "A track I choose (hear them first)…"}</option>}
+      </select>
+      {trackId ? (
+        <div className="music-track">
+          {track ? <PlayButton playing={audio.playing === track.id} onClick={() => audio.toggle(track.id, track.url)} label={track.name} />
+            : <span className="play-btn none" aria-hidden="true"><Music size={18} /></span>}
+          <span className="grow" style={{ minWidth: 0 }}>
+            <span className="name">{track?.name ?? (looked.loading ? "Loading…" : "No longer in the library")}</span>
+            {track && <span className="small muted">{seconds(track.duration)}{track.tags.length ? ` · ${track.tags.join(", ")}` : ""}</span>}
+          </span>
+          <button type="button" className="btn sm" onClick={choose}>Change</button>
+        </div>
+      ) : tracks && mood !== "none" && (
+        <span className="hint"><button type="button" className="link" onClick={choose}>Listen to the tracks</button> and choose one yourself.</span>
+      )}
+      {picking && <LibraryPicker kind="music" onClose={() => setPicking(false)} onPick={(i) => { setPicked(i); setPicking(false); onChange({ mood, trackId: i.id }); }} />}
+    </div>
+  );
 }
 
 /* ------------------------------------------------------------------------------------------------ uploads */

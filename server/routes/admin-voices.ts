@@ -2,11 +2,15 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { App } from "../types";
-import { now } from "../types";
+import { now, uid } from "../types";
 import { accountVoices, importVoice, voiceUsage, voiceView, type VoiceRow } from "../voices";
+import { speakSample } from "../providers/elevenlabs";
+import { ProviderError } from "../providers/http";
+import { SAMPLE_MAX_CHARS, sampleText } from "../../shared/voices";
 
 // Admin → Voices: the narration voices people can choose (server/voices.ts). Import from the ElevenLabs account, then
-// rename, describe, order, hide or make the default; a voice no video or series uses can be deleted.
+// rename, describe, order, hide or make the default; make each one's sample (what people play before choosing it); a
+// voice no video or series uses can be deleted.
 export const adminVoices = new Hono<App>();
 
 adminVoices.get("/", async (c) => {
@@ -53,6 +57,37 @@ adminVoices.patch("/:id", async (c) => {
   );
   // The default voice is always offered; making one the default takes it from the other.
   await c.env.DB.batch(d.default ? [c.env.DB.prepare("UPDATE voices SET is_default=0,updated_at=? WHERE is_default=1 AND id<>?").bind(now(), v.id), update] : [update]);
+  return c.json({ voice: voiceView((await c.env.DB.prepare("SELECT * FROM voices WHERE id=?").bind(v.id).first<VoiceRow>())!) });
+});
+const sampleFailures: Record<string, string> = {
+  VOICE_UNAVAILABLE: "ElevenLabs refused: check ELEVENLABS_API_KEY and the account's credits.",
+  VOICE_BUSY: "ElevenLabs is busy. Try again in a minute.",
+};
+/**
+ * Makes a voice's sample with ElevenLabs in place of the one it had: `text`, else the standard text (sampleText). It
+ * is spoken by the narration's model, so it sounds as the videos will; ElevenLabs bills its characters.
+ */
+adminVoices.post("/:id/sample", async (c) => {
+  const d = z.object({ text: z.string().trim().min(1).max(SAMPLE_MAX_CHARS).optional() }).parse(await c.req.json().catch(() => ({})));
+  const v = await c.env.DB.prepare("SELECT * FROM voices WHERE id=?").bind(c.req.param("id")).first<VoiceRow>();
+  if (!v) throw new HTTPException(404, { message: "Voice not found." });
+  if (!c.env.ELEVENLABS_API_KEY?.trim()) throw new HTTPException(503, { message: "Set ELEVENLABS_API_KEY first: samples are made with your ElevenLabs account." });
+  let audio: Uint8Array;
+  try {
+    audio = await speakSample(c.env, v.provider_id, d.text || sampleText(v.name));
+  } catch (e) {
+    const code = e instanceof ProviderError ? e.code : "";
+    throw new HTTPException(502, { message: sampleFailures[code] || "ElevenLabs couldn't make this sample. Try again, or change the text." });
+  }
+  // A key of its own: its address changes, and a sample made at the same moment never deletes this one.
+  const key = `voices/${v.id}/sample-${uid().slice(0, 8)}.mp3`;
+  await c.env.MEDIA.put(key, audio, { httpMetadata: { contentType: "audio/mpeg" } });
+  const saved = await c.env.DB.prepare("UPDATE voices SET preview_key=?,updated_at=? WHERE id=? AND preview_key IS ?").bind(key, now(), v.id, v.preview_key).run();
+  if (!saved.meta.changes) {
+    await c.env.MEDIA.delete(key);
+    throw new HTTPException(409, { message: "Another sample of this voice was just made. Reload to hear it." });
+  }
+  if (v.preview_key) await c.env.MEDIA.delete(v.preview_key);
   return c.json({ voice: voiceView((await c.env.DB.prepare("SELECT * FROM voices WHERE id=?").bind(v.id).first<VoiceRow>())!) });
 });
 adminVoices.delete("/:id", async (c) => {

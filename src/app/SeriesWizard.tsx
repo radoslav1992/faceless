@@ -8,9 +8,9 @@ import { StoryStylePicker } from "./StoryStyles";
 import { CaptionStylePicker } from "./CaptionPickers";
 import { PlatformBadge } from "./video-ui";
 import { connectPlatform, useConnectOutcome } from "./Channels";
-import { useOfferedVoice, VoiceSelect } from "./pickers";
+import { MusicChoice, useOfferedVoice, VoiceSelect } from "./pickers";
 import { isTemplate, seriesTemplates, templates, type TemplateId } from "../../shared/templates";
-import { defaultSeriesSettings, episodeCredits, episodeLengths, languages, lengthName, musicMoods, type SeriesSettings } from "../../shared/series";
+import { defaultSeriesSettings, episodeCredits, episodeLengths, languages, lengthName, type SeriesSettings } from "../../shared/series";
 import { videosPerMonth } from "../../shared/schedule";
 import { storyStyles } from "../../shared/story";
 import { platforms, type PlatformId } from "../../shared/social";
@@ -35,7 +35,6 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
   const t = templates[template];
   const set = (patch: Partial<SeriesSettings>) => onChange({ ...settings, ...patch });
   const accounts = useApi<{ accounts: Account[] }>(part === "content" ? null : "/accounts");
-  const music = useApi<{ items: LibraryItem[] }>(part === "posting" ? null : "/library?kind=music");
   const clips = useApi<{ items: LibraryItem[] }>(part === "posting" || t.kind !== "backdrop" ? null : "/library?kind=clip");
   const [time, setTime] = useState("12:00");
   const { pathname } = useLocation();
@@ -52,9 +51,9 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
           <label className="field"><span className="small">Narration language</span>
             <select className="select" value={settings.language} onChange={(e) => set({ language: e.target.value as SeriesSettings["language"] })}>{languages.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</select>
           </label>
-          <label className="field"><span className="small">Voice</span>
+          <div className="field"><span className="small">Voice</span>
             <VoiceSelect value={settings.voiceId} onChange={(voiceId) => set({ voiceId })} />
-          </label>
+          </div>
         </div>
         <div className="field"><span className="small">Length of each video</span>
           <div className="seg" role="group" aria-label="Length">
@@ -84,13 +83,8 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
       )}
       <Section title="Music and subtitles">
         <div className="form-row">
-          <label className="field"><span className="small">Music</span>
-            <select className="select" value={settings.music.trackId ? `track:${settings.music.trackId}` : settings.music.mood}
-              onChange={(e) => set({ music: e.target.value.startsWith("track:") ? { ...settings.music, trackId: e.target.value.slice(6) } : { ...settings.music, trackId: null, mood: e.target.value as SeriesSettings["music"]["mood"] } })}>
-              {musicMoods.map((m) => <option key={m} value={m}>{m === "auto" ? "A track that fits each episode" : m === "none" ? "No music" : `${m[0].toUpperCase()}${m.slice(1)} tracks`}</option>)}
-              {(music.data?.items || []).map((i) => <option key={i.id} value={`track:${i.id}`}>Always: {i.name}</option>)}
-            </select>
-          </label>
+          <MusicChoice label="Music" small mood={settings.music.mood} trackId={settings.music.trackId} onChange={({ mood, trackId }) => set({ music: { ...settings.music, mood, trackId } })}
+            moodName={(m) => (m === "auto" ? "A track that fits each episode" : m === "none" ? "No music" : `${m[0].toUpperCase()}${m.slice(1)} tracks`)} />
           <label className="field"><span className="small">Music volume: {Math.round(settings.music.volume * 100)}%</span>
             <input type="range" min={0} max={1} step={0.05} value={settings.music.volume} onChange={(e) => set({ music: { ...settings.music, volume: Number(e.target.value) } })} />
           </label>

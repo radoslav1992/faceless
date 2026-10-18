@@ -1,13 +1,15 @@
 import { useState, type FormEvent } from "react";
-import { ArrowDown, ArrowUp, Mic, Pencil, Plus, Search, Star, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, AudioLines, Mic, Pencil, Plus, Search, Star, Trash2 } from "lucide-react";
 import { Modal, Spinner, Switch, useToast } from "../ui";
 import { del, errorText, patch, post, reloadVoices, useApi } from "../lib";
 import { ConfirmDialog, Empty, PlayButton, usePreviewAudio, useStableCallback } from "./pickers";
-import type { Voice } from "../../shared/voices";
+import { SAMPLE_MAX_CHARS, sampleText, type Voice } from "../../shared/voices";
 
 // Admin → Voices: the narration voices people can choose (server/routes/admin-voices.ts). Voices come from the
 // ElevenLabs account with ElevenLabs' own details and sample; administrators rename, describe, order, hide them and
-// choose the default. A voice no video or series uses can be deleted; a used one can only be hidden.
+// choose the default, and make each one's sample: what people play before they choose it, spoken with the
+// narration's model from a text of theirs (or the standard one). A voice no video or series uses can be deleted; a
+// used one can only be hidden.
 
 type AdminVoice = Voice & { providerId: string; active: boolean; sort: number; usage: { series: number; videos: number } };
 type AccountVoice = { providerId: string; category: string; name: string; description: string; gender: string; accent: string; age: string; imported: string | null };
@@ -19,8 +21,11 @@ export function VoicesTab() {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<AdminVoice | null>(null);
   const [deleting, setDeleting] = useState<AdminVoice | null>(null);
+  const [sampling, setSampling] = useState<AdminVoice | null>(null);
+  const [filling, setFilling] = useState(false);
   const audio = usePreviewAudio();
   const voices = data?.voices || [];
+  const missing = voices.filter((v) => !v.preview);
   const changed = () => { reloadVoices(); void reload(); };
   const update = async (v: AdminVoice, changes: Record<string, unknown>, done = "Saved.") => {
     try {
@@ -53,7 +58,12 @@ export function VoicesTab() {
             <h2 id="voices-title">Voices</h2>
             <p className="muted small" style={{ margin: 0 }}>The voices people choose for narration, in this order. Hidden voices aren't offered, but videos and series that use one keep it.</p>
           </div>
-          <button type="button" className="btn primary" onClick={() => setAdding(true)}><Plus size={16} aria-hidden="true" />Add a voice</button>
+          <div className="row wrap" style={{ gap: 8 }}>
+            {missing.length > 0 && (
+              <button type="button" className="btn" onClick={() => { audio.stop(); setFilling(true); }}><AudioLines size={16} aria-hidden="true" />Make the missing samples ({missing.length})</button>
+            )}
+            <button type="button" className="btn primary" onClick={() => setAdding(true)}><Plus size={16} aria-hidden="true" />Add a voice</button>
+          </div>
         </div>
         {loading ? <div className="loading-page"><Spinner label="Loading voices" /></div> : error ? (
           <div className="notice bad" role="alert">{error} <button type="button" className="link" onClick={() => void reload()}>Try again</button></div>
@@ -69,7 +79,12 @@ export function VoicesTab() {
               <tbody>
                 {voices.map((v, i) => (
                   <tr key={v.id} className={v.active ? undefined : "muted"}>
-                    <td>{v.preview ? <PlayButton playing={audio.playing === v.id} onClick={() => audio.toggle(v.id, v.preview!)} label={`a sample of ${v.name}`} /> : <span className="small muted">None</span>}</td>
+                    <td>
+                      <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+                        {v.preview ? <PlayButton playing={audio.playing === v.id} onClick={() => audio.toggle(v.id, v.preview!)} label={`a sample of ${v.name}`} /> : <span className="small muted">None</span>}
+                        <button type="button" className="btn icon ghost" onClick={() => { audio.stop(); setSampling(v); }} aria-label={`Make a sample of ${v.name}`} title="Make a sample"><AudioLines size={16} /></button>
+                      </div>
+                    </td>
                     <td>
                       <span className="clip" style={{ fontWeight: 600 }}>{v.name}</span>
                       <span className="small muted">{v.description || "No description"}</span>
@@ -99,6 +114,24 @@ export function VoicesTab() {
       </section>
       {adding && <AddVoiceModal onClose={() => setAdding(false)} onAdded={(v) => { setAdding(false); changed(); toast(`${v.name} was added and is offered now.`, "good"); }} />}
       {editing && <EditVoiceModal voice={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); changed(); }} />}
+      {sampling && <SampleModal voice={sampling} onClose={() => setSampling(null)} onMade={() => { setSampling(null); changed(); toast(`${sampling.name} has a new sample.`, "good"); }} />}
+      {filling && (
+        <ConfirmDialog title="Make the missing samples?" confirmLabel={`Make ${missing.length} sample${missing.length > 1 ? "s" : ""}`} danger={false} onClose={() => setFilling(false)}
+          onConfirm={async () => {
+            // One at a time, with the standard text: ElevenLabs takes a few seconds for each.
+            try {
+              for (const v of missing) await post(`/admin/voices/${v.id}/sample`, {});
+              toast(`Made ${missing.length} sample${missing.length > 1 ? "s" : ""}.`, "good");
+            } finally {
+              changed();
+            }
+          }}>
+          <p>
+            Each of the {missing.length} voices without a sample ({missing.map((v) => v.name).join(", ")}) gets one, spoken with the standard text. ElevenLabs bills
+            about {missing.reduce((n, v) => n + sampleText(v.name).length, 0).toLocaleString()} characters in all. This takes a few seconds per voice.
+          </p>
+        </ConfirmDialog>
+      )}
       {deleting && (
         <ConfirmDialog title="Delete this voice?" onClose={() => setDeleting(null)} onConfirm={async () => {
           await del(`/admin/voices/${deleting.id}`);
@@ -173,6 +206,49 @@ function AddVoiceModal({ onClose, onAdded }: { onClose: () => void; onAdded: (v:
         </form>
         {problem && <p className="notice bad small" role="alert">{problem}</p>}
       </div>
+    </Modal>
+  );
+}
+
+/**
+ * Makes the voice's sample with ElevenLabs from a text (the standard one to start with), spoken by the narration's
+ * model; it replaces the sample the voice had.
+ */
+function SampleModal({ voice, onClose, onMade }: { voice: AdminVoice; onClose: () => void; onMade: () => void }) {
+  const [text, setText] = useState(sampleText(voice.name));
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const close = useStableCallback(() => { if (!busy) onClose(); });
+  const make = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setProblem(null);
+    try {
+      await post(`/admin/voices/${voice.id}/sample`, { text: text.trim() });
+      onMade();
+    } catch (err) {
+      setProblem(errorText(err));
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title={`A sample of ${voice.name}`} onClose={close}>
+      <form className="stack" onSubmit={make}>
+        <label className="field">
+          <span>What {voice.name} says</span>
+          <textarea className="textarea" rows={4} value={text} onChange={(e) => setText(e.target.value)} maxLength={SAMPLE_MAX_CHARS} required />
+          <span className="hint">
+            {text.trim().length} of {SAMPLE_MAX_CHARS} characters. People play it before they choose the voice; it is spoken with the same model as the videos. ElevenLabs bills a
+            character for each one.{voice.preview ? " It replaces the current sample." : ""}
+          </span>
+        </label>
+        <button type="button" className="link small" style={{ alignSelf: "flex-start" }} onClick={() => setText(sampleText(voice.name))} disabled={busy}>Use the standard text</button>
+        {problem && <p className="notice bad small" role="alert">{problem}</p>}
+        <div className="row" style={{ justifyContent: "flex-end" }}>
+          <button type="button" className="btn" onClick={close} disabled={busy}>Cancel</button>
+          <button type="submit" className="btn primary" disabled={busy || !text.trim()}>{busy && <Spinner label="Making the sample" />}Make the sample</button>
+        </div>
+      </form>
     </Modal>
   );
 }

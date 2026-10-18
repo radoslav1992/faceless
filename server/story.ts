@@ -278,6 +278,13 @@ export async function musicCatalog(env: Env, mood: string) {
   const fitting = mood === "auto" ? all : all.filter((m) => m.tags.toLowerCase().split(/[,\s]+/).includes(mood));
   return (fitting.length ? fitting : all).slice(0, 30).map((m, i) => ({ ref: `music${i + 1}`, id: m.id, name: m.name, tags: m.tags, description: m.description.slice(0, 160) }));
 }
+/** A library track the owner chose (heard in the music picker), as the writer's only music. */
+async function chosenTrack(env: Env, id: string) {
+  const m = await env.DB.prepare("SELECT id,name,tags,description FROM library_items WHERE id=? AND kind='music' AND active=1")
+    .bind(id).first<{ id: string; name: string; tags: string; description: string }>();
+  if (!m) throw new HTTPException(400, { message: "This track is no longer in the library. Choose another one." });
+  return [{ ref: "music1", id: m.id, name: m.name, tags: m.tags, description: m.description.slice(0, 160) }];
+}
 /** A background clip for storytime: the chosen one, else a random active library clip (null: none in the library). */
 export async function backdropFor(env: Env, chosen: string | null | undefined) {
   if (chosen && (await env.DB.prepare("SELECT 1 FROM library_items WHERE id=? AND kind='clip' AND active=1").bind(chosen).first())) return chosen;
@@ -299,6 +306,8 @@ const draftSchema = z.object({
   subject: z.string().trim().max(300).default(""),
   captions: z.object({ enabled: z.boolean(), style: z.enum(captionStyles) }).optional(),
   music: z.string().max(20).default("auto"),
+  /** A library track the owner chose: it plays whatever `music` says. */
+  musicTrackId: z.uuid().optional(),
   animate: z.number().int().min(0).max(3).default(0),
 });
 export type DraftRequest = z.input<typeof draftSchema>;
@@ -312,7 +321,7 @@ export async function draftVideo(env: Env, input: DraftRequest, recent: string[]
   // A voice asked for must be offered; the template's own is replaced by the default voice when it was hidden.
   if (d.voiceId && !(await voiceUsable(env, d.voiceId))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
   const style = d.style || t.style, voiceId = d.voiceId || (await offeredVoice(env, t.voice));
-  const catalog = await musicCatalog(env, d.music === "auto" ? t.music : d.music);
+  const catalog = d.musicTrackId ? await chosenTrack(env, d.musicTrackId) : await musicCatalog(env, d.music === "auto" ? t.music : d.music);
   const backdropId = t.kind === "backdrop" ? await backdropFor(env, null) : null;
   let concept: StoryConcept | null;
   // The owner's own words: a script (text to video), or a storytime story they wrote under its title question.
@@ -336,10 +345,10 @@ export async function draftVideo(env: Env, input: DraftRequest, recent: string[]
     });
   }
   if (!concept) throw new HTTPException(503, { message: "We couldn't write this video right now. Please try again in a minute." });
-  const music = concept.music ? catalog.find((m) => m.ref === concept!.music) : catalog[0];
+  const music = d.musicTrackId || !concept.music ? catalog[0] : catalog.find((m) => m.ref === concept!.music);
   const spec = conceptToSpec(concept, {
     kind: t.kind, voiceId, style, language: d.language, captions: d.captions, subject: d.subject, animate: d.animate,
-    music: music && d.music !== "none" ? { trackId: music.id, volume: t.kind === "backdrop" ? 0.18 : 0.25 } : null,
+    music: music && (d.musicTrackId || d.music !== "none") ? { trackId: music.id, volume: t.kind === "backdrop" ? 0.18 : 0.25 } : null,
     backdropId,
   });
   if (!spec) throw new HTTPException(502, { message: "The video we wrote didn't come out right. Please try again." });
