@@ -5,11 +5,12 @@ import { api, del, errorText, patch, post, reloadAvatars, useApi } from "../lib"
 import { ConfirmDialog, Empty, useStableCallback } from "./pickers";
 import { AvatarFace } from "./presenter-ui";
 import { presenterQualityInfo, type Avatar, type PresenterQuality } from "../../shared/presenter";
+import "./create.css";
 
 // Admin → Presenters (server/avatars.ts): the AI presenters people can put on camera. They come from HeyGen: its stock
-// avatars (offered after confirming the HeyGen plan allows it) or the account's own avatars, linked by ID (made in
-// HeyGen from a consenting person). Each is offered in the qualities its HeyGen engines allow; a used one can only
-// be hidden, never deleted.
+// avatars (picked from its library or added by ID, offered after confirming the HeyGen plan allows it) or the
+// account's own avatars, added by ID (made in HeyGen from a consenting person). Each is offered in the qualities its
+// HeyGen engines allow; a used one can only be hidden, never deleted.
 
 type AdminAvatar = Avatar & { lookId: string; engines: string[]; stock: boolean; active: boolean; sort: number; usage: number; createdAt: number };
 type StockLook = { id: string; name: string; gender: Avatar["gender"]; tags: string[]; qualities: PresenterQuality[]; added: string | null; image: string | null; page: string | null };
@@ -72,7 +73,7 @@ export function AvatarsTab() {
             </p>
           </div>
           <div className="row wrap" style={{ gap: 8 }}>
-            <button type="button" className="btn" disabled={!data?.enabled} onClick={() => setAdding("link")}><Link2 size={16} aria-hidden="true" />Link my own avatar</button>
+            <button type="button" className="btn" disabled={!data?.enabled} onClick={() => setAdding("link")}><Link2 size={16} aria-hidden="true" />Add by ID</button>
             <button type="button" className="btn primary" disabled={!data?.enabled} onClick={() => setAdding("stock")}><Plus size={16} aria-hidden="true" />Add from HeyGen</button>
           </div>
         </div>
@@ -240,9 +241,13 @@ function StockModal({ onClose, onAdded }: { onClose: () => void; onAdded: (a: Ad
   );
 }
 
-/** One of the HeyGen account's own avatars (or any avatar ID), with the confirmation that it may be offered. */
+/**
+ * An avatar by its HeyGen ID: one of HeyGen's stock avatars, or one of the account's own (made in HeyGen from a
+ * consenting person), each with its own confirmation that it may be offered.
+ */
 function LinkModal({ onClose, onAdded }: { onClose: () => void; onAdded: (a: AdminAvatar) => void }) {
   const [lookId, setLookId] = useState("");
+  const [source, setSource] = useState<"stock" | "own">("stock");
   const [rights, setRights] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -252,23 +257,28 @@ function LinkModal({ onClose, onAdded }: { onClose: () => void; onAdded: (a: Adm
     setBusy(true);
     setProblem(null);
     try {
-      onAdded((await post<{ avatar: AdminAvatar }>("/admin/avatars/link", { lookId: lookId.trim(), rightsConfirmed: rights })).avatar);
+      onAdded((await post<{ avatar: AdminAvatar }>(source === "stock" ? "/admin/avatars/stock" : "/admin/avatars/link", { lookId: lookId.trim(), rightsConfirmed: rights })).avatar);
     } catch (err) {
       setProblem(errorText(err));
       setBusy(false);
     }
   };
   return (
-    <Modal title="Link my own avatar" onClose={close}>
+    <Modal title="Add a presenter by ID" onClose={close}>
       <form className="stack" onSubmit={add}>
+        <div className="seg small-seg" role="group" aria-label="Whose avatar">
+          <button type="button" aria-pressed={source === "stock"} onClick={() => { setSource("stock"); setRights(false); }}>HeyGen stock avatar</button>
+          <button type="button" aria-pressed={source === "own"} onClick={() => { setSource("own"); setRights(false); }}>My own avatar</button>
+        </div>
         <p className="small muted" style={{ margin: 0 }}>
-          An avatar of your HeyGen account (Avatars → the avatar → its look ID). Only offer avatars of people who agreed to be offered as a presenter here — never a
-          likeness of someone who didn't.
+          {source === "stock"
+            ? "The look ID of one of HeyGen's public avatars, for one you found in HeyGen rather than in Add from HeyGen."
+            : "An avatar of your HeyGen account (Avatars → the avatar → its look ID). Only offer avatars of people who agreed to be offered as a presenter here — never a likeness of someone who didn't."}
         </p>
         <label className="field"><span>HeyGen avatar (look) ID</span>
           <input className="input" value={lookId} onChange={(e) => setLookId(e.target.value)} maxLength={160} spellCheck={false} autoComplete="off" required />
         </label>
-        <label className="check small"><input type="checkbox" checked={rights} onChange={(e) => setRights(e.target.checked)} /> The person in this avatar agreed to it being offered here, and my HeyGen plan allows it.</label>
+        <label className="check small"><input type="checkbox" checked={rights} onChange={(e) => setRights(e.target.checked)} /> {source === "stock" ? rightsText : "The person in this avatar agreed to it being offered here, and my HeyGen plan allows it."}</label>
         {problem && <p className="notice bad small" role="alert">{problem}</p>}
         <div className="row" style={{ justifyContent: "flex-end" }}>
           <button type="button" className="btn" onClick={close} disabled={busy}>Cancel</button>

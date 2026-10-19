@@ -268,6 +268,11 @@ describe("presenters in Admin → Presenters", () => {
     const own = await admin("POST", "/api/admin/avatars/link", { lookId: "look_own", rightsConfirmed: true });
     expect([own.status, own.data.avatar.stock, own.data.avatar.name]).toEqual([201, false, "Our founder"]);
     expect((await admin("POST", "/api/admin/avatars/link", { lookId: "look_missing", rightsConfirmed: true })).status).toBe(502);
+    // A stock avatar by its ID alone (not on the first page): read by itself, and marked as stock.
+    const byId = await admin("POST", "/api/admin/avatars/stock", { lookId: "look_dana", rightsConfirmed: true });
+    expect([byId.status, byId.data.avatar.stock, byId.data.avatar.name, byId.data.avatar.qualities]).toEqual([201, true, "Dana", ["regular", "high"]]);
+    expect((await admin("POST", "/api/admin/avatars/stock", { lookId: "look_missing", rightsConfirmed: true })).status).toBe(502);
+    await admin("DELETE", `/api/admin/avatars/${byId.data.avatar.id}`);
     expect((await admin("GET", "/api/admin/avatars/stock")).data.looks[0].added).toBe(anna.id);
 
     // What people see: name, gender, preview and qualities (never the HeyGen avatar behind it).
