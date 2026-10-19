@@ -175,14 +175,14 @@ describe("library", () => {
     };
     const describe = (body: object) => admin("POST", "/api/admin/library/describe", body);
 
-    // A clip: its frames, in order, to Gemini, with the name as data and the categories to choose from.
+    // A clip: its frames, in order, to Gemini, with its length and the categories to choose from (a name sent is ignored).
     const clip = await describe({ kind: "clip", name: "IMG 2041", duration: 12.4, frames: [jpeg(50), jpeg(60)] });
     expect(clip.status).toBe(200);
     expect(clip.data.suggestion).toEqual({ name: "Neon City Rain", description: "Rain falls on a neon-lit street at night.", category: "City", tags: ["rain", "neon", "night"] });
     const { model, input } = calls[0];
-    expect(model).toBe("google/gemini-3.8-flash");
+    expect(model).toBe("google/gemini-4-argon");
     expect(input.contents[0].parts).toEqual([
-      { text: JSON.stringify({ name: "IMG 2041", seconds: 12 }) },
+      { text: JSON.stringify({ seconds: 12 }) },
       { inlineData: { mimeType: "image/jpeg", data: jpeg(50) } },
       { inlineData: { mimeType: "image/jpeg", data: jpeg(60) } },
     ]);
@@ -195,9 +195,9 @@ describe("library", () => {
     expect(track.data.suggestion).toEqual({ name: "Late Night Lo-fi", description: "Mellow beats with soft keys.", category: "Lo-fi", tags: ["calm", "ambient", "piano", "slow"] });
     expect(calls[1].input.contents[0].parts[1]).toEqual({ inlineData: { mimeType: "audio/wav", data: wav() } });
     expect(calls[1].input.systemInstruction.parts[0].text).toMatch(/Ambient, Lo-fi, Cinematic[\s\S]*1 to 3 moods from this list that fit \(calm, upbeat/);
-    // The administrator's name is kept when it is a title, and guides the moods ("Lake Monster": dark, for scary stories).
-    expect(calls[1].input.systemInstruction.parts[0].text).toMatch(/current name exactly as it is when it is a real title[\s\S]*dark = scary, horror/);
-    expect(calls[1].input.systemInstruction.parts[0].text).toMatch(/"Lake Monster" is music for scary stories\): let it guide the moods, genre and description as far as what you hear allows/);
+    // Judged by the track alone: no name or other details are sent, and each mood is explained (a scary track is dark).
+    expect(calls[1].input.systemInstruction.parts[0].text).toMatch(/Judge only by what you hear[\s\S]*dark = scary, horror/);
+    expect(JSON.stringify(calls[1].input)).not.toContain("track01");
     env.DESCRIBE_MODEL = "google/gemini-3.7-flash";
     await describe({ kind: "image", name: "", frames: [jpeg(10)] });
     expect(calls[2].model).toBe("google/gemini-3.7-flash");

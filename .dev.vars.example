@@ -30,7 +30,7 @@ STRIPE_AUTOMATIC_TAX=
 
 # AI providers. Text (scripts, picture descriptions) runs on the Workers AI binding.
 TEXT_MODEL=
-# Optional multimodal model for "Fill in with AI" in Admin → Library (default google/gemini-3.8-flash).
+# Optional multimodal model for "Fill in with AI" in Admin → Library (default google/gemini-4-argon).
 DESCRIBE_MODEL=
 FAL_KEY=
 # Optional picture model (default openai/gpt-image-2.5/flare/text-to-image): its .../sunburst/text-to-image variant,

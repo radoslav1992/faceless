@@ -185,19 +185,19 @@ const isJpeg = (b: Uint8Array) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xf
 const isWav = (b: Uint8Array) => new TextDecoder().decode(b.subarray(0, 4)) === "RIFF" && new TextDecoder().decode(b.subarray(8, 12)) === "WAVE";
 /**
  * Suggests a file's name, description, genre or category and tags with a multimodal model (server/describe.ts), from
- * samples the administrator's browser made: the picture or frames of the clip as JPEGs, a part of the track as a WAV.
- * Nothing is saved; the suggestions fill the upload or edit form.
+ * samples the administrator's browser made: the picture or frames of the clip as JPEGs, a part of the track as a WAV
+ * (only those: the model judges the file, not what is filled in). Nothing is saved; the suggestions fill the form.
  */
 adminLibrary.post("/describe", async (c) => {
   const d = z.object({
-    kind: z.enum(libraryKinds), name: z.string().trim().max(200).default(""), duration: z.number().min(0).max(600).default(0),
+    kind: z.enum(libraryKinds), duration: z.number().min(0).max(600).default(0),
     frames: z.array(z.string().max(2_200_000)).max(8).default([]), audio: z.string().max(11_200_000).optional(),
   }).parse(await c.req.json());
   const frames = d.frames.map((f) => sample(f, 1.6 * MB, isJpeg));
   const audio = d.audio === undefined ? null : sample(d.audio, 8 * MB, isWav);
   const wanted = d.kind === "music" ? !!audio && !frames.length : !audio && frames.length > 0 && (d.kind === "clip" || frames.length === 1);
   if (!wanted || frames.some((f) => !f) || (d.audio !== undefined && !audio)) throw new HTTPException(400, { message: "These samples can't be described. Reload the page and try again." });
-  const suggestion = await describeMedia(c.env, { kind: d.kind, name: d.name, duration: d.duration, frames: frames as Uint8Array[], audio });
+  const suggestion = await describeMedia(c.env, { kind: d.kind, duration: d.duration, frames: frames as Uint8Array[], audio });
   if (!suggestion) throw new HTTPException(503, { message: "The AI couldn't describe this right now. Try again in a minute, or fill it in yourself." });
   return c.json({ suggestion });
 });
