@@ -180,7 +180,7 @@ describe("library", () => {
     expect(clip.status).toBe(200);
     expect(clip.data.suggestion).toEqual({ name: "Neon City Rain", description: "Rain falls on a neon-lit street at night.", category: "City", tags: ["rain", "neon", "night"] });
     const { model, input } = calls[0];
-    expect(model).toBe("google/gemini-2.5-flash");
+    expect(model).toBe("google/gemini-3.8-flash");
     expect(input.contents[0].parts).toEqual([
       { text: JSON.stringify({ name: "IMG 2041", seconds: 12 }) },
       { inlineData: { mimeType: "image/jpeg", data: jpeg(50) } },
@@ -195,6 +195,9 @@ describe("library", () => {
     expect(track.data.suggestion).toEqual({ name: "Late Night Lo-fi", description: "Mellow beats with soft keys.", category: "Lo-fi", tags: ["calm", "ambient", "piano", "slow"] });
     expect(calls[1].input.contents[0].parts[1]).toEqual({ inlineData: { mimeType: "audio/wav", data: wav() } });
     expect(calls[1].input.systemInstruction.parts[0].text).toMatch(/Ambient, Lo-fi, Cinematic[\s\S]*1 to 3 moods from this list that fit \(calm, upbeat/);
+    // The administrator's name is kept when it is a title, and guides the moods ("Lake Monster": dark, for scary stories).
+    expect(calls[1].input.systemInstruction.parts[0].text).toMatch(/current name exactly as it is when it is a real title[\s\S]*dark = scary, horror/);
+    expect(calls[1].input.systemInstruction.parts[0].text).toMatch(/"Lake Monster" is music for scary stories\): let it guide the moods, genre and description as far as what you hear allows/);
     env.DESCRIBE_MODEL = "google/gemini-3.7-flash";
     await describe({ kind: "image", name: "", frames: [jpeg(10)] });
     expect(calls[2].model).toBe("google/gemini-3.7-flash");
