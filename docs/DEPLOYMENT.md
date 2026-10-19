@@ -83,7 +83,7 @@ the Worker reads (`Env` in `server/types.ts`); `.dev.vars.example` lists them fo
 | `STRIPE_PRICE_STARTER_YEARLY`, `STRIPE_PRICE_DAILY_YEARLY`, `STRIPE_PRICE_DOUBLE_YEARLY`, `STRIPE_PRICE_STUDIO_YEARLY` | text | Yearly price IDs (section 3) |
 | `STRIPE_AUTOMATIC_TAX` | text | `true` when Stripe Tax is set up: tax, tax ID collection and a required billing address at checkout |
 | `TEXT_MODEL` | text | Optional Workers AI model for scripts and picture descriptions (default `openai/gpt-6-luna`) |
-| `DESCRIBE_MODEL` | text | Optional multimodal model (images and audio) that fills in library items' details in Admin → Library (default `google/gemini-2.5-flash`) |
+| `DESCRIBE_MODEL` | text | Optional multimodal model (images and audio) that fills in library items' details in Admin → Library (default `google/gemini-3.8-flash`) |
 | `FAL_KEY` | secret | AI pictures (`openai/gpt-image-2.5/flare/text-to-image`) and clips: `fal-ai/kling-video/v2.5-turbo/standard/image-to-video` at regular quality (720p) and `…/pro/image-to-video` at high quality (1080p) |
 | `FAL_IMAGE_MODEL` | text | Optional picture model: `openai/gpt-image-2.5/sunburst/text-to-image`, `fal-ai/nano-banana-2` or `fal-ai/flux/schnell` (cheapest); anything else uses the default |
 | `FAL_IMAGE_QUALITY` | text | Optional GPT Image 2.5 quality: `low`, `medium`, `high` (default), `xhigh` or `max`. Each step up costs more per picture |

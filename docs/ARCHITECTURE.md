@@ -173,8 +173,9 @@ An item marked as AI-made makes the video that shows it AI-made (`compose.synthe
 samples of the file (the picture or 6 frames spread over a clip as JPEGs of at most 720 to 1024 pixels, or a minute of a
 track as a mono 22 kHz WAV, so any format and size works), `POST /api/admin/library/describe` checks them (JPEG or WAV,
 fitting the kind, under 1.6 or 8 MB) and `describeMedia` (`server/describe.ts`) has a multimodal model, `DESCRIBE_MODEL`
-(default `google/gemini-2.5-flash` through the Workers AI binding), suggest a name, description, genre or category from
-the list and tags (for music, moods from the app's list first). Nothing is saved: the suggestions fill the form to check.
+(default `google/gemini-3.8-flash` through the Workers AI binding), suggest a name, description, genre or category from
+the list and tags (for music, moods from the app's list first, each mood explained so a scary track is `dark`). A name
+the administrator gave (a title, not a file name) is kept and read as what the item is for. Nothing is saved: the suggestions fill the form to check.
 `GET /api/admin/library/:id/file` serves an item's file to administrators even when it is switched off.
 People hear tracks before choosing them: `MusicChoice` (Create, a series) offers a mood the writer picks a track of
 (`musicCatalog`) or a track chosen in `LibraryPicker`, where every track has a play button, and shows the chosen one
