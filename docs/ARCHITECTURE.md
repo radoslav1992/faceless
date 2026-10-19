@@ -140,8 +140,8 @@ it once hidden (`voiceUsable` with the kept voice), and a template whose voice w
 `src/app/AdminAvatars.tsx`; ported from rech-bg's HeyGen avatars). An on-screen AI presenter speaks a narrated video's
 ElevenLabs voice, lip-synced by HeyGen. Administrators add HeyGen's stock avatars (`GET /api/admin/avatars/stock` pages
 `/v3/avatars/looks?ownership=public`, 50 at a time, its previews proxied because the page's policy allows only our own
-images; `POST /api/admin/avatars/stock`) or link one of the account's own by its look ID (`POST
-/api/admin/avatars/link`), each after confirming that the HeyGen plan (and, for an own avatar, the person in it) allows
+images; `POST /api/admin/avatars/stock`, which also takes a stock avatar's look ID alone) or link one of the account's
+own by its look ID (`POST /api/admin/avatars/link`), each after confirming that the HeyGen plan (and, for an own avatar, the person in it) allows
 offering it. Each keeps a copy of its preview (`avatars/<id>/preview.<ext>`, served at
 `/api/public/avatars/:id/preview`) and the engines HeyGen lists for it, which decide its qualities: regular (Avatar IV)
 and high (Avatar V); `POST /api/admin/avatars/:id/check` reads them again. They are renamed, ordered and hidden like

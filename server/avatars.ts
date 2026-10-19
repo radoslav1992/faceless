@@ -133,7 +133,7 @@ adminAvatars.get("/stock/image", async (c) => {
   return new Response(image.bytes, { headers: { "Content-Type": image.mime, "Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff" } });
 });
 const rights = z.boolean().default(false).refine((v) => v, "Confirm that your HeyGen plan lets you offer this avatar to your users.");
-/** Adds one of HeyGen's stock avatars (as listed on the page the administrator picked it from). */
+/** Adds one of HeyGen's stock avatars: picked from a page of the list (`page`), or by its look ID (read by itself). */
 adminAvatars.post("/stock", async (c) => {
   await rate(c, "avatar-add", 120, 3600, c.get("user").id);
   requireHeyGen(c.env);
