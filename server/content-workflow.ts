@@ -10,6 +10,8 @@ import { extOf, head, imageInfo, mediaKey, serveObject, storedDuration, storeStr
 import { fetchOutput } from "./providers/http";
 import { falResult, falStatus, submitFal, type FalTicket } from "./providers/fal";
 import { forcedAlignment, speak } from "./providers/elevenlabs";
+import { avatarVideoStatus, submitAvatarVideo } from "./providers/heygen";
+import { avatarFor, forgetHeyGenVideo } from "./avatars";
 import { releaseRender, renderFailures, renderFile, renderStatus, submitRender } from "./renderer";
 import { planRender, type Media, type Plan, type PlanContext } from "./render-plan";
 import { failAsset } from "./media";
@@ -21,15 +23,17 @@ import { narrationContext } from "./story";
 import { runEpisode, videoReady, videoFailed } from "./series";
 import { LONG_VIDEO_SECONDS, SPEECH_MAX_SECONDS, speechSpans } from "../shared/speech";
 import {
-  isHighlight, narrationCurrent, pendingMedia, referencedAssets, referencedLibrary, specSchema, trackKey, type HighlightSpec, type PendingMedia, type Spec, type StorySpec,
+  isHighlight, narrationCurrent, pendingMedia, presenterKey, presenterNeeded, referencedAssets, referencedLibrary, specSchema, trackKey,
+  type HighlightSpec, type PendingMedia, type Spec, type StorySpec,
 } from "../shared/formats";
+import { PRESENTER_ENGINES } from "../shared/presenter";
 import { trackSchema, type Track } from "../shared/track";
 import { narrationKey, storyScript, textWords } from "../shared/story";
 import { PRODUCT } from "../shared/brand";
 import type { RenderPayload, RenderStatus } from "../shared/render";
 
-// A run makes a video ready: the AI pictures and clips it asks for, its AI voice (a clip of a long video: where its
-// people are), then the render (the video and its cover). A run of kind "speech" transcribes a long video for credits.
+// A run makes a video ready: the AI pictures and clips it asks for, its AI voice and its presenter speaking it (a clip
+// of a long video: where its people are), then the render (the video and its cover). A run of kind "speech" transcribes a long video for credits.
 // Paid provider calls are made once: a claim is stored before each call and its ticket right after, so a retried step
 // polls the existing job instead of paying again; a claim without a ticket (the answer was lost) fails the run and
 // refunds the credits. The same workflow checks uploads (`inspectId`; videos imported from a link are downloaded first,
@@ -68,6 +72,13 @@ const messages: Record<string, string> = {
   GENERATION_UNCERTAIN: "We lost track of an AI picture request. Try again.",
   VOICE_UNAVAILABLE: "AI voices are temporarily unavailable. Try again later.",
   VOICE_FAILED: "The voice couldn't be recorded. Try again.",
+  AVATAR_UNAVAILABLE: "On-screen presenters are temporarily unavailable. Try again later, or remove the presenter.",
+  AVATAR_BUSY: "The presenter service is busy. Try again in a few minutes.",
+  AVATAR_FAILED: "The presenter's video couldn't be made. Try again.",
+  AVATAR_REJECTED: "The presenter's video was refused by the provider's content rules. Change the words and try again.",
+  AVATAR_UNCERTAIN: "We lost track of the presenter's video. Try again.",
+  AVATAR_TIMEOUT: "The presenter's video took too long. Try again.",
+  AVATAR_GONE: "This presenter is no longer available. Choose another one.",
   VIDEO_INVALID: "This video's settings aren't valid any more. Open it and save it again.",
 };
 /** Fails a run exactly once (the trigger refunds its credits) and tells its video why. */
@@ -129,6 +140,11 @@ export class ContentGeneration extends WorkflowEntrypoint<Env, Job> {
       await step.do("stop-renders", async () => {
         const s = await readState(e, id);
         for (const [name, job] of Object.entries(s.jobs || {})) if (s.slots?.[name] !== undefined) await releaseRender(e, s.slots[name], job);
+      });
+      // HeyGen's copy of a presenter video this run asked for (made or not) is deleted.
+      await step.do("stop-presenter", async () => {
+        const job = (await readState(e, id)).tickets?.presenter;
+        if (typeof job === "string") await forgetHeyGenVideo(e, job);
       });
       await step.do("fail", () => failRun(e, id, code));
     }
@@ -224,7 +240,68 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
   }
   // The AI voice, after the pictures (a refused picture stops the run before the voice is paid for).
   if (first.narration.kind === "voice" && !narrationCurrent(first)) await makeNarration(e, step, run, first, phase);
+  // The presenter speaking the recorded voice, after it.
+  if (first.presenter) {
+    const voiced = await step.do("spec-voiced", () => loadSpec(e, videoId)) as StorySpec;
+    if (presenterNeeded(voiced)) await makePresenter(e, step, run, voiced, phase);
+  }
   await renderAndSave(e, step, run, phase);
+}
+
+/**
+ * The presenter's video (HeyGen), paid once: the avatar lip-synced to the whole recorded voice (a capability link
+ * HeyGen reads), so the render can cut it into any scenes and keep it in time. Saved as an AI clip of the video's; then
+ * HeyGen's copy is deleted. HeyGen takes a few minutes per minute of voice: it is waited for up to 50 minutes.
+ */
+async function makePresenter(e: Env, step: WorkflowStep, run: RunInfo, spec: StorySpec, phase: Phase) {
+  const p = spec.presenter!, voiceAssetId = spec.generated?.voiceAssetId;
+  if (!voiceAssetId) throw new Error("VOICE_FAILED");
+  const job = await step.do("presenter-submit", once, async () => {
+    const s = await readState(e, run.id);
+    if (typeof s.tickets?.presenter === "string") return s.tickets.presenter;
+    if (s.claims?.presenter) throw new Error("AVATAR_UNCERTAIN");
+    // A hidden avatar still speaks for the videos that have it; a deleted one (or a quality it lost) cannot.
+    const avatar = await avatarFor(e, p.avatarId);
+    if (!avatar || !avatar.qualities.includes(p.quality)) throw new Error("AVATAR_GONE");
+    const voice = await e.DB.prepare("SELECT object_key FROM media_assets WHERE id=? AND user_id=? AND status='ready'").bind(voiceAssetId, run.user_id).first<{ object_key: string }>();
+    if (!voice) throw new Error("VOICE_FAILED");
+    const audio = await inputUrl(e, run.id, voice.object_key);
+    await patchState(e, run.id, (s) => { (s.claims ||= {}).presenter = true; });
+    await phase("presenter");
+    const videoId = await submitAvatarVideo(e, `${run.id}-presenter`, avatar.lookId, PRESENTER_ENGINES[p.quality], audio);
+    await patchState(e, run.id, (s) => { (s.tickets ||= {}).presenter = videoId; });
+    return videoId;
+  });
+  let url = "";
+  for (let i = 0; i < 150 && !url; i++) {
+    const status = await step.do(`presenter-status-${i}`, { retries: { limit: 2, delay: "10 seconds" }, timeout: "1 minute" }, () => avatarVideoStatus(e, job));
+    if (status.done) url = status.url;
+    else await step.sleep(`presenter-wait-${i}`, "20 seconds");
+  }
+  if (!url) throw new Error("AVATAR_TIMEOUT");
+  const assetId = await step.do("presenter-save", safe, async () => {
+    const s = await readState(e, run.id);
+    const existing = s.assets?.presenter && await e.DB.prepare("SELECT id FROM media_assets WHERE id=? AND status='ready'").bind(s.assets.presenter).first();
+    if (existing) return s.assets!.presenter;
+    // A fresh download link when this is tried again later (HeyGen's links expire).
+    const fresh = await avatarVideoStatus(e, job).catch(() => null);
+    const assetId = s.assets?.presenter || uid();
+    await patchState(e, run.id, (st) => { (st.assets ||= {}).presenter = assetId; });
+    const key = mediaKey(run.user_id, assetId, "mp4");
+    const bytes = await storeStream(e, key, await fetchOutput(fresh?.done ? fresh.url : url, AbortSignal.timeout(240000)), 400 * MB, "video/mp4");
+    const duration = (await storedDuration(e, key, bytes)) ?? 0;
+    const name = (await avatarFor(e, p.avatarId))?.name || "Presenter";
+    await e.DB.prepare(
+      "INSERT OR REPLACE INTO media_assets(id,user_id,video_id,kind,name,object_key,mime,bytes,duration,width,height,status,meta,created_at,updated_at) VALUES (?,?,?,'ai_clip',?,?,'video/mp4',?,?,0,0,'ready',?,?,?)",
+    ).bind(assetId, run.user_id, run.video_id, `AI presenter: ${name}`.slice(0, 160), key, bytes, duration,
+      JSON.stringify({ ai: true, presenter: true, avatarId: p.avatarId, quality: p.quality }), now(), now()).run();
+    return assetId;
+  });
+  await step.do("presenter-apply", () => updateSpec(e, run.video_id, (s) => {
+    s.presented = { key: presenterKey(spec), assetId, voiceAssetId };
+  }));
+  // Ours is saved: HeyGen's copy goes (retried hourly while HeyGen can't be reached).
+  await step.do("presenter-forget", safe, () => forgetHeyGenVideo(e, job));
 }
 
 /** The render of the video's final spec, then its files saved and the ones it no longer uses deleted. */

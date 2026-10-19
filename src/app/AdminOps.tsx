@@ -24,7 +24,7 @@ type Operations = {
   reviews: { area: "runs" | "cleanup"; ref: string; requestId: string | null; reason: string; createdAt: number }[];
 };
 const platformNames: Record<string, string> = { tiktok: "TikTok", instagram: "Instagram", youtube: "YouTube" };
-const serviceNames: Record<string, string> = { fal: "fal", elevenlabs: "ElevenLabs", renderer: "Renderer", other: "Runs (other)", speech: "Transcription" };
+const serviceNames: Record<string, string> = { fal: "fal", elevenlabs: "ElevenLabs", heygen: "HeyGen", renderer: "Renderer", other: "Runs (other)", speech: "Transcription" };
 /** "publish:tiktok" → "Publishing · TikTok"; a service area → its name. */
 function areaName(area: string) {
   const [kind, platform] = area.split(":");

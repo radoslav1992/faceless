@@ -10,9 +10,10 @@ import { operationsSnapshot } from "../operations";
 import { adminVoices } from "./admin-voices";
 import { adminLibrary } from "./admin-library";
 import { adminExamples } from "../examples";
+import { adminAvatars } from "../avatars";
 
 // Administration: health and operations, withdrawals and plan grants, the narration voices, the shared library (music
-// by mood, clips and pictures), each style's example video and contact messages.
+// by mood, clips and pictures), each style's example video, the presenters' avatars and contact messages.
 export const admin = new Hono<App>();
 admin.use("*", async (c, next) => {
   if (!isAdmin(c.env, c.get("user"))) throw new HTTPException(404, { message: "Not found." });
@@ -24,6 +25,7 @@ admin.route("/grants", planGrants);
 admin.route("/voices", adminVoices);
 admin.route("/library", adminLibrary);
 admin.route("/examples", adminExamples);
+admin.route("/avatars", adminAvatars);
 admin.get("/overview", async (c) => {
   const since = now() - DAY;
   const one = async (sql: string, ...args: unknown[]) => (await c.env.DB.prepare(sql).bind(...args).first<{ n: number }>())?.n || 0;
@@ -42,7 +44,7 @@ admin.get("/overview", async (c) => {
     config: {
       media: c.env.MEDIA_ENABLED === "true", fal: !!c.env.FAL_KEY, elevenlabs: !!c.env.ELEVENLABS_API_KEY,
       stripe: !!c.env.STRIPE_SECRET_KEY, billing: c.env.BILLING_ENABLED === "true", tokens: !!c.env.TOKEN_ENCRYPTION_KEY,
-      tiktok: !!c.env.TIKTOK_CLIENT_KEY, instagram: !!c.env.INSTAGRAM_APP_ID, youtube: !!c.env.GOOGLE_CLIENT_ID,
+      heygen: !!c.env.HEYGEN_API_KEY, tiktok: !!c.env.TIKTOK_CLIENT_KEY, instagram: !!c.env.INSTAGRAM_APP_ID, youtube: !!c.env.GOOGLE_CLIENT_ID,
     },
   });
 });

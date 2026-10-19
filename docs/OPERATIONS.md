@@ -27,7 +27,7 @@ under `/api/admin` answers 404 to anyone else.
 
 - **Overview**: counts (users and new users, paying customers, free months, videos made and published in 24 hours,
   active series, active and failed runs, failed publications) and the configuration: rendering (`MEDIA_ENABLED`), fal,
-  ElevenLabs, Stripe, billing, token encryption, TikTok, Instagram, YouTube.
+  ElevenLabs, HeyGen, Stripe, billing, token encryption, TikTok, Instagram, YouTube.
 - **Operations**: the last hourly maintenance and its failed stages (a warning when none finished in 2 hours); tiles
   for runs open over an hour, publications publishing over an hour, scheduled posts overdue by 15 minutes and cleanup
   waiting over a day; failures of the last 24 hours (runs by service and code, publishing by network and message, stats
@@ -39,6 +39,13 @@ under `/api/admin` answers 404 to anyone else.
   sample** (the waveform button) has ElevenLabs speak a text of yours, or the standard one ("Hi, I'm George…", about
   ten seconds of a story), with the same model as the videos, in place of the sample the voice had; **Make the missing
   samples** does it for every voice without one. ElevenLabs bills a character per character (about 160 a sample).
+- **Presenters**: the AI presenters people can put on camera (with `HEYGEN_API_KEY` set). **Add from HeyGen** pages
+  through HeyGen's stock avatars (filters: gender, HQ only, name or tag among the ones loaded): pick one, confirm your
+  HeyGen plan lets you offer it, add it. **Link my own avatar** takes the look ID of an avatar of your HeyGen account;
+  only link avatars of people who agreed to be offered here. Each shows the qualities HeyGen can animate it in (Regular:
+  Avatar IV; High: Avatar V); the refresh button reads them again. Rename, order or hide them; one a video has can only
+  be hidden. Every presenter video is billed to the HeyGen account's API credits (about $0.04 a second in regular
+  quality, $0.12 in high), while people pay 1 or 3 credits per 5 seconds.
 - **Library**: the shared music, clips and pictures people search and pick from. Upload (kind, file up to 50 MB or
   a 20 MB picture, name, genre for music or category for clips and pictures, description, tags with suggestions, the
   AI mark; **Fill in with AI** suggests the details from the chosen file before you upload) or **Add from my media** (your uploads and
@@ -96,7 +103,7 @@ The thresholds are constants at the top of `server/operations.ts` (`FAILURE_BURS
 ## 4. Failure codes
 
 Runs store a short code (`runs.error`); people see a plain message on the video and "Your credits were refunded". The
-summary groups codes by prefix: `GENERATION_` is fal, `VOICE_` and `SPEECH_` are ElevenLabs, `RENDER…` and
+summary groups codes by prefix: `GENERATION_` is fal, `VOICE_` and `SPEECH_` are ElevenLabs, `AVATAR_` is HeyGen, `RENDER…` and
 `MEDIA_TIMEOUT` the renderer, everything else "Other". A run of kind `speech` transcribes a long video for credits (no
 video is attached to it); its failure refunds the credits and the Clips page says the video couldn't be transcribed.
 
@@ -111,6 +118,11 @@ video is attached to it); its failure refunds the credits and the Clips page say
 | `VOICE_UNAVAILABLE` | ElevenLabs refused the key or plan (401/402), or the key or voice is missing |
 | `VOICE_BUSY` | ElevenLabs rate or concurrency limit (429) |
 | `VOICE_FAILED` | the narration failed, or a retried step found a claimed voice without its result |
+| `AVATAR_UNAVAILABLE` | HeyGen refused the key or the account has no API credits left (401/402/403, or `HEYGEN_API_KEY` missing) |
+| `AVATAR_BUSY` | HeyGen rate limit (429) |
+| `AVATAR_FAILED`, `AVATAR_REJECTED` | HeyGen failed the presenter video, or refused it under its content rules (caused by the request) |
+| `AVATAR_TIMEOUT`, `AVATAR_UNCERTAIN` | the presenter video wasn't done in 50 minutes, or a claimed request lost its answer: HeyGen may still bill it (section 5) |
+| `AVATAR_GONE` | the video's presenter was deleted, or HeyGen no longer animates it in the quality chosen |
 | `SPEECH_UNAVAILABLE`, `SPEECH_BUSY`, `SPEECH_FAILED` | Scribe refused the key or plan, was rate limited, or failed transcribing a long video |
 | `SPEECH_UNCERTAIN` | a paid transcription was claimed but its answer was lost: it may have been billed by ElevenLabs |
 | `SPEECH_INVALID` | the video to transcribe was deleted or changed before the run started. Caused by the request |
@@ -154,9 +166,13 @@ a manual check** with fal's request ID:
 - reason `uncertain`: a request was claimed but no ticket was stored (`GENERATION_UNCERTAIN`; there is no request ID);
 - reason `failed`: the run failed for another reason (`INTERNAL`) while fal work was open.
 
-What to do: open fal's dashboard, find the request, and cancel it or note what it billed. Rows are kept 90 days.
+A presenter video still being made at HeyGen (`AVATAR_TIMEOUT`, `AVATAR_UNCERTAIN`) is set aside the same way, as
+"HeyGen video <id>" (the run already asked HeyGen to delete it).
 
-Storage cleanup refuses any key outside `media/` and `library/` (`drainCleanup`): nothing is deleted, `Storage cleanup
+What to do: open fal's (or HeyGen's) dashboard, find the request, and cancel it or note what it billed. Rows are kept 90 days.
+
+Storage cleanup refuses any key outside `media/`, `library/`, `examples/` and `avatars/` (`drainCleanup`; HeyGen
+copies waiting for deletion, `heygen/…`, are not files of ours and are handled apart): nothing is deleted, `Storage cleanup
 refused` is logged, and the row moves to the same list (area "Storage cleanup", reason `refused`). A refused row means
 a bug or a new kind of key; when a feature stores files under another prefix, extend the check and its test.
 
@@ -220,6 +236,11 @@ again by itself.
   hidden so nobody new chooses it. Forced alignment failing
   (`Narration timing unavailable`, `Forced alignment failed`) only costs exact timings; Scribe failing (`Speech not
   found`) only costs transcripts of uploads.
+- **HeyGen** (`AVATAR_*`): check the API key and the account's API credits in HeyGen. A failed run asks HeyGen to
+  delete the video it requested; `HeyGen copy will be deleted later` means the delete failed and is retried hourly
+  (`HeyGen copy could not be deleted; remove it in HeyGen` after two weeks: delete it in HeyGen by hand). A presenter
+  HeyGen stopped supporting can be hidden in Admin → Presenters (its videos then fail with `AVATAR_GONE` only if they
+  need a new presenter video).
 - **Renderer** (`RENDERER_UNAVAILABLE`, `MEDIA_TIMEOUT`, `MEDIA_LOST`): check Containers in the dashboard (instances
   running, the latest image rolled out, errors). Three containers render one job each; more work waits for a free
   one, and runs time out after about 40 minutes of waiting or rendering. A fourth (`download-0`) only downloads

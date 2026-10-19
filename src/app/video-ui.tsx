@@ -6,7 +6,7 @@ import { platforms, type PlatformId } from "../../shared/social";
 // Small pieces every list of videos shares: where a video is in its making, its card, its posts.
 
 const phases: Record<string, string> = {
-  images: "Drawing the pictures", clip: "Animating a scene", voice: "Recording the voice", tracking: "Finding the speaker", rendering: "Rendering the video", saving: "Saving",
+  images: "Drawing the pictures", clip: "Animating a scene", voice: "Recording the voice", presenter: "Filming the presenter", tracking: "Finding the speaker", rendering: "Rendering the video", saving: "Saving",
 };
 /** What a video being made is doing right now. */
 export const phaseText = (v: Pick<Video, "phase" | "renderStatus">) => (v.renderStatus === "queued" ? "Waiting to start" : phases[v.phase || ""] || "Getting started");

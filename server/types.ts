@@ -47,6 +47,8 @@ export interface Env {
   /** Multimodal model that suggests library items' details from a picture, clip frames or a part of a track (server/describe.ts). */
   DESCRIBE_MODEL?: string;
   FAL_KEY?: string;
+  /** HeyGen: on-screen presenters (avatars lip-synced to the narration; server/providers/heygen.ts). */
+  HEYGEN_API_KEY?: string;
   /** fal model for scene pictures: GPT Image 2.5 Flare by default, or its Sunburst variant, "fal-ai/nano-banana-2" or "fal-ai/flux/schnell". */
   FAL_IMAGE_MODEL?: string;
   /** GPT Image 2.5's quality: low, medium, high (default), xhigh or max. */

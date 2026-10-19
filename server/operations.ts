@@ -40,11 +40,12 @@ export async function recordStageFailures(e: Env, failed: string[]) {
   await writeState(e, "stages", Object.fromEntries(Object.entries(merged).filter(([, at]) => at > t - DAY)));
 }
 
-export type ServiceArea = "fal" | "elevenlabs" | "renderer" | "other";
+export type ServiceArea = "fal" | "elevenlabs" | "heygen" | "renderer" | "other";
 /** The service a run's failure code points at (its prefix, see server/providers/http.ts failureCode). */
 export function serviceOf(code: string): ServiceArea {
   if (code.startsWith("GENERATION_")) return "fal";
   if (code.startsWith("VOICE_") || code.startsWith("SPEECH_")) return "elevenlabs";
+  if (code.startsWith("AVATAR_")) return "heygen";
   if (code.startsWith("RENDER") || code === "MEDIA_TIMEOUT") return "renderer";
   return "other";
 }
@@ -63,7 +64,7 @@ const RUN_OVERDUE = 3 * HOUR + 15 * MINUTE;
 const PUBLISH_OVERDUE = 15 * MINUTE;
 
 const serviceNames: Record<ServiceArea, string> = {
-  fal: "fal (AI pictures and clips)", elevenlabs: "ElevenLabs (voices)",
+  fal: "fal (AI pictures and clips)", elevenlabs: "ElevenLabs (voices)", heygen: "HeyGen (presenters)",
   renderer: "Renderer (videos)", other: "Other run failures",
 };
 const labels: Record<string, string> = {
@@ -101,7 +102,7 @@ export async function attention(e: Env) {
   // Failed runs of the last hour by code (runs live 3 hours at most, so the created_at bound keeps it on the index).
   const codes = (await e.DB.prepare("SELECT error AS code,COUNT(*) AS n FROM runs WHERE status='failed' AND created_at>? AND updated_at>? GROUP BY error")
     .bind(t - 4 * HOUR, t - HOUR).all<{ code: string | null; n: number }>()).results;
-  const services: Record<ServiceArea, Record<string, number>> = { fal: {}, elevenlabs: {}, renderer: {}, other: {} };
+  const services: Record<ServiceArea, Record<string, number>> = { fal: {}, elevenlabs: {}, heygen: {}, renderer: {}, other: {} };
   for (const c of codes) {
     const code = c.code || "INTERNAL";
     if (!userCaused(code)) services[serviceOf(code)][code] = (services[serviceOf(code)][code] || 0) + Number(c.n);
@@ -181,19 +182,22 @@ export function firstSentence(message: string | null) {
   return (message || "").split(/(?<=\.)\s/)[0].trim().slice(0, 100) || "—";
 }
 /**
- * Failed runs that may have left paid work running at a provider (a fal request still in its queue): the run gave up
+ * Failed runs that may have left paid work running at a provider (a fal request still in its queue, a HeyGen video): the run gave up
  * and refunded the credits, but the provider may finish and bill. Each is set aside once.
  */
 export async function reviewRuns(e: Env) {
   const t = now();
   const rows = (await e.DB.prepare(
-    "SELECT id,error,provider FROM runs WHERE status='failed' AND created_at>? AND updated_at>? AND error IN ('GENERATION_TIMEOUT','GENERATION_UNCERTAIN','MEDIA_TIMEOUT','INTERNAL') LIMIT 200",
+    "SELECT id,error,provider FROM runs WHERE status='failed' AND created_at>? AND updated_at>? AND error IN ('GENERATION_TIMEOUT','GENERATION_UNCERTAIN','AVATAR_TIMEOUT','AVATAR_UNCERTAIN','MEDIA_TIMEOUT','INTERNAL') LIMIT 200",
   ).bind(t - 6 * HOUR, t - 2 * HOUR).all<{ id: string; error: string; provider: string }>()).results;
   for (const r of rows) {
     const s = json<{ tickets?: Record<string, any>; claims?: Record<string, boolean>; assets?: Record<string, string> }>(r.provider, {});
     const open: string[] = [];
     for (const [name, ticket] of Object.entries(s.tickets || {})) {
-      if (s.assets?.[name] || !ticket || typeof ticket !== "object") continue;
+      if (s.assets?.[name] || !ticket) continue;
+      // A presenter video still being made at HeyGen (the run's failure asked HeyGen to delete it).
+      if (name === "presenter" && typeof ticket === "string") open.push(`HeyGen video ${ticket}`);
+      if (typeof ticket !== "object") continue;
       if (typeof ticket.request_id === "string") open.push(`fal request ${ticket.request_id}`);
     }
     // Claimed but no ticket stored: the provider may have accepted it (the answer was lost).

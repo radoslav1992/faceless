@@ -132,3 +132,13 @@
 .stat-card strong { font-size: 30px; font-family: var(--display); line-height: 1.1; }
 .stat-card .sub { font-size: 13px; color: var(--muted); }
 .stat-card.bad strong { color: var(--red); }
+
+/* Presenters' avatars (presenter-ui.tsx, AdminAvatars.tsx): a picture, or the name's initial. */
+.avatar-face { display: grid; place-items: center; width: 44px; height: 44px; flex: none; border-radius: 12px; object-fit: cover; background: var(--surface-2); color: var(--muted); font-weight: 700; }
+.avatar-face.sm { width: 40px; height: 40px; border-radius: 10px; }
+.pick-item .avatar-face { width: 100%; height: 100%; border-radius: 0; font-size: 28px; }
+.avatar-grid { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
+.pick-item:disabled { cursor: default; opacity: 0.55; }
+.presenter-current { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.presenter-current .name { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.presenter-note { margin: 0; }

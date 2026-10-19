@@ -34,3 +34,7 @@
 .example-card .art .chip { position: absolute; top: 8px; right: 8px; }
 .example-card .select { width: 100%; margin-top: 4px; }
 @media (max-width: 520px) { .example-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Admin → Presenters (AdminAvatars.tsx): the stock picker's footer, its confirmation on a line of its own. */
+.stock-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; width: 100%; }
+.stock-foot .check { flex: 1 1 100%; }
