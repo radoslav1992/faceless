@@ -53,7 +53,8 @@ under `/api/admin` answers 404 to anyone else.
   the AI pictures and clips made for your videos, with their name, prompt as the description and the AI mark; the
   details open right after to check). Preview, edit the name, genre or category, description, tags and AI mark (✨ on
   an item has AI fill them in: it looks at the picture or frames of the clip, or listens to a minute of the track, and
-  nothing is saved until you check and save), switch off or delete; the list shows what each item is used by. If AI
+  judges only that, not what is filled in; it keeps your name and offers its own beside it ("Use it"); nothing is saved
+  until you check and save), switch off or delete; the list shows what each item is used by. If AI
   can't describe a file, `Describe model failed` is logged; `DESCRIBE_MODEL` switches the model. People search by name, description and tag, so describe what an item shows
   or sounds like. Music is picked by its mood tags (`calm`, `upbeat`, `inspiring`, `dark`, `epic`, `mysterious`,
   `playful`, `ambient`), and people can also listen to the tracks and choose one themselves; clips loop behind storytime videos and, like pictures, can be any scene's picture. Videos that

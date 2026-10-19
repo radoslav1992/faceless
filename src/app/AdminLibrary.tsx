@@ -52,7 +52,7 @@ export function LibraryTab() {
   const describe = async (item: AdminItem) => {
     setDescribing(item.id);
     try {
-      setEditing({ item, suggestion: await suggest(item.kind, item.name, adminFile(item.id)) });
+      setEditing({ item, suggestion: await suggest(item.kind, adminFile(item.id)) });
     } catch (e) {
       toast(errorText(e), "bad");
     } finally {
@@ -369,9 +369,10 @@ async function samplesOf(src: File | string, kind: LibraryKind): Promise<{ durat
   }
 }
 /** The AI's suggested details for a file (a chosen one, or an item's), from samples made here. */
-async function suggest(kind: LibraryKind, name: string, src: File | string) {
+/** The AI's suggestions from the file alone (nothing already filled in is sent). */
+async function suggest(kind: LibraryKind, src: File | string) {
   const s = await samplesOf(src, kind);
-  return (await post<{ suggestion: Suggestion }>("/admin/library/describe", { kind, name: name.slice(0, 200), ...s, duration: Math.min(600, s.duration) })).suggestion;
+  return (await post<{ suggestion: Suggestion }>("/admin/library/describe", { kind, ...s, duration: Math.min(600, s.duration) })).suggestion;
 }
 /** A genre or category: one of the suggested ones, or the administrator's own words. */
 function CategoryField({ kind, id, value, onChange, disabled }: { kind: LibraryKind; id: string; value: string; onChange: (v: string) => void; disabled?: boolean }) {
@@ -389,6 +390,7 @@ function LibraryUpload({ onUploaded, onFromMedia }: { onUploaded: (item: AdminIt
   const [kind, setKind] = useState<LibraryKind>("clip");
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState("");
+  const [aiName, setAiName] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("");
   const [tags, setTags] = useState("");
@@ -425,7 +427,7 @@ function LibraryUpload({ onUploaded, onFromMedia }: { onUploaded: (item: AdminIt
       const thumbed = await saveThumb(item.id, m.poster);
       if (!thumbed && kind === "clip") toast("Uploaded, but the thumbnail couldn't be saved.", "bad");
       toast(`${title} is in the library.`, "good");
-      setFile(null); setName(""); setDescription(""); setCategory(""); setTags(""); setAi(false);
+      setFile(null); setName(""); setAiName(""); setDescription(""); setCategory(""); setTags(""); setAi(false);
       onUploaded(thumbed ? { ...item, thumb: `/api/library/${item.id}/thumb` } : item);
     } catch (err) {
       setProblem(errorText(err));
@@ -440,9 +442,10 @@ function LibraryUpload({ onUploaded, onFromMedia }: { onUploaded: (item: AdminIt
     setSuggesting(true);
     setProblem(null);
     try {
-      const s = await suggest(kind, name.trim(), file);
-      // A name made of the file's name gives way to the AI's; one the administrator wrote stays.
-      if (s.name && (!name.trim() || name.trim() === baseName(file.name))) setName(s.name);
+      const s = await suggest(kind, file);
+      // The name stays (the file's or the administrator's); the AI's fills an empty one, else is offered beside it.
+      if (s.name && !name.trim()) setName(s.name);
+      setAiName(s.name);
       setDescription(s.description);
       setCategory(s.category);
       setTags(s.tags.join(", "));
@@ -481,11 +484,14 @@ function LibraryUpload({ onUploaded, onFromMedia }: { onUploaded: (item: AdminIt
             <span id="lib-file-name" className="small muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file ? `${file.name} · ${bytes(file.size)}` : "No file chosen"}</span>
           </div>
           <input ref={input} type="file" hidden tabIndex={-1} aria-hidden="true" accept={accepts[kind]}
-            onChange={(e) => { const f = e.target.files?.[0] || null; e.target.value = ""; setFile(f); if (f && !name.trim()) setName(baseName(f.name)); }} />
+            onChange={(e) => { const f = e.target.files?.[0] || null; e.target.value = ""; setFile(f); setAiName(""); if (f && !name.trim()) setName(baseName(f.name)); }} />
         </div>
         <div className="field">
           <label className="label" htmlFor="lib-name">Name</label>
           <input id="lib-name" className="input" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} placeholder="e.g. Kinetic sand cutting" disabled={busy} />
+          {aiName && aiName !== name.trim() && (
+            <span className="hint">AI suggests “{aiName}”. <button type="button" className="link" onClick={() => setName(aiName)} disabled={busy}>Use it</button></span>
+          )}
         </div>
         <div className="field">
           <label className="label" htmlFor="lib-category">{categoryLabel(kind)}</label>
@@ -623,11 +629,12 @@ function PreviewModal({ item, onClose }: { item: AdminItem; onClose: () => void 
  */
 function EditItemModal({ item, suggestion, onClose, onSaved }: { item: AdminItem; suggestion?: Suggestion; onClose: () => void; onSaved: (item: AdminItem) => void }) {
   const toast = useToast();
+  // The name stays the administrator's; the AI's is offered beside it.
   const filled = (s: Suggestion | undefined) => ({
-    name: s?.name || item.name, description: s?.description || item.description, category: s?.category || item.category,
-    tags: s?.tags.length ? s.tags.join(", ") : item.rawTags,
+    description: s?.description || item.description, category: s?.category || item.category, tags: s?.tags.length ? s.tags.join(", ") : item.rawTags,
   });
-  const [form, setForm] = useState({ ...filled(suggestion), ai: item.ai });
+  const [form, setForm] = useState({ name: item.name, ...filled(suggestion), ai: item.ai });
+  const [aiName, setAiName] = useState(suggestion?.name || "");
   const [suggested, setSuggested] = useState(!!suggestion);
   const [suggesting, setSuggesting] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -636,8 +643,9 @@ function EditItemModal({ item, suggestion, onClose, onSaved }: { item: AdminItem
   const fillIn = async () => {
     setSuggesting(true);
     try {
-      const s = await suggest(item.kind, form.name, adminFile(item.id));
+      const s = await suggest(item.kind, adminFile(item.id));
       set(filled(s));
+      setAiName(s.name);
       setSuggested(true);
     } catch (err) {
       toast(errorText(err), "bad");
@@ -670,7 +678,11 @@ function EditItemModal({ item, suggestion, onClose, onSaved }: { item: AdminItem
           </button>
         </div>
         {suggested && <p className="notice small" role="status" style={{ margin: 0 }}>Filled in by AI from the {item.kind === "music" ? "track" : item.kind === "clip" ? "clip" : "picture"}. Check it before saving: nothing is saved until you do.</p>}
-        <label className="field"><span>Name</span><input className="input" value={form.name} onChange={(e) => set({ name: e.target.value })} maxLength={120} required /></label>
+        <label className="field"><span>Name</span><input className="input" value={form.name} onChange={(e) => set({ name: e.target.value })} maxLength={120} required />
+          {aiName && aiName !== form.name.trim() && (
+            <span className="hint">AI suggests “{aiName}”. <button type="button" className="link" onClick={() => set({ name: aiName })}>Use it</button></span>
+          )}
+        </label>
         <div className="field">
           <span><label htmlFor="edit-category">{categoryLabel(item.kind)}</label></span>
           <CategoryField kind={item.kind} id="edit-category" value={form.category} onChange={(category) => set({ category })} />
