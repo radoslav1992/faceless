@@ -34,6 +34,16 @@ under `/api/admin` answers 404 to anyone else.
   reads by network, transcriptions); accounts to reconnect by network; Stripe (the nightly reconciliation, renewals
   overdue, the last webhook event, free months running); work set aside for a manual check (section 5).
 - **Billing**: *Withdrawal within 14 days* (section 6) and *Free month of a plan* (section 7).
+- **Growth**: the **affiliates** (visits, sign-ups and paying customers, balances on hold, available and paid, and
+  whether each still earns) and the **calls for credits**. Once a month, send each available balance of $50 or more
+  by PayPal to the affiliate's payout address, then **Record payout** (optionally with the PayPal transaction ID): it
+  marks those commissions paid. Refunds after a payout show as negative "refund taken back" rows deducted next time.
+  Pause an affiliate who breaks the terms (spam, ads on our name, earnings promises, self-referrals): their customers'
+  new payments earn nothing. **Commissions** shows each commission with its customer. For calls: after each one, click
+  **Done** and write what you learned (what they make, what got in their way, what they'd pay for); it adds 30 credits
+  and emails them. **Missed** lets them book again. A customer whose trial ended can't be credited: give them a free
+  month first. `Affiliate commission not recorded; check it by hand` in the logs means a Stripe event's commission
+  failed (billing went on).
 - **Voices**: the narration voices people choose, each with a sample they play first. Add voices from the ElevenLabs
   account (with ElevenLabs' details and sample), then rename, describe, order, hide or make one the default. **Make a
   sample** (the waveform button) has ElevenLabs speak a text of yours, or the standard one ("Hi, I'm George…", about

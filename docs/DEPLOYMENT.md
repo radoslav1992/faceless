@@ -25,8 +25,9 @@ Apply the schema once, and again whenever a file lands in `migrations/` — befo
 video; `0003_voices.sql` creates the narration voices managed in Admin → Voices, with the twelve voices offered
 before; `0004_library.sql` rebuilds `library_items` with its rows to add pictures, descriptions and the AI mark;
 `0005_style_examples.sql` creates each style's example video, `0006_example_previews.sql` adds the columns of their
-short previews, `0007_library_categories.sql` the library's genre or category and `0008_avatars.sql` the presenters'
-avatars managed in Admin → Presenters; the code already running keeps working on each):
+short previews, `0007_library_categories.sql` the library's genre or category, `0008_avatars.sql` the presenters'
+avatars managed in Admin → Presenters and `0009_growth.sql` the affiliate program and calls for credits; the code
+already running keeps working on each):
 
 ```sh
 npm run db:remote     # wrangler d1 migrations apply faceless --remote
@@ -88,6 +89,7 @@ the Worker reads (`Env` in `server/types.ts`); `.dev.vars.example` lists them fo
 | `FAL_IMAGE_MODEL` | text | Optional picture model: `openai/gpt-image-2.5/sunburst/text-to-image`, `fal-ai/nano-banana-2` or `fal-ai/flux/schnell` (cheapest); anything else uses the default |
 | `FAL_IMAGE_QUALITY` | text | Optional GPT Image 2.5 quality: `low`, `medium`, `high` (default), `xhigh` or `max`. Each step up costs more per picture |
 | `ELEVENLABS_API_KEY` | secret | Narration (`eleven_v4` with timestamps), forced alignment, and Scribe v2 transcription of uploads (the files are uploaded to ElevenLabs from storage, so nothing there depends on ElevenLabs reaching `SITE_URL`). Admin → Voices lists the account's voices to import, so the key needs the Voices read permission (and Text to Speech, Speech to Text, Forced Alignment). A key without Speech to Text shows as `SPEECH_PERMISSION` under Admin → Operations |
+| `CALL_BOOKING_URL` | text | Optional. The https scheduling page (Cal.com, Calendly…) where customers book a 15-minute call for 30 credits; the app fills in their name and email. Without it the offer isn't shown |
 | `HEYGEN_API_KEY` | secret | Optional. On-screen presenters: HeyGen API v3 lip-syncs an avatar to the video's ElevenLabs voice (Avatar IV for regular quality, Avatar V for high), and Admin → Presenters lists HeyGen's stock avatars and links the account's own. HeyGen reads the voice through a capability link on `SITE_URL`. Without it presenters aren't offered. The account's API credits pay for each presenter video (about $0.04 a second with Avatar IV, $0.12 with Avatar V) |
 | `TOKEN_ENCRYPTION_KEY` | secret | `openssl rand -base64 32`. Seals OAuth tokens (AES-256-GCM) and signs API download links. Never change it once accounts are connected |
 | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` | secret | TikTok app (section 4) |

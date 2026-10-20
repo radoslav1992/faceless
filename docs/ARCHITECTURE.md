@@ -59,7 +59,8 @@ handler runs `maintenance()` every minute.
 `migrations/0001_initial.sql`, `0002_clips.sql` (runs of kind `speech`), `0003_voices.sql` (narration voices) and
 `0004_library.sql` (library pictures, descriptions and the AI mark), `0005_style_examples.sql` (each style's example
 video), `0006_example_previews.sql` (the examples' short previews), `0007_library_categories.sql` (library items'
-genre or category) and `0008_avatars.sql` (the presenters' avatars); D1 always enforces foreign keys.
+genre or category), `0008_avatars.sql` (the presenters' avatars) and `0009_growth.sql` (affiliates, commissions,
+payouts and calls for credits); D1 always enforces foreign keys.
 
 | Area | Tables |
 | --- | --- |
@@ -135,6 +136,28 @@ fetch the new one. `GET /api/public/voices` lists the offered voices (the app's 
 chosen one with its sample, `VoicePicker` every voice with a play button, filtered by gender and accent; the API's
 `/types` and `list_video_types`). A new video or series must use an offered voice; one that already has a voice keeps
 it once hidden (`voiceUsable` with the kept voice), and a template whose voice was hidden gets the default.
+
+**Affiliates** (`shared/growth.ts`, `server/affiliates.ts`, "Earn 30%" in `src/app/Affiliate.tsx`, Admin → Growth in
+`src/app/AdminGrowth.tsx`). A verified user joins with a PayPal address and the affiliate terms (Terms › Affiliate
+program) and gets a code. `/r/<code>` counts the visit (once a day per IP, `hit`) and redirects to `/?ref=<code>`;
+no cookie or browser storage is used: the public site keeps the code in memory (`src/referral.ts`) and the sign-up
+form shows it, removable, and sends it as `referralCode`. `referrerFor` sets `users.referred_by` to an active
+affiliate, never the person signing up (same mailbox in any spelling). From the Stripe webhook, each payment of a
+referred customer in the 12 months after their first one earns `floor(30% × paid without tax)`: `invoice.paid`
+(read back with its payment, one row per invoice) and paid credit packs (one per Checkout session). A commission is
+held 30 days (`available_at`); `charge.refunded` brings it down in proportion (void when fully refunded) and a
+dispute voids it; once paid out, the difference becomes a negative `reversal` row taken from the next payout.
+Administrators record a payout they sent (the available balance, confirmed by amount, with a PayPal reference); all
+available commissions become paid. Payouts stay for the accounts after the affiliate's account is deleted. Affiliates
+see counts and amounts only; administrators also see the customers. Commission errors never block billing
+(`affiliateStep` logs them).
+
+**Calls for credits** (`server/calls.ts`, `CallOffer` on Home and in Billing). With `CALL_BOOKING_URL` set, a
+verified customer who can use credits (on a plan, or within the free trial) gets the offer: "Book a call" records the
+request and opens the scheduling page with their name and email. After the call an administrator marks it done with
+notes in Admin → Growth, which adds `CALL_CREDITS` (30) to the current month as top-up credits (they roll over like
+credit packs) once per account and emails the customer; or missed (they can book again). A customer whose trial
+ended can't book, and a call can't be credited while they couldn't spend the credits.
 
 **Presenters** (`shared/presenter.ts`, `server/avatars.ts`, `avatars` table, Admin → Presenters in
 `src/app/AdminAvatars.tsx`; ported from rech-bg's HeyGen avatars). An on-screen AI presenter speaks a narrated video's

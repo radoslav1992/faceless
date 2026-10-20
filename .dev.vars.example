@@ -43,6 +43,8 @@ ELEVENLABS_API_KEY=
 ELEVENLABS_VOICES=
 # Optional: on-screen AI presenters (HeyGen API v3, Admin → Presenters); none are offered without it.
 HEYGEN_API_KEY=
+# Optional: a scheduling page (Cal.com, Calendly…) for calls with customers in exchange for credits (server/calls.ts).
+CALL_BOOKING_URL=
 # Turns on rendering (needs the renderer container) and AI generation, and the series autopilot.
 MEDIA_ENABLED=false
 

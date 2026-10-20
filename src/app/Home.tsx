@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { ArrowRight, PenSquare, Repeat, Scissors, Sparkles } from "lucide-react";
 import { useApi, useAuth, usePoll, number, when, type Series, type Video } from "../lib";
 import { VideoCard, making } from "./video-ui";
+import { CallOffer } from "./CallOffer";
 import { StyleArt } from "../art";
 import { ExampleVideo, useExamples } from "../examples";
 import { templates } from "../../shared/templates";
@@ -46,6 +47,8 @@ export function Home() {
           </div>
         </div>
       )}
+
+      <CallOffer place="home" />
 
       <div className="grid three" style={{ marginBottom: 22 }}>
         <div className="card stat"><span className="muted small">Credits left</span><strong>{user ? number(Math.max(0, user.limit - user.used)) : "–"}</strong><Link className="small text-link" to="/app/billing">{user?.plan === "free" ? "Upgrade" : "Add credits"}</Link></div>

@@ -8,6 +8,7 @@ import { VoicesTab } from "./AdminVoices";
 import { LibraryTab } from "./AdminLibrary";
 import { ExamplesTab } from "./AdminExamples";
 import { AvatarsTab } from "./AdminAvatars";
+import { GrowthTab } from "./AdminGrowth";
 import "./pages.css";
 
 type Overview = {
@@ -15,8 +16,8 @@ type Overview = {
   config: Record<string, boolean>;
 };
 type Message = { id: string; name: string; email: string; topic: string; message: string; created_at: number };
-type Tab = "overview" | "operations" | "billing" | "voices" | "avatars" | "library" | "examples" | "messages";
-const tabIds: Tab[] = ["overview", "operations", "billing", "voices", "avatars", "library", "examples", "messages"];
+type Tab = "overview" | "operations" | "billing" | "growth" | "voices" | "avatars" | "library" | "examples" | "messages";
+const tabIds: Tab[] = ["overview", "operations", "billing", "growth", "voices", "avatars", "library", "examples", "messages"];
 const topics: Record<string, string> = { question: "Question", billing: "Billing", withdrawal: "Withdrawal (14 days)", partnership: "Partnership", abuse: "Report abuse", other: "Other" };
 const flagNames: Record<string, string> = {
   media: "Media pipeline", fal: "fal.ai (AI images & clips)", elevenlabs: "ElevenLabs (voices)", heygen: "HeyGen (presenters)", stripe: "Stripe keys",
@@ -39,12 +40,12 @@ function AdminConsole() {
       <div className="page-head">
         <div>
           <h1>Admin</h1>
-          <p>Service health and operations, withdrawals and free months, narration voices, presenters, the shared library, style examples and contact messages.</p>
+          <p>Service health and operations, withdrawals and free months, affiliates and calls, narration voices, presenters, the shared library, style examples and contact messages.</p>
         </div>
       </div>
       <div style={{ marginBottom: 20 }}>
         <Tabs label="Admin sections" idBase="admin" value={tab} onChange={(t) => setParams(t === "overview" ? {} : { tab: t }, { replace: true })} items={[
-          { id: "overview", label: "Overview" }, { id: "operations", label: "Operations" }, { id: "billing", label: "Billing" },
+          { id: "overview", label: "Overview" }, { id: "operations", label: "Operations" }, { id: "billing", label: "Billing" }, { id: "growth", label: "Growth" },
           { id: "voices", label: "Voices" }, { id: "avatars", label: "Presenters" }, { id: "library", label: "Library" }, { id: "examples", label: "Examples" }, { id: "messages", label: "Messages" },
         ]} />
       </div>
@@ -52,6 +53,7 @@ function AdminConsole() {
         {tab === "overview" && <OverviewTab />}
         {tab === "operations" && <OperationsTab />}
         {tab === "billing" && <BillingTab />}
+        {tab === "growth" && <GrowthTab />}
         {tab === "voices" && <VoicesTab />}
         {tab === "avatars" && <AvatarsTab />}
         {tab === "library" && <LibraryTab />}

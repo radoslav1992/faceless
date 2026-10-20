@@ -49,6 +49,8 @@ export interface Env {
   FAL_KEY?: string;
   /** HeyGen: on-screen presenters (avatars lip-synced to the narration; server/providers/heygen.ts). */
   HEYGEN_API_KEY?: string;
+  /** A scheduling page (Cal.com, Calendly…) where customers book a call for credits (server/calls.ts). */
+  CALL_BOOKING_URL?: string;
   /** fal model for scene pictures: GPT Image 2.5 Flare by default, or its Sunburst variant, "fal-ai/nano-banana-2" or "fal-ai/flux/schnell". */
   FAL_IMAGE_MODEL?: string;
   /** GPT Image 2.5's quality: low, medium, high (default), xhigh or max. */
@@ -71,6 +73,8 @@ export type DbUser = {
   verified: number;
   created_at: number;
   stripe_customer: string | null;
+  /** The affiliate this account signed up through (migrations/0009_growth.sql). */
+  referred_by?: string | null;
 };
 export type ContextVars = { user: DbUser; session: string };
 export type App = { Bindings: Env; Variables: ContextVars };

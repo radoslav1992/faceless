@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   House, PenSquare, Repeat, Clapperboard, CalendarDays, Share2, CircleDollarSign, Settings, Shield, PanelLeftClose, PanelLeftOpen, Clock, Menu, LogOut, Coins, Scissors,
-  Download, Share, SquarePlus,
+  Download, Share, SquarePlus, HandCoins,
 } from "lucide-react";
 import { post, timeLeft, useAuth, number } from "../lib";
 import { planById } from "../../shared/plans";
@@ -63,6 +63,7 @@ export function AppLayout() {
         <div className="nav-sep" />
         {item("/app/billing", CircleDollarSign, free ? "Upgrade" : "Billing", { className: free ? "upgrade" : "" })}
         {item("/app/settings", Settings, "Settings")}
+        {item("/app/affiliate", HandCoins, "Earn 30%")}
         {user.admin && item("/app/admin", Shield, "Admin")}
         <div style={{ flex: 1 }} />
         <div className="credits-card">

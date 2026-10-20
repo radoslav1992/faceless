@@ -286,6 +286,37 @@ function terms(op: Operator): Section[] {
       ),
     },
     {
+      id: "affiliates",
+      title: "Affiliate program",
+      body: (
+        <>
+          <p>
+            You can join our affiliate program from “Earn 30%” in the app. These terms apply to it, in addition to the rest of these Terms.
+          </p>
+          <ul>
+            <li>
+              <strong>What you earn:</strong> 30% of what each customer who signed up with your code pays us for plans and credit packs, without tax, for 12
+              months from their first payment. Someone who already had an account, or who removes your code at sign-up, isn't your customer.
+            </li>
+            <li>
+              <strong>When it's paid:</strong> each commission is held for 30 days. A refund or chargeback lowers it or cancels it; if it was already paid out,
+              we take the difference from your next payout. We pay available balances of $50 or more by PayPal, to the address you give us, once a month.
+            </li>
+            <li>
+              <strong>What's not allowed:</strong> referring yourself or your own other accounts; spam or unsolicited messages; ads that bid on our name or
+              pretend to be us; promising earnings, views or monetization; and misleading claims about {name}. Say that you earn a commission where the law
+              or the platform asks you to (for example #ad or "affiliate link").
+            </li>
+            <li>
+              <strong>Our part:</strong> we may pause an affiliate account, and keep commissions earned against these rules. Commissions are earned only
+              while your account exists: deleting it forfeits any balance not yet paid out. You are responsible for any taxes on what you earn. We may change
+              the program with 30 days' notice; what you earned before a change stays as agreed.
+            </li>
+          </ul>
+        </>
+      ),
+    },
+    {
       id: "ownership",
       title: "Your content and ownership",
       body: (
@@ -474,6 +505,15 @@ function privacy(op: Operator): Section[] {
             amounts paid and refunded, the credits used, and the dates).
           </li>
           <li>
+            <strong>Referrals and affiliates:</strong> if you sign up with an affiliate's referral code, which affiliate referred you (they never see your
+            name or email: only counts and the commissions your payments earn them). If you're an affiliate, your code, your payout email, the number of
+            visits through your link (counted without cookies), your commissions and payouts.
+          </li>
+          <li>
+            <strong>Calls with us:</strong> if you book a call for credits, that you booked it, our notes from the call and the credits added. You book it on
+            a scheduling service's page, which receives what you enter there.
+          </li>
+          <li>
             <strong>Messages:</strong> what you send us through the contact form or by email.
           </li>
           <li>
@@ -500,6 +540,10 @@ function privacy(op: Operator): Section[] {
             <li>
               <strong>To send service emails</strong> — confirming your email, password resets, security alerts, notices about your series' episodes (which
               you can switch off for each series) and important changes. We don't send marketing emails without your consent.
+            </li>
+            <li>
+              <strong>To run the affiliate program</strong> — crediting the affiliate who referred a customer and paying them (our contract with the
+              affiliate, and our legitimate interest in knowing who brought a customer), and to learn from calls you book with us (your request).
             </li>
             <li>
               <strong>To meet legal obligations</strong> — such as tax and accounting records.
@@ -606,6 +650,10 @@ function privacy(op: Operator): Section[] {
             </li>
             <li>Billing records: as long as tax and accounting law requires. Stripe keeps its own records under its policies.</li>
             <li>
+              Referrals, commissions and call notes: while you have an account. Payouts to affiliates (amount, date, the PayPal address paid to): as long as
+              accounting law requires, also after the affiliate's account is deleted.
+            </li>
+            <li>
               When you delete your account (Settings › Delete account), we cancel any paid plan and delete your account, series, videos, uploads, social
               connections and API keys straight away; stored files are removed by our clean-up job shortly after. Only the records named above are kept.
             </li>
@@ -641,7 +689,8 @@ function privacy(op: Operator): Section[] {
         <>
           <p>
             We use a single cookie: a session cookie that keeps you signed in (it lasts up to 30 days, or until you log out). We don't use advertising
-            cookies, analytics trackers or third-party pixels, so there is no cookie banner.
+            cookies, analytics trackers or third-party pixels, so there is no cookie banner. Referral links don't set cookies either: the code stays in the
+            page's address and memory until you sign up, where you see it and can remove it.
           </p>
           <p>
             The app also keeps a few things in your browser's storage: whether the sidebar is collapsed; a draft from the “try it” demo on our home page, so

@@ -8,6 +8,7 @@ import type { App, Env, DbUser } from "./types";
 import { now, ready, uid, DAY, GB } from "./types";
 import { hmac, origin, rate, sendMail, sha } from "./security";
 import { writeState } from "./ops-state";
+import { commissionForInvoice, commissionForPack, reverseCommission } from "./affiliates";
 import { PRODUCT } from "../shared/brand";
 
 export const billing = new Hono<App>();
@@ -461,6 +462,14 @@ export async function confirmPendingContracts(e: Env) {
   }
 }
 const customerId = (c: string | { id: string }) => (typeof c === "string" ? c : c.id);
+/** Affiliate commissions never hold up billing: a failure is logged for a manual check, and the event goes on. */
+async function affiliateStep(event: Stripe.Event, step: () => Promise<unknown>) {
+  try {
+    await step();
+  } catch (error) {
+    console.error("Affiliate commission not recorded; check it by hand", { event: event.id, type: event.type, error: (error as Error)?.name });
+  }
+}
 export async function webhook(request: Request, e: Env) {
   if (!e.STRIPE_WEBHOOK_SECRET) throw new HTTPException(503, { message: "Payments are not set up." });
   const s = stripe(e);
@@ -479,10 +488,16 @@ export async function webhook(request: Request, e: Env) {
   else if (event.type === "checkout.session.completed" && object.mode === "subscription")
     subscriptionId = typeof object.subscription === "string" ? object.subscription : object.subscription?.id;
   // Credit packs: paid at once (cards) or later (async methods).
-  if (["checkout.session.completed", "checkout.session.async_payment_succeeded"].includes(event.type) && object.mode === "payment")
+  if (["checkout.session.completed", "checkout.session.async_payment_succeeded"].includes(event.type) && object.mode === "payment") {
     await creditTopup(e, object as Stripe.Checkout.Session);
-  else if (["invoice.paid", "invoice.payment_failed"].includes(event.type))
+    await affiliateStep(event, () => commissionForPack(e, object as Stripe.Checkout.Session));
+  } else if (["invoice.paid", "invoice.payment_failed"].includes(event.type))
     subscriptionId = object.parent?.subscription_details?.subscription || object.subscription;
+  if (event.type === "invoice.paid" && object.customer && typeof object.id === "string")
+    await affiliateStep(event, () => commissionForInvoice(e, object.id, customerId(object.customer)));
+  // A refund (in part or in full) lowers the affiliate's commission on that payment.
+  if (event.type === "charge.refunded" && object.payment_intent)
+    await affiliateStep(event, () => reverseCommission(e, customerId(object.payment_intent), Number(object.amount_refunded) || 0, Number(object.amount) || 0));
   const statements: D1PreparedStatement[] = [];
   // A refunded credit pack takes back its unused credits; a refunded subscription payment ends the plan.
   if (event.type === "charge.refunded" && object.refunded === true && object.customer) {
@@ -492,6 +507,8 @@ export async function webhook(request: Request, e: Env) {
   if (event.type === "charge.dispute.created" && object.charge) {
     const charge = await s.charges.retrieve(customerId(object.charge));
     if (charge.customer) await endPaidAccess(e, customerId(charge.customer), "dispute");
+    const intent = charge.payment_intent;
+    if (intent) await affiliateStep(event, () => reverseCommission(e, customerId(intent), charge.amount, charge.amount));
   }
   const completedSession = event.type === "checkout.session.completed" && object.mode === "subscription" && typeof object.id === "string" ? (object.id as string) : null;
   if (completedSession)

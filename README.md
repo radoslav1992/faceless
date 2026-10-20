@@ -79,6 +79,9 @@ and the maintenance cron.
   month. Unused credits roll over while a plan runs, up to three months of the plan's credits plus credit packs.
   Subscribers can buy credit packs at any time: 10 credits for $8, 40 for $28, 150 for $90. Credits are reserved when
   work starts and refunded automatically when it fails.
+- **Growth.** An affiliate program ("Earn 30%": 30% of referred customers' payments for 12 months, tracked without
+  cookies, paid out by PayPal from Admin → Growth) and calls with customers for credits (a scheduling page,
+  `CALL_BOOKING_URL`; 30 credits once the call took place).
 - **API and MCP.** Personal API keys (Settings) work with a small REST API (`/api/v1`) and an MCP server (`/mcp`), so
   scripts and AI assistants can make videos, find and make clips of the owner's long videos, fetch download links and
   pause or resume series, with the same credits and limits as the app.

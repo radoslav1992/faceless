@@ -6,12 +6,13 @@ import type { App, Env, DbUser } from "./types";
 import { now, uid, ready, DAY, HOUR } from "./types";
 import { checkPassword, hashPassword, token, sha, rate, hit, limited, tooMany, clientIp, defer, sendMail, origin, verifyTurnstile } from "./security";
 import { allowance, touchTrial } from "./billing";
+import { referrerFor } from "./affiliates";
 import { PRODUCT } from "../shared/brand";
 
 export const auth = new Hono<App>();
 export const SESSION_COOKIE = "hss_session";
 /** The terms' "last updated" date: change it with the terms, so each acceptance records its version. */
-export const TERMS_VERSION = "2026-10-15";
+export const TERMS_VERSION = "2026-10-20";
 const credentials = z.object({
   email: z.email().max(254).transform((s) => s.toLowerCase().trim()),
   password: z.string().min(10, "Use at least 10 characters for your password.").max(128),
@@ -54,7 +55,11 @@ auth.post("/register", async (c) => {
     throw new HTTPException(503, { message: "Sign-ups open soon." });
   await rate(c, "register", 5);
   const body = await c.req.json();
-  const d = credentials.extend({ name: z.string().trim().min(2).max(80), acceptTerms: z.literal(true) }).parse(body);
+  const d = credentials.extend({
+    name: z.string().trim().min(2).max(80), acceptTerms: z.literal(true),
+    /** An affiliate's code, shown in the form (from their link or typed); an unknown one is ignored. */
+    referralCode: z.string().max(40).optional(),
+  }).parse(body);
   if (!c.env.EMAIL || !c.env.EMAIL_FROM) throw new HTTPException(503, { message: "Sign-ups are temporarily unavailable." });
   if (c.env.APP_ENV !== "development" && !c.env.TURNSTILE_SECRET_KEY)
     throw new HTTPException(503, { message: "Sign-ups are temporarily unavailable." });
@@ -67,11 +72,12 @@ auth.post("/register", async (c) => {
   const base = origin(c.env, c.req.raw);
   const existing = await c.env.DB.prepare("SELECT id FROM users WHERE email=?").bind(d.email).first();
   if (existing) return c.json({ ok: true, emailSent: await alertExisting(c.env, d.email, base) });
-  const user: DbUser = { id: uid(), email: d.email, name: d.name, password_hash: passwordHash, verified: 0, created_at: now(), stripe_customer: null };
+  const referredBy = await referrerFor(c.env, d.referralCode, d.email);
+  const user: DbUser = { id: uid(), email: d.email, name: d.name, password_hash: passwordHash, verified: 0, created_at: now(), stripe_customer: null, referred_by: referredBy };
   try {
     await c.env.DB.batch([
-      c.env.DB.prepare("INSERT INTO users(id,email,name,password_hash,created_at) VALUES (?,?,?,?,?)")
-        .bind(user.id, user.email, user.name, user.password_hash, user.created_at),
+      c.env.DB.prepare("INSERT INTO users(id,email,name,password_hash,created_at,referred_by) VALUES (?,?,?,?,?,?)")
+        .bind(user.id, user.email, user.name, user.password_hash, user.created_at, referredBy),
       c.env.DB.prepare("INSERT INTO terms_acceptances(user_id,version,accepted_at) VALUES (?,?,?)").bind(user.id, TERMS_VERSION, user.created_at),
     ]);
   } catch (e) {

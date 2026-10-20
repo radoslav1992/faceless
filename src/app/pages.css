@@ -142,3 +142,8 @@
 .presenter-current { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
 .presenter-current .name { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .presenter-note { margin: 0; }
+
+/* The call-for-credits offer (CallOffer.tsx), on Home and in Billing. */
+.call-offer { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+.call-offer > svg { flex: none; }
+@media (max-width: 600px) { .call-offer { flex-wrap: wrap; } .call-offer > .row { width: 100%; justify-content: flex-end; } }
