@@ -1,5 +1,6 @@
 import { useEffect, useId, useState, type FormEvent, type InputHTMLAttributes, type ReactNode } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
+import { referralCode } from "../referral";
 import { ArrowLeft, CircleCheck, Eye, EyeOff, KeyRound, MailCheck, MailWarning, Sparkles } from "lucide-react";
 import { ApiError, errorText, post, useAuth } from "../lib";
 import { Logo, Spinner } from "../ui";
@@ -178,6 +179,9 @@ function Register({ next }: { next: string }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [accept, setAccept] = useState(false);
+  // An affiliate's code from their link (or typed in): shown, and removable.
+  const [referral, setReferral] = useState(() => (params.get("ref") || referralCode()).trim().toLowerCase());
+  const [typingReferral, setTypingReferral] = useState(false);
   const check = useCheck();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -193,6 +197,7 @@ function Register({ next }: { next: string }) {
     try {
       const r = await post<{ ok: boolean; emailSent: boolean }>("/auth/register", {
         name: name.trim(), email: email.trim(), password, acceptTerms: true, ...(check.token && { turnstileToken: check.token }),
+        ...(referral.trim() && { referralCode: referral.trim() }),
       });
       setResult({ email: email.trim(), emailSent: r.emailSent !== false });
     } catch (err) {
@@ -305,6 +310,18 @@ function Register({ next }: { next: string }) {
         <TextField label="Your name" name="name" autoComplete="name" required minLength={2} maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
         <TextField label="Email" type="email" name="email" autoComplete="email" required maxLength={254} value={email} onChange={(e) => setEmail(e.target.value)} />
         <PasswordField label="Password" autoComplete="new-password" value={password} onChange={setPassword} hint="At least 10 characters." />
+        {referral || typingReferral ? (
+          <label className="field">
+            <span className="label">Referral code</span>
+            <span className="row" style={{ gap: 8 }}>
+              <input className="input grow" value={referral} onChange={(e) => setReferral(e.target.value.toLowerCase())} maxLength={24} autoComplete="off" spellCheck={false} />
+              <button type="button" className="btn" onClick={() => { setReferral(""); setTypingReferral(false); }}>Remove</button>
+            </span>
+            <span className="hint">The person who recommended {PRODUCT.name} earns a share of what you pay. You pay the same either way.</span>
+          </label>
+        ) : (
+          <button type="button" className="link small" style={{ alignSelf: "flex-start" }} onClick={() => setTypingReferral(true)}>Have a referral code?</button>
+        )}
         <label className="check">
           <input type="checkbox" checked={accept} onChange={(e) => setAccept(e.target.checked)} required />
           <span>

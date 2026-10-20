@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { rememberReferral } from "../referral";
 import { Menu, X } from "lucide-react";
 import { Logo } from "../ui";
 import { api, useAuth } from "../lib";
@@ -69,11 +70,13 @@ const links = [
 export function PublicLayout() {
   const { user } = useAuth();
   const { config } = usePublicConfig();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const [open, setOpen] = useState(false);
   const toggle = useRef<HTMLButtonElement>(null);
   const menuId = useId();
   useEffect(() => setOpen(false), [pathname]);
+  // An affiliate's link: the code is carried to the sign-up form in memory only.
+  useEffect(() => rememberReferral(new URLSearchParams(search).get("ref")), [search]);
   useEffect(() => {
     if (!open) return;
     const key = (e: KeyboardEvent) => {

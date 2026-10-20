@@ -15,6 +15,8 @@ hours rather than in one expensive run.
 | Data | Kept | How it goes |
 | --- | --- | --- |
 | Profile (name, email, password hash), series (template, prompt, voice, language, art style, music, length, schedule, accounts, review and e-mail choices), videos (spec: script, scenes, captions, word timings), uploads (with the words found in their speech, and for videos clips are cut from the moments found in them and where their people appear), AI pictures, clips, voices and renders, connected accounts, publications and their stats, API keys (SHA-256 of the key, name, prefix, created and last used) | While the account exists | With the account, or when the user deletes the item (videos, series, uploads, API keys; disconnecting an account) |
+| Referral (`users.referred_by`: which affiliate an account signed up through), an affiliate's code, payout email, visit count and commissions, call-for-credits requests and their notes | While the account exists | With the account (a deleted referred customer's commissions stay with the affiliate without them) |
+| Affiliate payouts (amount, date, PayPal address paid to, reference) | As long as accounting law requires | Kept when the affiliate's account is deleted (`affiliate_id` cleared) |
 | Sessions | 30 days | Removed hourly once expired |
 | Email confirmation / password reset links (hash of the token only) | 24 hours / 1 hour | Removed hourly once expired |
 | OAuth sign-in states for social networks | 10 minutes | Removed hourly once expired |

@@ -36,6 +36,7 @@ const Channels = named(() => import("./app/Channels"), "ChannelsPage");
 const Billing = named(() => import("./app/Billing"), "BillingPage");
 const Settings = named(() => import("./app/Settings"), "SettingsPage");
 const Admin = named(() => import("./app/Admin"), "AdminPage");
+const Affiliate = named(() => import("./app/Affiliate"), "Affiliate");
 
 /** Keeps the title current and moves focus to the new page's heading for screen readers. */
 function RouteChange() {
@@ -150,6 +151,7 @@ export function App() {
             <Route path="channels" element={<Channels />} />
             <Route path="billing" element={<Billing />} />
             <Route path="settings" element={<Settings />} />
+            <Route path="affiliate" element={<Affiliate />} />
             <Route path="admin" element={<Admin />} />
             <Route path="*" element={<Navigate to="/app" replace />} />
           </Route>

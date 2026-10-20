@@ -11,9 +11,12 @@ import { adminVoices } from "./admin-voices";
 import { adminLibrary } from "./admin-library";
 import { adminExamples } from "../examples";
 import { adminAvatars } from "../avatars";
+import { adminAffiliates } from "../affiliates";
+import { adminCalls } from "../calls";
 
 // Administration: health and operations, withdrawals and plan grants, the narration voices, the shared library (music
-// by mood, clips and pictures), each style's example video, the presenters' avatars and contact messages.
+// by mood, clips and pictures), each style's example video, the presenters' avatars, affiliates and calls for credits,
+// and contact messages.
 export const admin = new Hono<App>();
 admin.use("*", async (c, next) => {
   if (!isAdmin(c.env, c.get("user"))) throw new HTTPException(404, { message: "Not found." });
@@ -26,6 +29,8 @@ admin.route("/voices", adminVoices);
 admin.route("/library", adminLibrary);
 admin.route("/examples", adminExamples);
 admin.route("/avatars", adminAvatars);
+admin.route("/affiliates", adminAffiliates);
+admin.route("/calls", adminCalls);
 admin.get("/overview", async (c) => {
   const since = now() - DAY;
   const one = async (sql: string, ...args: unknown[]) => (await c.env.DB.prepare(sql).bind(...args).first<{ n: number }>())?.n || 0;

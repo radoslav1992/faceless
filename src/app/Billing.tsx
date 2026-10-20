@@ -8,6 +8,7 @@ import { PRICE_NOTE, planById, planIncludes, tariffs, type Interval, type PaidPl
 import { IMMEDIATE_START_TEXT, WITHDRAWAL_DAYS } from "../../shared/withdrawal";
 import { PRODUCT } from "../../shared/brand";
 import { formatDate, useSignedInUser } from "./pickers";
+import { CallOffer } from "./CallOffer";
 import "./pages.css";
 
 /** Billing: the plan and its credits, plan changes through Stripe Checkout / Customer Portal, and credit packs. */
@@ -177,6 +178,8 @@ export function BillingPage() {
         <CreditPacks allowed={enabled && subscriber && user.verified} busy={busy} onBuy={(pack) => void buy(pack)} />
         {!subscriber && <p className="hint" style={{ marginTop: 8 }}>Credit packs are for subscribers: choose a plan first.</p>}
       </section>
+
+      <div className="section"><CallOffer place="billing" /></div>
 
       {user.hasSubscription && (
         <section className="section card row wrap" aria-labelledby="withdraw-title" style={{ alignItems: "center", gap: 16 }}>
