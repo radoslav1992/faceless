@@ -50,6 +50,8 @@ MEDIA_ENABLED=false
 
 # Social publishing. 32 random bytes, base64: encrypts OAuth tokens at rest (and signs API download links).
 TOKEN_ENCRYPTION_KEY=
+# The networks everyone can connect (unset: only ADMIN_EMAILS, everyone else sees "Coming soon").
+SOCIAL_OPEN=tiktok,youtube,instagram
 TIKTOK_CLIENT_KEY=
 TIKTOK_CLIENT_SECRET=
 # "true" once TikTok has audited the app for Direct Post; unset, videos go to people's TikTok inbox as drafts.

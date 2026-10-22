@@ -26,6 +26,7 @@ on YouTube, videos on TikTok.
 | `SITE_URL` | Public `https://` origin. Redirect URIs and media links are built from it. |
 | `TOKEN_ENCRYPTION_KEY` | 32 random bytes, base64: `openssl rand -base64 32`. Encrypts every OAuth token at rest. Changing it disconnects every account (people reconnect). |
 | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` | TikTok app. |
+| `SOCIAL_OPEN` | Networks everyone can connect (`tiktok,youtube,instagram`). The others are "Coming soon" for everyone but administrators, who can always connect (to test before a network opens). The connect route refuses a closed network with 403. |
 | `TIKTOK_DIRECT_POST` | `true` once TikTok has audited the app: videos post straight to the profile. Unset, they go to the person's TikTok inbox as drafts (see TikTok below). |
 | `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET` | The Instagram app ID/secret of the Meta app (Instagram product, not the Facebook app ID). |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth client (Web application). |

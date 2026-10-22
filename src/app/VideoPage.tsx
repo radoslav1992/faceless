@@ -9,7 +9,7 @@ import { HighlightEditor } from "./clip-editor";
 import { PlatformBadge, PublicationLine, StatusChip, making, phaseText } from "./video-ui";
 import { specCredits, visualPart, type HighlightSpec, type Spec, type StorySpec } from "../../shared/formats";
 import { creditsLabel } from "../../shared/credits";
-import { platforms, postCaption } from "../../shared/social";
+import { comingSoon, platforms, postCaption } from "../../shared/social";
 import "./create.css";
 
 // One video: watch it, approve or reject it (series episodes in review), post it now or later, download it, and edit
@@ -42,7 +42,7 @@ function DraftNote({ video }: { video: Video }) {
 
 function PostPanel({ video, onDone }: { video: Video; onDone: () => void }) {
   const toast = useToast();
-  const accounts = useApi<{ accounts: Account[]; platforms?: { id: string; drafts?: boolean }[] }>("/accounts");
+  const accounts = useApi<{ accounts: Account[]; platforms?: { id: string; soon?: boolean; drafts?: boolean }[] }>("/accounts");
   const [chosen, setChosen] = useState<string[]>([]);
   const [later, setLater] = useState(false);
   const [at, setAt] = useState(() => local(Math.floor(Date.now() / 1000) + 3600));
@@ -50,6 +50,7 @@ function PostPanel({ video, onDone }: { video: Video; onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const usable = (accounts.data?.accounts || []).filter((a) => a.status === "active");
   const tiktokDrafts = !!accounts.data?.platforms?.find((p) => p.id === "tiktok")?.drafts;
+  const allSoon = !!accounts.data?.platforms?.length && accounts.data.platforms.every((p) => p.soon);
   const toDrafts = tiktokDrafts && usable.some((a) => a.platform === "tiktok" && chosen.includes(a.id));
   const pubs = (video.publications || []).filter((p) => p.status !== "canceled");
   const send = async () => {
@@ -87,7 +88,9 @@ function PostPanel({ video, onDone }: { video: Video; onDone: () => void }) {
         </div>
       )) : <p className="muted small">Not posted anywhere yet.</p>}
       <hr style={{ border: 0, borderTop: "1px solid var(--line)", width: "100%" }} />
-      {video.renderStatus !== "ready" ? <p className="muted small">You can post it once it's made.</p> : !usable.length ? (
+      {video.renderStatus !== "ready" ? <p className="muted small">You can post it once it's made.</p> : !usable.length ? allSoon ? (
+        <p className="muted small">{comingSoon("TikTok, YouTube and Instagram")}</p>
+      ) : (
         <p className="muted small">Connect TikTok, YouTube or Instagram to post from here. <Link className="text-link" to="/app/channels">Connect a channel</Link></p>
       ) : (
         <>
