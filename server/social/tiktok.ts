@@ -13,7 +13,8 @@ const MiB = 1024 * 1024;
 // video.list (Display API) reads the stats of the account's public videos; connections made before it was asked for
 // lack it and are asked to reconnect.
 const SCOPES = ["user.info.basic", "video.publish", "video.list"] as const;
-const DRAFT_SCOPES = ["user.info.basic", "video.upload", "video.list"] as const;
+// Drafts never get stats (we don't learn the post made from them), so they don't ask for video.list.
+const DRAFT_SCOPES = ["user.info.basic", "video.upload"] as const;
 /** Videos go to the creator's inbox as drafts, not straight to their profile. */
 export const tiktokDrafts = (env: Env) => env.TIKTOK_DIRECT_POST !== "true";
 const STATS_FIELDS = "id,view_count,like_count,comment_count,share_count";

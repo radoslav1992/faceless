@@ -57,7 +57,8 @@ Instagram gets no flag through the API; the file itself carries the renderer's A
 
 Two modes (`server/social/tiktok.ts`):
 
-- **Drafts** (the default): the video goes to the person's TikTok inbox (Upload API, scope `video.upload`). TikTok
+- **Drafts** (the default): the video goes to the person's TikTok inbox (Upload API, scopes `user.info.basic` and
+  `video.upload`; no `video.list`, since drafts have no stats). TikTok
   notifies them; they add the caption, choose who can see it, set the AI-content label and post it in the TikTok app.
   Only the normal app review is needed, not the Direct Post audit, and there is no private-only restriction.
 - **Direct Post** (`TIKTOK_DIRECT_POST=true`, once TikTok has audited the app): the video posts straight to the profile
@@ -68,9 +69,9 @@ Setup:
 1. developers.tiktok.com → Manage apps → create an app. Platform: Web. Fill in the terms and privacy policy URLs
    (`${SITE_URL}/terms`, `${SITE_URL}/privacy`).
 2. Add products **Login Kit** and **Content Posting API** (Upload; turn on **Direct Post** only for the audit).
-3. Scopes: `user.info.basic`, `video.upload` and `video.list` (post stats; see "Post stats" below); add
-   `video.publish` for Direct Post. The app asks for the mode's set only, so each must be approved before people
-   outside the app's test users can connect.
+3. Scopes: `user.info.basic` and `video.upload` for drafts; for Direct Post `user.info.basic`, `video.publish` and
+   `video.list` (post stats; see "Post stats" below). The app asks for the mode's set only, so each must be approved
+   before people outside the app's test users can connect.
 4. Login Kit → Redirect URI: `${SITE_URL}/api/accounts/callback/tiktok`.
 5. No media domain verification is needed: videos are uploaded as files (`FILE_UPLOAD`). (`server/social/tiktok.ts`
    still has a photo-post branch that would fetch from our media links and need it; the Publication workflow only

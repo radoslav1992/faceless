@@ -150,14 +150,14 @@ describe("connecting accounts", () => {
   it("connects TikTok for drafts: asks for video.upload instead of video.publish, and the Channels page says so", async () => {
     const s = setup({ TIKTOK_DIRECT_POST: "" });
     const url = await connect(s, "tiktok");
-    expect(url.searchParams.get("scope")).toBe("user.info.basic,video.upload,video.list");
+    expect(url.searchParams.get("scope")).toBe("user.info.basic,video.upload");
     const [token, userInfo] = tiktokRoutes();
     const granting = (scope: string): Route => [token[0], token[1], () =>
       ok({ access_token: "tt-access", expires_in: 86400, open_id: "open-1", refresh_token: "tt-refresh", refresh_expires_in: 31536000, scope, token_type: "Bearer" })];
     // Without the upload permission there is nothing to connect.
     mockFetch([granting("user.info.basic,video.publish"), userInfo]);
     expect((await callback(s, "tiktok", `code=c&state=${url.searchParams.get("state")}`)).headers.get("Location")).toBe("/app/channels?error=permissions");
-    const calls = mockFetch([granting("user.info.basic,video.upload,video.list"), userInfo]);
+    const calls = mockFetch([granting("user.info.basic,video.upload"), userInfo]);
     expect((await callback(s, "tiktok", `code=c&state=${await stateOf(s, "tiktok")}`)).headers.get("Location")).toBe("/app/channels?connected=tiktok");
     // No creator info (it needs video.publish), so the account has no handle.
     expect(calls.map((c) => c.url.pathname)).toEqual(["/v2/oauth/token/", "/v2/user/info/"]);

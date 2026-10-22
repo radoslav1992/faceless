@@ -141,7 +141,7 @@ bound to the person who started it. Review and audit steps per network: [SOCIAL.
 
 | Network | App | Redirect URI | Scopes |
 | --- | --- | --- | --- |
-| TikTok | developers.tiktok.com app with Login Kit and the Content Posting API (Upload for drafts; Direct Post once audited); `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` | `${SITE_URL}/api/accounts/callback/tiktok` | `user.info.basic`, `video.upload` (drafts) or `video.publish` (with `TIKTOK_DIRECT_POST=true`), `video.list` |
+| TikTok | developers.tiktok.com app with Login Kit and the Content Posting API (Upload for drafts; Direct Post once audited); `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` | `${SITE_URL}/api/accounts/callback/tiktok` | `user.info.basic` and `video.upload` (drafts), or `user.info.basic`, `video.publish` and `video.list` (with `TIKTOK_DIRECT_POST=true`) |
 | YouTube | Google Cloud project with the YouTube Data API v3 enabled, an OAuth consent screen and an OAuth client of type *Web application*; `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | `${SITE_URL}/api/accounts/callback/youtube` | `https://www.googleapis.com/auth/youtube.upload`, `https://www.googleapis.com/auth/youtube.readonly` |
 | Instagram | Meta app with the Instagram product, *Instagram API with Instagram login* (business login); `INSTAGRAM_APP_ID` / `INSTAGRAM_APP_SECRET` are the Instagram app's ID and secret, not the Facebook app ID | `${SITE_URL}/api/accounts/callback/instagram` | `instagram_business_basic`, `instagram_business_content_publish`, `instagram_business_manage_insights` |
 
