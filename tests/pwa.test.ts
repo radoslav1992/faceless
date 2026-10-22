@@ -25,6 +25,13 @@ describe("installable app", () => {
     expect(html).toContain('<link rel="apple-touch-icon" href="/apple-touch-icon.png" />');
   });
 
+  it("tells readers without scripts what the site is and links the legal pages", () => {
+    // Google's app verification checks the home page for a description and links to the terms and privacy policy.
+    const fallback = /<noscript>([\s\S]*)<\/noscript>/.exec(file("index.html").toString())?.[1] ?? "";
+    expect(fallback).toContain("YouTube");
+    for (const path of ["/terms", "/privacy"]) expect(fallback).toContain(`href="${path}"`);
+  });
+
   it("serves the service worker uncached, the manifest with its type, and the offline page as a page of its own", async () => {
     const { env } = testEnv();
     const sw = await call(worker, env, "GET", "/sw.js");
