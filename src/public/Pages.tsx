@@ -74,10 +74,10 @@ export function Tools() {
           <Faq items={[
             ["What can I make with these tools?", "Narrated vertical videos: stories with a picture for every sentence, POV clips with an on-screen line, absurd mashup characters, storytime over a background clip, or your own script illustrated scene by scene."],
             ["How do I turn text into a video?", "Open Text to video, paste your script and choose a voice and an art style. Every sentence or two becomes a scene with its own picture; subtitles follow the voice word by word."],
-            ["Are the videos made for TikTok, Shorts and Reels?", "Yes: 1080 × 1920 vertical MP4s up to three minutes, which fit all three. Connect your accounts to post them straight away or on a schedule."],
+            ["Are the videos made for TikTok, Shorts and Reels?", "Yes: 1080 × 1920 vertical MP4s up to three minutes, which fit all three. Download them to upload; posting straight to your accounts is coming soon."],
             ["Do I need to film myself or record a voiceover?", "No. Every video is faceless and narrated by a natural AI voice in one of 26 languages. You can use your own recording if you prefer."],
             ["Does choosing a tool make a video right away?", "No. A tool opens with your idea filled in; you see the draft script and choose the voice and look before anything is made or charged."],
-            ["Can I schedule videos for my channels?", "Yes. Post any video now or later, or turn a tool into a series that makes and posts new episodes on its own schedule."],
+            ["Can I schedule videos for my channels?", "Yes. Turn a tool into a series that makes new episodes on its own schedule. Posting them straight to your channels is coming soon; until then, download each one."],
           ]} />
         </div>
       </section>
@@ -142,7 +142,7 @@ export function ToolPage() {
             <div className="feature"><Wand2 size={22} className="accent-text" aria-hidden="true" /><h3>Written for you</h3><p>{t.brief}</p></div>
             <div className="feature"><Layers size={22} className="accent-text" aria-hidden="true" /><h3>A picture per sentence</h3><p>Every scene gets its own AI picture in {storyStyles[t.style].name.toLowerCase()} style by default — or pick any of {storyStyleIds.length} art styles.</p></div>
             <div className="feature"><Clapperboard size={22} className="accent-text" aria-hidden="true" /><h3>Ready to post</h3><p>Natural narration, word-by-word subtitles, smooth transitions and music, rendered as a 1080 × 1920 MP4.</p></div>
-            <div className="feature"><CalendarClock size={22} className="accent-text" aria-hidden="true" /><h3>Or on autopilot</h3><p>Turn it into a series: a new episode for every slot of your schedule, posted to TikTok, YouTube and Instagram.</p></div>
+            <div className="feature"><CalendarClock size={22} className="accent-text" aria-hidden="true" /><h3>Or on autopilot</h3><p>Turn it into a series: a new episode for every slot of your schedule, for TikTok, YouTube and Instagram (auto-posting coming soon).</p></div>
           </div>
         </div>
       </section>
@@ -173,7 +173,7 @@ export function Styles() {
 export function FaqPage() {
   return (
     <div className="pub-wrap">
-      <div className="pub-head center"><h1 className="title">Frequently asked questions</h1><p className="lead">How {PRODUCT.name} makes, schedules and posts your videos.</p></div>
+      <div className="pub-head center"><h1 className="title">Frequently asked questions</h1><p className="lead">How {PRODUCT.name} makes your videos on your schedule.</p></div>
       <Faq items={[
         ...homeFaq,
         ["Which languages can the narration use?", `${languages.length} languages, from English, Spanish and Portuguese to German, Polish, Turkish, Greek and Ukrainian. Subtitles follow the narration.`],
@@ -197,7 +197,7 @@ export function About() {
         <p className="lead">{PRODUCT.name} exists for people with ideas and no time to film, edit and post every day.</p></div>
       <div className="stack" style={{ gap: 18, fontSize: 17, color: "#c9d0ca" }}>
         <p>Short-form video rewards consistency: a new post every day, for months. That is hard to keep up when every video means writing a script, finding pictures, recording a voice, editing, captioning and posting by hand.</p>
-        <p>{PRODUCT.name} does that work for you. Choose a faceless style and a topic once; for every slot in your schedule it writes an original script, narrates it with a natural AI voice, draws a new picture for every sentence in one art style, adds subtitles, transitions and music, and posts the finished video to the channels you connected. You can step in at any point: edit the draft, ask to review before anything posts, or just download.</p>
+        <p>{PRODUCT.name} does that work for you. Choose a faceless style and a topic once; for every slot in your schedule it writes an original script, narrates it with a natural AI voice, draws a new picture for every sentence in one art style, adds subtitles, transitions and music, and has the finished video ready on time (posting it straight to your channels is coming soon). You can step in at any point: edit the draft, ask to review before anything posts, or just download.</p>
         <p>We care about doing this responsibly: every script is written new, videos are labelled as AI-made where the networks ask, we never invent reviews or results, and your connected accounts are only ever used to post what you made.</p>
       </div>
       <div className="feature-list" style={{ marginTop: 36 }}>
@@ -220,7 +220,7 @@ export function Business() {
       </div>
       <section className="pub-section tight">
         <div className="pub-wrap feature-list">
-          <div className="feature"><Users size={22} className="accent-text" aria-hidden="true" /><h3>Many channels</h3><p>Run dozens of series side by side and post to as many TikTok, YouTube and Instagram accounts as you need.</p></div>
+          <div className="feature"><Users size={22} className="accent-text" aria-hidden="true" /><h3>Many channels</h3><p>Run dozens of series side by side and post to as many TikTok, YouTube and Instagram accounts as you need once posting opens (coming soon).</p></div>
           <div className="feature"><Eye size={22} className="accent-text" aria-hidden="true" /><h3>Review before posting</h3><p>Turn on review for any series: episodes wait for approval, with an e-mail when each is ready.</p></div>
           <div className="feature"><Clapperboard size={22} className="accent-text" aria-hidden="true" /><h3>Clips from your shows</h3><p>Turn podcasts, webinars and streams of up to two hours into captioned vertical clips that cut to whoever is talking, each moment with a virality score.</p></div>
           <div className="feature"><Bot size={22} className="accent-text" aria-hidden="true" /><h3>API and MCP</h3><p>Make videos from your own tools, scripts or AI assistant with an API key. <Link className="text-link" to="/mcp">How it works</Link></p></div>

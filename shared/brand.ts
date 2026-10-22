@@ -7,7 +7,7 @@ export const PRODUCT = {
   product: "Shorts",
   /** For machine names: the MCP server, file names. */
   slug: "hookstreak-shorts",
-  tagline: "Faceless videos that post themselves",
+  tagline: "Faceless videos on autopilot",
   pitch:
-    "Pick a niche, a voice and an art style once. Hookstreak Shorts writes, narrates, illustrates and subtitles a new short video for every slot in your schedule and posts it to TikTok, YouTube Shorts and Instagram Reels.",
+    "Pick a niche, a voice and an art style once. Hookstreak Shorts writes, narrates, illustrates and subtitles a new short video for every slot in your schedule, ready for TikTok, YouTube Shorts and Instagram Reels. Posting straight to them is coming soon.",
 } as const;

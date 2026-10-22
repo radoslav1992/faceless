@@ -14,7 +14,7 @@ export const publicPages: Record<string, { title: string; description: string; u
   "/mcp": { title: `MCP connection and API — ${PRODUCT.name}`, description: `Make faceless videos from your AI assistant or your own code with the ${PRODUCT.name} MCP server and REST API.`, updated: UPDATED },
   "/business": { title: `For business — ${PRODUCT.name}`, description: "Run many faceless channels with review, API access and one bill.", updated: UPDATED },
   "/about": { title: `About — ${PRODUCT.name}`, description: `Why ${PRODUCT.name} exists and how it makes videos.`, updated: UPDATED },
-  "/faq": { title: `FAQ — ${PRODUCT.name}`, description: `How ${PRODUCT.name} makes, schedules and posts faceless videos.`, updated: UPDATED },
+  "/faq": { title: `FAQ — ${PRODUCT.name}`, description: `How ${PRODUCT.name} makes faceless videos on your schedule.`, updated: UPDATED },
   "/terms": { title: `Terms of Service — ${PRODUCT.name}`, description: `The terms for using ${PRODUCT.name}.`, updated: UPDATED },
   "/privacy": { title: `Privacy Policy — ${PRODUCT.name}`, description: `How ${PRODUCT.name} handles your data.`, updated: UPDATED },
   "/contact": { title: `Contact — ${PRODUCT.name}`, description: `Questions about ${PRODUCT.name}? Write to us.`, updated: UPDATED },

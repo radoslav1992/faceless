@@ -148,7 +148,7 @@ export function PublicLayout() {
           <div className="foot-grid">
             <div className="foot-brand">
               <Logo />
-              <p>{PRODUCT.tagline}. Pick a style once; new videos are written, made and posted on your schedule.</p>
+              <p>{PRODUCT.tagline}. Pick a style once; new videos are written and made on your schedule.</p>
             </div>
             <nav aria-label="Product">
               <h2>Product</h2>

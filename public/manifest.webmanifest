@@ -2,7 +2,7 @@
   "id": "/app",
   "name": "Hookstreak Shorts",
   "short_name": "Hookstreak",
-  "description": "Faceless short videos that write, narrate, illustrate and post themselves to TikTok, YouTube Shorts and Instagram Reels.",
+  "description": "Faceless short videos written, narrated, illustrated and subtitled for you, for TikTok, YouTube Shorts and Instagram Reels.",
   "start_url": "/app",
   "scope": "/",
   "display": "standalone",
