@@ -8,7 +8,7 @@ import { HIGHLIGHT_MAX_SECONDS, HIGHLIGHT_MIN_SECONDS, layoutSchema } from "./hi
 import { LONG_VIDEO_SECONDS } from "./speech";
 import { trackSchema } from "./track";
 import {
-  clipPrompt, narrationKey, narrationSchema, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_SCENES, type StoryStyle,
+  clipPrompt, narrationKey, narrationSchema, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_SCENES, voicedScript, type StoryStyle,
 } from "./story";
 
 // The editable description ("spec") of a video, one of two formats:
@@ -135,13 +135,13 @@ export function momentOverlap(a: { start: number; end: number }, b: { start: num
 
 /** The AI voice is recorded for the video's current words and voice (no new recording is paid). */
 export function narrationCurrent(spec: StorySpec) {
-  return spec.narration.kind === "voice" && !!spec.generated?.voiceAssetId && spec.generated.key === narrationKey(spec.narration.voiceId, storyScript(spec.scenes));
+  return spec.narration.kind === "voice" && !!spec.generated?.voiceAssetId && spec.generated.key === narrationKey(spec.narration.voiceId, voicedScript(spec.scenes));
 }
 
 /** What a presenter video is made from: the avatar, its quality and the AI voice's words (a change needs a new one). */
 export const presenterKey = (spec: StorySpec) =>
   spec.presenter && spec.narration.kind === "voice"
-    ? `${spec.presenter.avatarId}:${spec.presenter.quality}:${narrationKey(spec.narration.voiceId, storyScript(spec.scenes))}` : "";
+    ? `${spec.presenter.avatarId}:${spec.presenter.quality}:${narrationKey(spec.narration.voiceId, voicedScript(spec.scenes))}` : "";
 /**
  * The presenter's video is made for the video's current avatar, quality and words, from the recording it keeps (no
  * new one is paid). A new recording always needs a new presenter video: the lips follow the recording.

@@ -28,7 +28,7 @@ import {
 } from "../shared/formats";
 import { PRESENTER_ENGINES } from "../shared/presenter";
 import { trackSchema, type Track } from "../shared/track";
-import { narrationKey, storyScript, textWords } from "../shared/story";
+import { narrationKey, storyScript, textWords, voicedScript } from "../shared/story";
 import { PRODUCT } from "../shared/brand";
 import type { RenderPayload, RenderStatus } from "../shared/render";
 
@@ -429,14 +429,16 @@ async function sourcePicture(e: Env, run: RunInfo, m: PendingMedia) {
  */
 async function makeNarration(e: Env, step: WorkflowStep, run: RunInfo, spec: StorySpec, phase: Phase) {
   if (spec.narration.kind !== "voice") return;
-  const voiceId = spec.narration.voiceId, script = storyScript(spec.scenes);
+  // The voice is asked for the script with each scene's tone as an audio tag; its timings skip the tags, so its words
+  // are counted, and aligned if need be, against the plain script.
+  const voiceId = spec.narration.voiceId, script = storyScript(spec.scenes), voiced = voicedScript(spec.scenes);
   const voice = await step.do("narration", once, async () => {
     const s = await readState(e, run.id);
     if (s.assets?.voice && s.tickets?.words) return { assetId: s.assets.voice, seconds: Number(s.tickets.voiceSeconds) || 0, words: s.tickets.words as any[] };
     if (s.claims?.voice) throw new Error("VOICE_FAILED");
     await patchState(e, run.id, (s) => { (s.claims ||= {}).voice = true; });
     await phase("voice");
-    const result = await speak(e, voiceId, script, spec.language || "en", "original");
+    const result = await speak(e, voiceId, voiced, spec.language || "en", "original");
     const assetId = uid(), key = mediaKey(run.user_id, assetId, "wav");
     await e.MEDIA.put(key, result.audio, { httpMetadata: { contentType: "audio/wav" } });
     await e.DB.prepare(
@@ -458,7 +460,7 @@ async function makeNarration(e: Env, step: WorkflowStep, run: RunInfo, spec: Sto
     }
   });
   await step.do("narration-apply", () => updateSpec(e, run.video_id, (s) => {
-    s.generated = { key: narrationKey(voiceId, script), voiceAssetId: voice.assetId, words };
+    s.generated = { key: narrationKey(voiceId, voiced), voiceAssetId: voice.assetId, words };
   }));
 }
 

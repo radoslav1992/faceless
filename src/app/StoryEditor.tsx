@@ -14,8 +14,8 @@ import {
 import { narrationCurrent, pendingMedia, presenterCurrent, presenterNeeded, showsPresenter, specCredits, spokenSeconds, type StorySpec } from "../../shared/formats";
 import { presenterLayoutInfo, presenterQualityInfo } from "../../shared/presenter";
 import {
-  clipFor, normWord, storyLengths, storyScript, storyStyles, storyTransitions, textWords, transitionInfo, STORY_MAX_CHARS, STORY_MAX_SCENES, STORY_MAX_SECONDS,
-  type SceneSource, type StoryScene, type StoryStyle, type StoryTransition,
+  clipFor, normWord, storyLengths, storyScript, storyStyles, storyTransitions, textWords, transitionInfo, voiceToneNames, voiceTones, STORY_MAX_CHARS, STORY_MAX_SCENES,
+  STORY_MAX_SECONDS, type SceneSource, type StoryScene, type StoryStyle, type StoryTransition,
 } from "../../shared/story";
 import { styledCaptions } from "../../shared/captions";
 import { overlayItems } from "../../shared/overlay";
@@ -243,6 +243,15 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
           {narrationCurrent(spec) && <span className="hint">The voice is recorded: new words record it again (see the price below).</span>}
         </label>
       ) : <span className="small strong-label">Words (from your recording)</span>}
+      {voice && (
+        <label className="field"><span className="small">Tone of voice</span>
+          <select className="select" value={scene.tone} onChange={(e) => onChange({ tone: e.target.value as StoryScene["tone"] })}>
+            <option value="">{index ? "Same as before" : "Natural"}</option>
+            {voiceTones.map((t) => <option key={t} value={t}>{voiceToneNames[t]}</option>)}
+          </select>
+          <span className="hint">How the AI voice says this scene, and the scenes after it until another tone.{narrationCurrent(spec) ? " A new tone records the voice again." : ""}</span>
+        </label>
+      )}
       <div className="word-chips" role="group" aria-label="Words of this scene: choose one to mark it or split before it">
         {w.map((text, i) => (
           <button key={i} type="button" className={`word-chip${isKey(text) ? " key" : ""}`} aria-pressed={word === i} onClick={() => setWord(word === i ? null : i)}>{text}</button>

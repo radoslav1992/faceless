@@ -97,7 +97,7 @@ A video's editable description is its **spec** (`shared/formats.ts`, validated w
 formats: `story` (below) or `highlight`, a clip of one of the owner's long videos (see [Clips](#clips-from-long-videos)).
 A story's spec holds the video type (`kind`: `story`, `pov`, `mashup`, `script`, `backdrop`), the narration (an AI voice by ID, or one of the owner's
 audio/video uploads with an optional exact script), the language, 1–40 scenes (their words, a picture description, key
-words, the picture's source and the transition in), one art style (`shared/story.ts`, 15 prompt suffixes), one
+words, the picture's source, the transition in and the AI voice's tone), one art style (`shared/story.ts`, 15 prompt suffixes), one
 recurring subject, one look (the video's world: place and era, time of day, light, colours), captions (on/off, one
 of 21 styles), an optional on-screen headline (`shared/headline.ts`), an
 optional background clip that replaces the pictures (storytime), music (a library track or an upload, with a volume),
@@ -230,7 +230,8 @@ only, no existing characters, brands or real private people, no invented statist
 content, graphic violence or medical, legal or financial advice; spoken text in the narration language, picture
 descriptions in English. It writes about 15 characters per second of the target length as one scene per ~4.5 s
 (3–40 scenes), each with a picture description and one or two key words, plus the recurring characters (described
-once, at most two, each with a label every picture uses) and the look of the whole video, a headline, a
+once, at most two, each with a label every picture uses), the look of the whole video, a tone for the scenes where the
+narrator's feeling changes (about one in three), a headline, a
 title, a caption, hashtags, a topic and a music code from the library list. Each video type adds rules (POV in the
 second person, the mashup's chanted name, storytime's title question read out first). `acceptStory` cleans and checks
 the answer; fewer than two usable scenes means failure.
@@ -299,7 +300,11 @@ D1 batch, so the credits are reserved by the triggers before any work starts. It
    Banana edit endpoint, or `off` draws every picture from its text alone.
    Each is stored in R2 as an asset of the video (marked `{"ai":true}`) and written back into the spec.
 3. **Voice + alignment** (after the pictures, so a refused picture stops the run before the voice is paid): ElevenLabs
-   `eleven_v4` with timestamps of the text as written, saved as a WAV. When the timings do not have one word per word
+   `eleven_v4` with timestamps of the text as written, saved as a WAV. The text is the script with each scene's tone
+   before its words as an Eleven v4 audio tag (`[whispers]`, `[excited]`, … from `voiceTones`, a tested list; a tone
+   lasts until the next, `voicedScript`); the timings skip what is in brackets, so the subtitles never show the tags. A
+   changed tone records the voice again, charged like changed words (the voice's key is made from the voiced script,
+   which is the plain script when no scene has a tone). When the timings do not have one word per word
    of the script, forced alignment of the WAV with the script times it; if that fails, the voice's own timings are
    matched to the script by their letters. A voice without any timings still makes a video: its scenes are spread over
    it and it has no subtitles.

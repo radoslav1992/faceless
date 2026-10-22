@@ -9,10 +9,10 @@ import { call, signedIn, subscribe, testEnv } from "./helpers";
 import { estimatedSeconds, narrationCurrent, pendingMedia, specCredits, specSchema, type StorySpec } from "../shared/formats";
 import {
   AUTO_TRANSITIONS, clipFor, estimatedTimings, mergeScenes, moveEdge, narrationKey, splitScene, toggleKey, resolveTransition, scenePrompt, scenesFromCounts, splitScenes, storyScript, storySegments,
-  storyStyleIds, storyStyles, storyTiming, timedScript, transitionInfo, transitionKinds, FPS, STORY_MAX_SCENES,
+  storyStyleIds, storyStyles, storyTiming, textWords, timedScript, transitionInfo, transitionKinds, voicedScript, FPS, STORY_MAX_SCENES,
 } from "../shared/story";
 import { captionTimeline } from "../shared/caption-scene";
-import { keyWordIndex, styledCaptions, titleCase, type CaptionWord } from "../shared/captions";
+import { alignmentWords, keyWordIndex, styledCaptions, titleCase, type CaptionWord } from "../shared/captions";
 import { CLIP_CREDITS, pictureCredits, videoCredits, voiceCredits } from "../shared/credits";
 
 // Narrated videos (shared/story.ts): scenes on the voiceover's clock, their pictures, transitions centred on scene
@@ -441,8 +441,8 @@ describe("the writer", () => {
     topic: "Octopus hearts", caption: "Nature is weird.", hashtags: ["#ocean", "#facts!!"], title: "Three hearts", headline: "Three hearts 🐙 and blue blood",
     subject: "a small orange octopus with big round eyes", music: "music2",
     scenes: [
-      { text: "Octopuses have [excited] three hearts 🐙 and **blue** blood.", picture: "An orange octopus pointing at three hearts", keys: ["hearts", "purple", "blue"] },
-      { text: "Two hearts pump blood to the gills.", picture: "x", keys: ["Gills"] },
+      { text: "Octopuses have [excited] three hearts 🐙 and **blue** blood.", picture: "An orange octopus pointing at three hearts", keys: ["hearts", "purple", "blue"], tone: " [Excited] " },
+      { text: "Two hearts pump blood to the gills.", picture: "x", keys: ["Gills"], tone: "angry and loud" },
       { text: "   ", picture: "Nothing", keys: [] },
       { text: "When it swims, the third heart stops.", picture: "The octopus swimming, one heart greyed out", keys: ["stops"] },
     ],
@@ -451,9 +451,10 @@ describe("the writer", () => {
   it("keeps plain spoken scenes, real key words and a picture for each; drops what does not fit", () => {
     const k = acceptStory(answer)!;
     expect(k.scenes).toEqual([
-      { text: "Octopuses have three hearts and blue blood.", picture: "An orange octopus pointing at three hearts", keys: ["hearts", "blue"] },
-      { text: "Two hearts pump blood to the gills.", picture: "An illustration of: Two hearts pump blood to the gills.", keys: ["gills"] },
-      { text: "When it swims, the third heart stops.", picture: "The octopus swimming, one heart greyed out", keys: ["stops"] },
+      // A tone the voice knows is kept (as a plain word); anything else is no tone.
+      { text: "Octopuses have three hearts and blue blood.", picture: "An orange octopus pointing at three hearts", keys: ["hearts", "blue"], tone: "excited" },
+      { text: "Two hearts pump blood to the gills.", picture: "An illustration of: Two hearts pump blood to the gills.", keys: ["gills"], tone: "" },
+      { text: "When it swims, the third heart stops.", picture: "The octopus swimming, one heart greyed out", keys: ["stops"], tone: "" },
     ]);
     expect(k).toMatchObject({ subject: "a small orange octopus with big round eyes", look: "", music: "music2", headline: "Three hearts and blue blood", title: "Three hearts" });
     expect(acceptStory({ ...answer, music: "Lo-fi beats" })!.music).toBe("");
@@ -492,7 +493,7 @@ describe("the writer", () => {
 
   it("plans pictures by scene ID", () => {
     expect(acceptScenePlan({ subject: "a fox", look: " A snowy pine forest at dusk, blue and amber ", title: "  The night fox ", scenes: [{ id: "s2", picture: "A fox at night", keys: ["night"] }, { id: "s9", picture: "Nope" }] }, ["Hello.", "It was night."]))
-      .toEqual({ subject: "a fox", look: "A snowy pine forest at dusk, blue and amber", title: "The night fox", scenes: [{ description: "", keys: [] }, { description: "A fox at night", keys: ["night"] }] });
+      .toEqual({ subject: "a fox", look: "A snowy pine forest at dusk, blue and amber", title: "The night fox", scenes: [{ description: "", keys: [], tone: "" }, { description: "A fox at night", keys: ["night"], tone: "" }] });
     expect(acceptScenePlan({ scenes: [] }, ["Hi."])).toBeNull();
   });
 });
@@ -575,6 +576,32 @@ async function setup() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("narrated videos in the content run", () => {
+  it("tells the voice each scene's tone as an audio tag, keeps tags out of the words, and records again for a new tone", async () => {
+    const { env, user, spec, run } = await setup();
+    const calls = providers();
+    const toned = { ...spec, scenes: spec.scenes.map((s, i) => (i === 0 ? { ...s, tone: "whispers" as const } : i === 2 ? { ...s, tone: "excited" as const } : s)) };
+    const created = await call(worker, env, "POST", "/api/videos", { spec: toned, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(created.status).toBe(201);
+    await run();
+    // ElevenLabs gets the script with the tones in brackets before their scenes' words.
+    const speech = calls.find((c) => c.url.includes("/v1/text-to-speech/"))!;
+    expect(speech.body.text).toBe(voicedScript(toned.scenes));
+    expect(speech.body.text.startsWith(`[whispers] ${textWords(toned.scenes[0].text).join(" ")} `)).toBe(true);
+    expect(speech.body.text).toContain(` [excited] ${textWords(toned.scenes[2].text).join(" ")} `);
+    const video = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
+    expect(narrationCurrent(video.spec)).toBe(true);
+    // Another tone is a new recording, charged like new words; no tones at all is the plain script (older videos stay current).
+    const sad = { ...video.spec, scenes: video.spec.scenes.map((s: any, i: number) => (i === 1 ? { ...s, tone: "sad" } : s)) };
+    expect(narrationCurrent(sad)).toBe(false);
+    expect(specCredits(sad, false)).toBe(voiceCredits(storyScript(sad.scenes)));
+    expect(voicedScript(spec.scenes)).toBe(storyScript(spec.scenes));
+    // The voice's timings skip the tags, so the subtitles never show them.
+    const chars = [..."[whispers] Hi there"];
+    expect(alignmentWords({ characters: chars, characterStartTimesSeconds: chars.map((_, i) => i / 10), characterEndTimesSeconds: chars.map((_, i) => (i + 1) / 10) }).map((w) => w.text))
+      .toEqual(["Hi", "there"]);
+    expect(specSchema.safeParse({ ...video.spec, scenes: video.spec.scenes.map((s: any) => ({ ...s, tone: "shouting" })) }).success).toBe(false);
+  });
+
   it("draws every picture from its own text when FAL_REFERENCE_MODEL is off", async () => {
     const { env, user, spec, run } = await setup();
     env.FAL_REFERENCE_MODEL = "off";
@@ -776,7 +803,7 @@ describe("planning and writing through the API", () => {
     };
     const plan = await call(worker, env, "POST", "/api/story/plan", { texts: said.map((s) => s[0]), style: "doodle" }, user.cookie);
     expect(plan.status).toBe(200);
-    expect(plan.data.scenes[0]).toEqual({ description: "Picture 1 of the octopus", keys: ["have"] });
+    expect(plan.data.scenes[0]).toEqual({ description: "Picture 1 of the octopus", keys: ["have"], tone: "" });
     expect(JSON.parse(seen[0].input).scenes[0]).toEqual({ id: "s1", text: said[0][0] });
     const draft = await call(worker, env, "POST", "/api/story/draft", { template: "facts", prompt: "octopus facts", seconds: 20, voiceId: "aria", style: "doodle" }, user.cookie);
     expect(draft.status).toBe(200);
