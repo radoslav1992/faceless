@@ -78,6 +78,20 @@ export async function freshTokens(env: Env, account: AccountRow): Promise<Tokens
   return next;
 }
 
+/**
+ * Withdraws our access at the network after the account is disconnected or its owner's account deleted, where the
+ * network has a way to (YouTube). Best effort: our copy of the tokens is deleted either way.
+ */
+export async function revokeAccess(env: Env, account: Pick<AccountRow, "id" | "platform" | "credentials">) {
+  const platform = platformFor(account.platform);
+  if (!platform.revoke) return;
+  try {
+    await platform.revoke(env, await readTokens(env, account.credentials));
+  } catch (e) {
+    console.warn("Social access not revoked", { platform: platform.id, account: account.id, code: e instanceof SocialError ? e.code : e instanceof Error ? e.name : "Error" });
+  }
+}
+
 /** The person has to connect the account again (tokens expired, revoked or unreadable). */
 export async function markExpired(env: Env, accountId: string) {
   await env.DB.prepare("UPDATE social_accounts SET status='expired',updated_at=? WHERE id=? AND status='active'").bind(now(), accountId).run();

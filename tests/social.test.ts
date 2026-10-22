@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import worker from "../server/index";
 import { open, seal } from "../server/crypto";
+import { hashPassword } from "../server/security";
 import { tiktokChunks } from "../server/social/tiktok";
 import { SITE, call, signedIn, subscribe, testEnv } from "./helpers";
 
@@ -430,6 +431,34 @@ describe("connecting accounts", () => {
     // Its series stop posting to it and keep everything else.
     expect(JSON.parse((s.sqlite.prepare("SELECT settings FROM series").get() as any).settings)).toEqual({ prompt: "space facts", accounts: [otherAccount] });
     expect((await call(worker, s.env, "DELETE", `/api/accounts/${accountId}`, undefined, s.user.cookie)).status).toBe(404);
+  });
+
+  it("revokes Google's access when a YouTube channel is disconnected or its account deleted, and goes on when Google fails", async () => {
+    const s = setup();
+    const youtube = async (externalId: string, refreshToken?: string) => {
+      const id = addAccount(s, "youtube", externalId);
+      s.sqlite.prepare("UPDATE social_accounts SET credentials=? WHERE id=?").run(await seal(s.env, { accessToken: `a-${externalId}`, refreshToken }), id);
+      return id;
+    };
+    const first = await youtube("UC1", "r-UC1"), second = await youtube("UC2", "r-UC2");
+    await youtube("UC3");
+    addAccount(s, "tiktok", "open-1");
+    let answer = 200;
+    const calls = mockFetch([["POST", "https://oauth2.googleapis.com/revoke", () => new Response("{}", { status: answer })]]);
+    expect((await call(worker, s.env, "DELETE", `/api/accounts/${first}`, undefined, s.user.cookie)).status).toBe(200);
+    // The refresh token is revoked (with it, every access token and the grant itself).
+    expect(calls.map((c) => [c.url.href, String(c.body)])).toEqual([["https://oauth2.googleapis.com/revoke", "token=r-UC1"]]);
+    // Google failing doesn't keep the channel connected: our copy of the tokens is gone either way.
+    answer = 503;
+    expect((await call(worker, s.env, "DELETE", `/api/accounts/${second}`, undefined, s.user.cookie)).status).toBe(200);
+    expect(s.sqlite.prepare("SELECT platform FROM social_accounts ORDER BY platform").all()).toEqual([{ platform: "tiktok" }, { platform: "youtube" }]);
+    // Deleting the account revokes its remaining YouTube channel (without a refresh token, the access token); TikTok
+    // has nothing to revoke.
+    answer = 200;
+    s.sqlite.prepare("UPDATE users SET password_hash=? WHERE id=?").run(await hashPassword("a-long-password"), s.user.id);
+    expect((await call(worker, s.env, "DELETE", "/api/settings/account", { password: "a-long-password" }, s.user.cookie)).status).toBe(200);
+    expect(calls.map((c) => String(c.body))).toEqual(["token=r-UC1", "token=r-UC2", "token=a-UC3"]);
+    expect(count(s, "social_accounts")).toBe(0);
   });
 });
 

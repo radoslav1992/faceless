@@ -120,8 +120,17 @@ Limits until then:
   connect.
 - **Unaudited API project** (created after 28 July 2020): every video uploaded through the API is locked to
   **private**, whatever `privacyStatus` we send, until the project passes the YouTube compliance audit.
-- Quota: the default is 10,000 units a day per project and an upload costs 1,600 units (check Google's quota
-  calculator) — about six uploads a day; ask for more in the audit form.
+- Quota: uploads have their own allowance, by default 100 `videos.insert` calls a day per project for all customers
+  together (Google's quota calculator, checked October 2026); reading channels and stats comes out of the separate
+  10,000 units a day. Ask for more in the audit form before customers get near it.
+
+What the audit checks on our side, already in place: the Terms say that connecting YouTube means agreeing to the
+YouTube Terms of Service (`/terms#social-accounts`); the privacy policy's "YouTube API Services" section
+(`/privacy#youtube`) says the app uses YouTube API Services, links the Google Privacy Policy, explains what YouTube data
+is accessed, stored and shared, and how to revoke access (disconnect, account deletion, or Google's security settings
+page); disconnecting revokes the token. Keep `YOUTUBE_IMPORT` off: downloading YouTube videos is outside what the
+YouTube API Services policies allow (see DEPLOYMENT.md). The Channels page warns that videos may post as private
+until Google finishes its review: take that sentence out of `src/app/Channels.tsx` once the audit passes.
 
 Uploads use the resumable protocol in 16 MiB chunks; an interrupted upload is resumed through the same session, so it
 never creates a second video. Videos are posted as Shorts (vertical, at most 3 minutes; longer ones are refused before
@@ -174,7 +183,10 @@ never stops the others. An expired or revoked token marks the account `expired`,
    again a minute later.
 
 Disconnecting an account cancels what is still scheduled to it and removes it from every series; its published
-history stays ("Disconnected account"). Pausing or deleting a series cancels its scheduled posts.
+history stays ("Disconnected account"). Pausing or deleting a series cancels its scheduled posts. Disconnecting a
+YouTube channel, or deleting the account that owns it, also revokes its refresh token at Google after the response
+(`revokeAccess` in `server/social/credentials.ts`), so the app leaves the person's Google connections list; a failed
+revoke is only logged (`Social access not revoked`), since our copy of the tokens is already deleted.
 
 Provider calls never follow redirects, have timeouts, and log only the platform, publication ID, HTTP status and a
 short code — never tokens, URLs with tokens, or response bodies.

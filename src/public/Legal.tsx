@@ -270,6 +270,10 @@ function terms(op: Operator): Section[] {
             Each platform's own terms apply to what you publish there. The platforms decide on reach, moderation and account status; we are not responsible
             for their decisions or for posts they reject, delay or remove.
           </p>
+          <p>
+            Our YouTube features use YouTube API Services. By connecting a YouTube channel or using {name} to post to YouTube, you agree to be bound by
+            the <a href="https://www.youtube.com/t/terms" target="_blank" rel="noreferrer">YouTube Terms of Service</a>.
+          </p>
         </>
       ),
     },
@@ -606,6 +610,42 @@ function privacy(op: Operator): Section[] {
             These providers process data under their own security and privacy commitments. We may also disclose data when the law requires it, to protect
             people's safety or our rights, or to a buyer if our business is sold (you will be told first, and this policy will keep applying).
           </p>
+        </>
+      ),
+    },
+    {
+      id: "youtube",
+      title: "YouTube API Services",
+      body: (
+        <>
+          <p>
+            {name} uses YouTube API Services when you connect a YouTube channel. Google's handling of your data is described in the{" "}
+            <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer">Google Privacy Policy</a>.
+          </p>
+          <ul>
+            <li>
+              <strong>What we access:</strong> when you connect, your channel's ID, name, handle and picture; then we upload the videos you post or schedule
+              to it, with their titles and descriptions, and read the views, likes and comment counts of those videos for 30 days after each is posted.
+              Where importing from YouTube is available on your plan, we also list your channel's latest videos and download the one you choose.
+            </li>
+            <li>
+              <strong>What we store and why:</strong> the access tokens (encrypted), the channel's details and, for each video we post, its YouTube ID,
+              link, status and those counts — to post for you and to show you how your videos do. We use this data only to provide {name} to you.
+            </li>
+            <li>
+              <strong>Who we share it with:</strong> Google, to post your videos, and the providers that host {name} (see above). We don't sell it, don't
+              use it for advertising, and don't let third parties serve ads through {name}. The cookie and browser storage we use are described under
+              “Cookies and local storage” below.
+            </li>
+            <li>
+              <strong>How to remove our access:</strong> disconnect the channel on the Channels page, or delete your account. We then delete its tokens
+              and ask Google to revoke our access. You can also revoke it at any time in your{" "}
+              <a href="https://security.google.com/settings/security/permissions" target="_blank" rel="noreferrer">Google account's security settings</a>;
+              the channel then shows as needing to be connected again, until you reconnect or disconnect it. The links and counts of videos already posted
+              stay in your posting history until you delete those videos or your account.
+            </li>
+          </ul>
+          <p>Questions about how we use your YouTube data? Please {op.contact}.</p>
         </>
       ),
     },
