@@ -15,6 +15,8 @@ const KEYS = {
   GOOGLE_CLIENT_SECRET: "g-secret",
   // Most tests connect TikTok for Direct Post; the drafts test unsets it.
   TIKTOK_DIRECT_POST: "true",
+  // Open to everyone; the "coming soon" test closes them again.
+  SOCIAL_OPEN: "tiktok,youtube,instagram",
 };
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const now = () => Math.floor(Date.now() / 1000);
@@ -167,6 +169,26 @@ describe("connecting accounts", () => {
     // With Direct Post on, TikTok isn't in drafts mode.
     const direct = setup();
     expect((await call(worker, direct.env, "GET", "/api/accounts", undefined, direct.user.cookie)).data.platforms[0]).toMatchObject({ id: "tiktok", drafts: false });
+  });
+
+  it("keeps connecting \"coming soon\" for everyone but administrators until a network is opened", async () => {
+    const s = setup({ SOCIAL_OPEN: "" });
+    const platformsFor = async (cookie: string) => (await call(worker, s.env, "GET", "/api/accounts", undefined, cookie)).data.platforms.map((p: any) => [p.id, p.soon]);
+    expect(await platformsFor(s.user.cookie)).toEqual([["tiktok", true], ["youtube", true], ["instagram", true]]);
+    const refused = await call(worker, s.env, "POST", "/api/accounts/connect", { platform: "youtube" }, s.user.cookie);
+    expect(refused.status).toBe(403);
+    expect(refused.data.error).toBe("Posting to YouTube is coming soon.");
+    expect(count(s, "oauth_states")).toBe(0);
+    // Administrators can connect every network, to try it before it opens.
+    const admin = signedIn(s.sqlite, "admin@example.com");
+    subscribe(s.sqlite, admin.id, "starter");
+    expect(await platformsFor(admin.cookie)).toEqual([["tiktok", false], ["youtube", false], ["instagram", false]]);
+    expect((await call(worker, s.env, "POST", "/api/accounts/connect", { platform: "youtube" }, admin.cookie)).status).toBe(200);
+    // Opening one network opens it to everyone; the others stay "coming soon".
+    s.env.SOCIAL_OPEN = " YouTube ";
+    expect(await platformsFor(s.user.cookie)).toEqual([["tiktok", true], ["youtube", false], ["instagram", true]]);
+    expect((await call(worker, s.env, "POST", "/api/accounts/connect", { platform: "youtube" }, s.user.cookie)).status).toBe(200);
+    expect((await call(worker, s.env, "POST", "/api/accounts/connect", { platform: "tiktok" }, s.user.cookie)).status).toBe(403);
   });
 
   it("builds Google's authorize URL for offline access with an S256 challenge", async () => {
@@ -410,9 +432,9 @@ describe("connecting accounts", () => {
     expect(r.data.accounts[0]).toMatchObject({ platform: "tiktok", name: "Brand Co", handle: "brandco", avatarUrl: "https://p16.tiktokcdn.com/a.jpg", status: "active" });
     expect(JSON.stringify(r.data)).not.toMatch(/credentials|tt-access|tt-refresh/);
     expect(r.data.platforms).toEqual([
-      { id: "tiktok", name: "TikTok", configured: true, drafts: false },
-      { id: "youtube", name: "YouTube", configured: false, drafts: false },
-      { id: "instagram", name: "Instagram", configured: true, drafts: false },
+      { id: "tiktok", name: "TikTok", configured: true, soon: false, drafts: false },
+      { id: "youtube", name: "YouTube", configured: false, soon: false, drafts: false },
+      { id: "instagram", name: "Instagram", configured: true, soon: false, drafts: false },
     ]);
     expect(r.data.limit).toEqual({ max: 1, used: 1 });
     // A connection that ended shows as expired before maintenance notices.

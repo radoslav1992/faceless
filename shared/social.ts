@@ -9,6 +9,8 @@ export const platforms: Record<PlatformId, {
   instagram: { name: "Instagram", short: "Reels", color: "#e1306c", captionMax: 2200, video: { min: 3, max: 900 }, note: "Reels on professional (business or creator) accounts." },
 };
 export const isPlatform = (p: string): p is PlatformId => (platformIds as readonly string[]).includes(p);
+/** What people read while a network is not open to them yet (SOCIAL_OPEN, server/accounts.ts). */
+export const comingSoon = (name: string) => `Posting straight to ${name} is coming soon. Until then, download your videos and upload them yourself.`;
 
 /** At most `max` UTF-16 units (what the networks count), never splitting a surrogate pair. */
 export function clipText(text: string, max: number) {

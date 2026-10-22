@@ -13,7 +13,7 @@ import { isTemplate, seriesTemplates, templates, type TemplateId } from "../../s
 import { defaultSeriesSettings, episodeCredits, episodeLengths, languages, lengthName, type SeriesSettings } from "../../shared/series";
 import { videosPerMonth } from "../../shared/schedule";
 import { storyStyles } from "../../shared/story";
-import { platforms, type PlatformId } from "../../shared/social";
+import { comingSoon, platforms, type PlatformId } from "../../shared/social";
 import { planById } from "../../shared/plans";
 import { creditsLabel } from "../../shared/credits";
 import "./create.css";
@@ -34,7 +34,7 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
 }) {
   const t = templates[template];
   const set = (patch: Partial<SeriesSettings>) => onChange({ ...settings, ...patch });
-  const accounts = useApi<{ accounts: Account[] }>(part === "content" ? null : "/accounts");
+  const accounts = useApi<{ accounts: Account[]; platforms?: { id: PlatformId; soon?: boolean }[] }>(part === "content" ? null : "/accounts");
   const clips = useApi<{ items: LibraryItem[] }>(part === "posting" || t.kind !== "backdrop" ? null : "/library?kind=clip");
   const [time, setTime] = useState("12:00");
   const { pathname } = useLocation();
@@ -95,6 +95,8 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
     </>
   );
   const usable = (accounts.data?.accounts || []).filter((a) => a.status === "active");
+  // Networks this person can connect now; the others are "coming soon" (server/accounts.ts).
+  const open = accounts.data ? (Object.keys(platforms) as PlatformId[]).filter((p) => !accounts.data?.platforms?.find((x) => x.id === p)?.soon) : [];
   const perMonth = videosPerMonth(settings.schedule);
   const posting = (
     <>
@@ -104,14 +106,16 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
             <input type="checkbox" checked={settings.accounts.includes(a.id)} onChange={(e) => set({ accounts: e.target.checked ? [...settings.accounts, a.id] : settings.accounts.filter((x) => x !== a.id) })} />
             <PlatformBadge platform={a.platform} /><span className="grow">{a.name}{a.handle ? ` (@${a.handle})` : ""}</span>
           </label>
-        )) : <p className="muted small">No channels connected yet.</p>}
-        <div className="row wrap" style={{ gap: 8 }}>
-          {(Object.keys(platforms) as (keyof typeof platforms)[]).map((p) => (
-            <button key={p} type="button" className="btn sm" onClick={() => void connect(p)}><Plus size={14} aria-hidden="true" /> {platforms[p].name}</button>
-          ))}
-          <Link className="small text-link" to="/app/channels">Manage channels</Link>
-        </div>
-        <div className="row between"><span className="small">Post privately (only you see them; TikTok and YouTube)</span><Switch checked={settings.private} onChange={(v) => set({ private: v })} label="Post privately" /></div>
+        )) : !accounts.data ? null : open.length ? <p className="muted small">No channels connected yet.</p> : <p className="muted small">{comingSoon("TikTok, YouTube and Instagram")}</p>}
+        {open.length > 0 && (
+          <div className="row wrap" style={{ gap: 8 }}>
+            {open.map((p) => (
+              <button key={p} type="button" className="btn sm" onClick={() => void connect(p)}><Plus size={14} aria-hidden="true" /> {platforms[p].name}</button>
+            ))}
+            <Link className="small text-link" to="/app/channels">Manage channels</Link>
+          </div>
+        )}
+        {usable.length > 0 && <div className="row between"><span className="small">Post privately (only you see them; TikTok and YouTube)</span><Switch checked={settings.private} onChange={(v) => set({ private: v })} label="Post privately" /></div>}
         <div className="row between"><span className="small">Review each episode before it posts</span><Switch checked={settings.review} onChange={(v) => set({ review: v })} label="Review first" /></div>
         <div className="row between"><span className="small">E-mail me when an episode is ready</span><Switch checked={settings.notify} onChange={(v) => set({ notify: v })} label="E-mail notices" /></div>
       </Section>

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import type { App, Env } from "./types";
+import type { App, DbUser, Env } from "./types";
 import { now, uid, MINUTE } from "./types";
 import { dbFailure, json } from "./db";
 import { allowance } from "./billing";
@@ -15,6 +15,7 @@ import { codeVerifier } from "./social/http";
 import { tiktokDrafts } from "./social/tiktok";
 import { connectionExpiry, revokeAccess } from "./social/credentials";
 import { STATS_WINDOW } from "./metrics";
+import { isAdmin } from "./auth";
 
 // Connecting social accounts with OAuth, listing and disconnecting them. Tokens are sealed with TOKEN_ENCRYPTION_KEY
 // and never leave the server.
@@ -23,6 +24,14 @@ export const accounts = new Hono<App>();
 const STATE_TTL = 10 * MINUTE;
 
 const ready = (env: Env, platform: PlatformId) => encryptionReady(env) && socialPlatforms[platform].configured(env);
+/**
+ * Whether this person may connect the network: administrators always (to try it before launch), everyone else once it
+ * is listed in SOCIAL_OPEN (comma-separated platform IDs). Until then people see "Coming soon".
+ */
+export function linkable(env: Env, user: DbUser, platform: PlatformId) {
+  if (isAdmin(env, user)) return true;
+  return (env.SOCIAL_OPEN || "").toLowerCase().split(",").map((s) => s.trim()).includes(platform);
+}
 const redirectUri = (env: Env, request: Request, platform: PlatformId) => `${siteUrl(env, request)}/api/accounts/callback/${platform}`;
 
 /** The account limit of the user's plan, and how many accounts they have connected. */
@@ -49,8 +58,11 @@ accounts.get("/", async (c) => {
       status: a.status === "active" && a.expires_at && a.expires_at < t ? "expired" : a.status,
       createdAt: a.created_at,
     })),
-    // drafts: videos arrive in the person's TikTok inbox for them to post (server/social/tiktok.ts).
-    platforms: platformIds.map((id) => ({ id, name: platforms[id].name, configured: ready(c.env, id), drafts: id === "tiktok" && tiktokDrafts(c.env) })),
+    // soon: not open to this person yet ("Coming soon"); drafts: videos arrive in the person's TikTok inbox for them to
+    // post (server/social/tiktok.ts).
+    platforms: platformIds.map((id) => ({
+      id, name: platforms[id].name, configured: ready(c.env, id), soon: !linkable(c.env, user, id), drafts: id === "tiktok" && tiktokDrafts(c.env),
+    })),
     limit: await limits(c.env, user),
   });
 });
@@ -58,6 +70,7 @@ accounts.get("/", async (c) => {
 accounts.post("/connect", async (c) => {
   const user = c.get("user");
   const d = z.object({ platform: z.enum(platformIds), back: z.string().regex(/^\/app\/[a-z0-9/-]{0,80}$/).optional() }).parse(await c.req.json());
+  if (!linkable(c.env, user, d.platform)) throw new HTTPException(403, { message: `Posting to ${platforms[d.platform].name} is coming soon.` });
   const { max, used } = await limits(c.env, user);
   if (max <= 0) throw new HTTPException(402, { message: "Connecting social accounts needs a plan." });
   if (used >= max) {

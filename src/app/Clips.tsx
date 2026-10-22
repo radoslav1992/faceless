@@ -14,6 +14,7 @@ import {
   defaultClipOptions, layoutChoices, MOMENT_COUNTS, momentLengthIds, momentLengths, momentSpec, type ClipOptions, type Moment, type MomentLength,
 } from "../../shared/highlights";
 import { planById } from "../../shared/plans";
+import { comingSoon } from "../../shared/social";
 import { SPEECH_MAX_SECONDS } from "../../shared/speech";
 import "./clips.css";
 import "./create.css";
@@ -464,7 +465,8 @@ const spacings = [{ hours: 24, label: "One a day" }, { hours: 12, label: "Two a 
 /** Posts made clips one after another: the first at a chosen time, then one per spacing, on the chosen channels. */
 function ScheduleClips({ clips, onClose, onDone }: { clips: Video[]; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
-  const accounts = useApi<{ accounts: Account[] }>("/accounts");
+  const accounts = useApi<{ accounts: Account[]; platforms?: { id: string; soon?: boolean }[] }>("/accounts");
+  const allSoon = !!accounts.data?.platforms?.length && accounts.data.platforms.every((p) => p.soon);
   const unposted = clips.filter((c) => !(c.publications || []).some((p) => p.status !== "failed" && p.status !== "canceled"));
   const [chosen, setChosen] = useState<string[]>([]);
   const [videos, setVideos] = useState<string[]>(() => unposted.map((c) => c.id));
@@ -498,7 +500,9 @@ function ScheduleClips({ clips, onClose, onDone }: { clips: Video[]; onClose: ()
       </>
     }>
       <div className="stack">
-        {accounts.loading && !accounts.data ? <Spinner label="Loading channels" /> : !usable.length ? (
+        {accounts.loading && !accounts.data ? <Spinner label="Loading channels" /> : !usable.length ? allSoon ? (
+          <p className="muted small">{comingSoon("TikTok, YouTube and Instagram")}</p>
+        ) : (
           <p className="muted small">Connect TikTok, YouTube or Instagram first. <Link className="text-link" to="/app/channels">Connect a channel</Link></p>
         ) : (
           <div className="stack" style={{ gap: 6 }}>

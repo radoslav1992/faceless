@@ -5,7 +5,7 @@ import { del, errorText, post, useApi, type Account } from "../lib";
 import { Spinner, useToast } from "../ui";
 import { ConfirmDialog } from "./pickers";
 import { PlatformBadge } from "./video-ui";
-import { isPlatform, platformIds, platforms, type PlatformId } from "../../shared/social";
+import { comingSoon, isPlatform, platformIds, platforms, type PlatformId } from "../../shared/social";
 
 // Connected TikTok, YouTube and Instagram channels: connect (OAuth), reconnect, disconnect. The OAuth callback lands
 // back here (or on the page that started it) with ?connected= or ?error=.
@@ -28,7 +28,7 @@ export const callbackErrors: Record<string, string> = {
 };
 /** While TikTok posting goes through drafts (server/social/tiktok.ts). */
 export const TIKTOK_DRAFTS_NOTE = "Videos arrive in your TikTok inbox as drafts: open TikTok's notification, paste the caption (the video's page has it ready to copy), choose who can see it and post.";
-type Response = { accounts: Account[]; platforms: { id: PlatformId; configured: boolean; drafts?: boolean }[]; limit: { max: number; used: number } };
+type Response = { accounts: Account[]; platforms: { id: PlatformId; configured: boolean; soon?: boolean; drafts?: boolean }[]; limit: { max: number; used: number } };
 
 /** Shows what the network's consent screen came back with, once, and cleans the address. */
 export function useConnectOutcome() {
@@ -62,6 +62,7 @@ export function ChannelsPage() {
   const accounts = data?.accounts || [];
   const limit = data?.limit ?? { max: 1, used: 0 };
   const full = limit.used >= limit.max;
+  const allSoon = !!data && data.platforms.every((p) => p.soon);
   const connect = async (platform: PlatformId) => {
     setConnecting(platform);
     try {
@@ -78,9 +79,10 @@ export function ChannelsPage() {
           <h1>Channels</h1>
           <p>The accounts your videos post to. Series post to the channels you pick for them; any video can be posted from its page.</p>
         </div>
-        {data && <span className="chip">{limit.used} of {limit.max} channel{limit.max === 1 ? "" : "s"} on your plan</span>}
+        {data && !allSoon && <span className="chip">{limit.used} of {limit.max} channel{limit.max === 1 ? "" : "s"} on your plan</span>}
       </div>
-      {data && full && (
+      {allSoon && <p className="notice" style={{ marginBottom: 16 }}>{comingSoon("TikTok, YouTube and Instagram")}</p>}
+      {data && full && !allSoon && (
         <p className="notice" style={{ marginBottom: 16 }}>
           You've connected all the channels your plan includes. Expired ones can still be reconnected. <Link className="link" to="/app/billing">Upgrade for more</Link>
         </p>
@@ -92,8 +94,9 @@ export function ChannelsPage() {
           {platformIds.map((id) => {
             const facts = data?.platforms.find((p) => p.id === id);
             const configured = facts?.configured ?? false;
+            const soon = facts?.soon ?? false;
             const mine = accounts.filter((a) => a.platform === id);
-            const reason = !configured ? `Posting to ${platforms[id].name} isn't set up on this site yet.` : full ? "Your plan's channels are in use." : null;
+            const reason = soon ? null : !configured ? `Posting to ${platforms[id].name} isn't set up on this site yet.` : full ? "Your plan's channels are in use." : null;
             return (
               <section key={id} className="card stack" aria-labelledby={`channel-${id}`}>
                 <div className="row" style={{ gap: 12 }}>
@@ -102,12 +105,16 @@ export function ChannelsPage() {
                     <h2 id={`channel-${id}`} style={{ fontSize: 18 }}>{platforms[id].name}</h2>
                     <p className="small muted">{facts?.drafts ? "Sends videos to your TikTok inbox as drafts." : platforms[id].note}</p>
                   </div>
-                  <button type="button" className="btn primary sm" onClick={() => void connect(id)} disabled={!!reason || !!connecting}>
-                    {connecting === id ? <Spinner label="Opening" /> : <Plus size={14} aria-hidden="true" />} Connect{mine.length ? " another" : ""}
-                  </button>
+                  {soon ? <span className="chip">Coming soon</span> : (
+                    <button type="button" className="btn primary sm" onClick={() => void connect(id)} disabled={!!reason || !!connecting}>
+                      {connecting === id ? <Spinner label="Opening" /> : <Plus size={14} aria-hidden="true" />} Connect{mine.length ? " another" : ""}
+                    </button>
+                  )}
                 </div>
                 {reason && <p className="small muted">{reason} {full && configured && <Link className="link" to="/app/billing">See plans</Link>}</p>}
-                <p className="small muted row" style={{ gap: 6, alignItems: "flex-start" }}><Info size={14} aria-hidden="true" style={{ flex: "none", marginTop: 3 }} /> {facts?.drafts ? TIKTOK_DRAFTS_NOTE : beforeYouConnect[id]}</p>
+                {!(soon && allSoon) && (
+                  <p className="small muted row" style={{ gap: 6, alignItems: "flex-start" }}><Info size={14} aria-hidden="true" style={{ flex: "none", marginTop: 3 }} /> {soon ? comingSoon(platforms[id].name) : facts?.drafts ? TIKTOK_DRAFTS_NOTE : beforeYouConnect[id]}</p>
+                )}
                 {mine.map((a) => {
                   const active = a.status === "active";
                   return (
@@ -118,7 +125,7 @@ export function ChannelsPage() {
                         <span className="small muted">{a.handle ? `@${a.handle}` : platforms[id].name}</span>
                       </div>
                       {active ? <span className="chip green">Connected</span> : (
-                        <button type="button" className="btn sm primary" onClick={() => void connect(id)} disabled={!configured || !!connecting}>
+                        <button type="button" className="btn sm primary" onClick={() => void connect(id)} disabled={!configured || soon || !!connecting}>
                           <RefreshCw size={14} aria-hidden="true" /> Reconnect
                         </button>
                       )}
@@ -126,7 +133,7 @@ export function ChannelsPage() {
                     </div>
                   );
                 })}
-                {!mine.length && <p className="small muted">No {platforms[id].name} account connected.</p>}
+                {!mine.length && !soon && <p className="small muted">No {platforms[id].name} account connected.</p>}
               </section>
             );
           })}
