@@ -1,5 +1,5 @@
 import { json } from "../db";
-import { platforms, type PlatformId } from "../../shared/social";
+import { platforms, postCaption, type PlatformId } from "../../shared/social";
 import { clip } from "./http";
 
 // How a video goes out on a network: its text, title and checks.
@@ -18,18 +18,11 @@ export type VideoRow = {
   duration: number;
 };
 
-const hashtag = (t: unknown) => typeof t === "string" && /^#?[\p{L}\p{N}_]{1,60}$/u.test(t.trim()) ? (t.trim().startsWith("#") ? t.trim() : `#${t.trim()}`) : "";
-
 /** The text to publish: caption, a blank line and the hashtags, cut to the network's limit (hashtags kept). */
 export function postText(video: VideoRow, platform: PlatformId) {
   const spec = json<any>(video.spec, {});
   const caption = String(video.caption || spec.caption || "").trim();
-  const hashtags = (Array.isArray(spec.hashtags) ? spec.hashtags : []).map(hashtag).filter(Boolean).slice(0, 30) as string[];
-  const max = platforms[platform].captionMax;
-  const tail = hashtags.join(" ");
-  const text = !tail ? clip(caption, max)
-    : tail.length + 2 >= max ? clip(`${caption}\n\n${tail}`, max)
-    : [clip(caption, max - tail.length - 2), tail].filter(Boolean).join("\n\n");
+  const { text, hashtags } = postCaption(caption, Array.isArray(spec.hashtags) ? spec.hashtags : [], platform);
   const firstLine = caption.split("\n").find((l) => l.trim())?.trim() || "";
   const title = clip(String(spec.title || video.title || firstLine || video.hook || "").replace(/\s+/g, " ").trim(), 100);
   return { text, caption, hashtags, title };

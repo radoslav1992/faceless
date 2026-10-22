@@ -121,8 +121,8 @@ async function context(env: Env, { pub, post, account, platform }: Loaded): Prom
 async function settle(env: Env, l: Loaded, r: PublishResult, fromStart: boolean): Promise<Outcome> {
   if (r.state === "published") {
     await env.DB.prepare(
-      "UPDATE publications SET status='published',external_id=?,url=?,published_at=?,ticket=NULL,token=NULL,error=NULL,updated_at=? WHERE id=? AND attempts=? AND status IN ('publishing','failed')",
-    ).bind(r.externalId || null, r.url || null, now(), now(), l.pub.id, l.pub.attempts).run();
+      "UPDATE publications SET status='published',draft=?,external_id=?,url=?,published_at=?,ticket=NULL,token=NULL,error=NULL,updated_at=? WHERE id=? AND attempts=? AND status IN ('publishing','failed')",
+    ).bind(r.draft ? 1 : 0, r.externalId || null, r.url || null, now(), now(), l.pub.id, l.pub.attempts).run();
     return { state: "published" };
   }
   if (r.state === "processing") {

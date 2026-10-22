@@ -26,7 +26,8 @@ video; `0003_voices.sql` creates the narration voices managed in Admin → Voice
 before; `0004_library.sql` rebuilds `library_items` with its rows to add pictures, descriptions and the AI mark;
 `0005_style_examples.sql` creates each style's example video, `0006_example_previews.sql` adds the columns of their
 short previews, `0007_library_categories.sql` the library's genre or category, `0008_avatars.sql` the presenters'
-avatars managed in Admin → Presenters and `0009_growth.sql` the affiliate program and calls for credits; the code
+avatars managed in Admin → Presenters, `0009_growth.sql` the affiliate program and calls for credits and
+`0010_tiktok_drafts.sql` marks posts sent to TikTok as drafts; the code
 already running keeps working on each):
 
 ```sh
@@ -93,6 +94,7 @@ the Worker reads (`Env` in `server/types.ts`); `.dev.vars.example` lists them fo
 | `HEYGEN_API_KEY` | secret | Optional. On-screen presenters: HeyGen API v3 lip-syncs an avatar to the video's ElevenLabs voice (Avatar IV for regular quality, Avatar V for high), and Admin → Presenters lists HeyGen's stock avatars and links the account's own. HeyGen reads the voice through a capability link on `SITE_URL`. Without it presenters aren't offered. The account's API credits pay for each presenter video (about $0.04 a second with Avatar IV, $0.12 with Avatar V) |
 | `TOKEN_ENCRYPTION_KEY` | secret | `openssl rand -base64 32`. Seals OAuth tokens (AES-256-GCM) and signs API download links. Never change it once accounts are connected |
 | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` | secret | TikTok app (section 4) |
+| `TIKTOK_DIRECT_POST` | text | `true` once TikTok has audited the app for Direct Post: videos then post straight to people's profiles. Unset (the default), they go to people's TikTok inbox as drafts, which they post in the TikTok app. People connected in one mode reconnect after a switch (the permission differs) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | secret | Google OAuth client for YouTube (section 4) |
 | `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET` | secret | The Instagram app ID and secret of the Meta app (section 4) |
 
@@ -139,13 +141,14 @@ bound to the person who started it. Review and audit steps per network: [SOCIAL.
 
 | Network | App | Redirect URI | Scopes |
 | --- | --- | --- | --- |
-| TikTok | developers.tiktok.com app with Login Kit and the Content Posting API (direct post); `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` | `${SITE_URL}/api/accounts/callback/tiktok` | `user.info.basic`, `video.publish`, `video.list` |
+| TikTok | developers.tiktok.com app with Login Kit and the Content Posting API (Upload for drafts; Direct Post once audited); `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` | `${SITE_URL}/api/accounts/callback/tiktok` | `user.info.basic`, `video.upload` (drafts) or `video.publish` (with `TIKTOK_DIRECT_POST=true`), `video.list` |
 | YouTube | Google Cloud project with the YouTube Data API v3 enabled, an OAuth consent screen and an OAuth client of type *Web application*; `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | `${SITE_URL}/api/accounts/callback/youtube` | `https://www.googleapis.com/auth/youtube.upload`, `https://www.googleapis.com/auth/youtube.readonly` |
 | Instagram | Meta app with the Instagram product, *Instagram API with Instagram login* (business login); `INSTAGRAM_APP_ID` / `INSTAGRAM_APP_SECRET` are the Instagram app's ID and secret, not the Facebook app ID | `${SITE_URL}/api/accounts/callback/instagram` | `instagram_business_basic`, `instagram_business_content_publish`, `instagram_business_manage_insights` |
 
-- **TikTok** uses PKCE. Videos are uploaded as files in chunks, so no URL ownership check is needed for them. Until
-  TikTok audits the app it accepts posts only to private accounts; people then see a message saying so. `video.list`
-  reads video stats.
+- **TikTok** uses PKCE. Videos are uploaded as files in chunks, so no URL ownership check is needed for them. By
+  default they go to the person's TikTok inbox as drafts (no audit needed beyond the app review); with
+  `TIKTOK_DIRECT_POST=true` they post directly, which an app TikTok hasn't audited may only do privately, to private
+  accounts. `video.list` reads the stats of directly posted videos.
 - **YouTube** asks for offline access with a consent prompt (for a refresh token) and PKCE. A Google account without a
   YouTube channel cannot connect, nor can people who untick the upload scope. The read scope reads the channel when
   it connects and the videos' stats. Check that the project's YouTube Data API quota covers your daily uploads.

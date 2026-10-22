@@ -5,6 +5,7 @@ import { dispatchDue, refreshAccounts } from "../server/publishing";
 import { Publication } from "../server/publish-workflow";
 import { videoReady } from "../server/series";
 import { tiktokChunks } from "../server/social/tiktok";
+import { dueForStats } from "../server/metrics";
 import { specSchema } from "../shared/formats";
 import { seriesSettingsSchema } from "../shared/series";
 import type { Tokens } from "../server/social";
@@ -12,9 +13,11 @@ import { SITE, call, signedIn, testEnv } from "./helpers";
 
 // Posting made videos on TikTok, YouTube and Instagram: now, at a chosen time, or (a series' episodes) at their slot.
 
-const KEYS = {
+const KEYS: Record<string, string> = {
   TIKTOK_CLIENT_KEY: "tt-key",
   TIKTOK_CLIENT_SECRET: "tt-secret",
+  // Most tests post to TikTok directly; the drafts tests unset it.
+  TIKTOK_DIRECT_POST: "true",
   INSTAGRAM_APP_ID: "ig-app",
   INSTAGRAM_APP_SECRET: "ig-secret",
   GOOGLE_CLIENT_ID: "g-client",
@@ -59,8 +62,8 @@ function person(sqlite: ReturnType<typeof testEnv>["sqlite"]): User {
   sqlite.prepare("INSERT INTO media_limits(user_id,max_bytes) VALUES (?,?)").run(user.id, 10 * 1024 ** 3);
   return user;
 }
-function setup() {
-  const { env, sqlite } = testEnv(KEYS);
+function setup(overrides: Record<string, string> = {}) {
+  const { env, sqlite } = testEnv({ ...KEYS, ...overrides });
   return { env, sqlite, user: person(sqlite) };
 }
 
@@ -594,6 +597,64 @@ describe("publishing", () => {
     const strict = addPublication(s, await addVideo(s), account, "tiktok", { private: true });
     expect(await publish(s, strict)).toMatchObject({ status: "failed", error: expect.stringMatching(/doesn't offer private posting/) });
     expect(calls.map((c) => c.url.pathname)).toEqual(["/v2/post/publish/creator_info/query/"]);
+  });
+
+  it("sends a TikTok video to the creator's inbox as a draft: the file only, done once it's in the inbox", async () => {
+    const s = setup({ TIKTOK_DIRECT_POST: "" });
+    const account = await addAccount(s, "tiktok");
+    const size = 20 * MiB + 5;
+    const video = await addVideo(s, { bytes: size });
+    // "Post privately" doesn't apply to a draft: the creator chooses who sees it in TikTok.
+    const pubId = addPublication(s, video, account, "tiktok", { private: true });
+    const tickets: string[] = [];
+    const calls = mockFetch([
+      ["POST", "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/", tiktokInit("v_inbox_file~v2.5")],
+      ["PUT", "https://open-upload.tiktokapis.com/video/", () => {
+        tickets.push(publication(s, pubId).ticket);
+        return new Response(null, { status: 201 });
+      }],
+      ["POST", "https://open.tiktokapis.com/v2/post/publish/status/fetch/", sequence(
+        () => ok({ data: { status: "PROCESSING_UPLOAD" }, error: { code: "ok" } }),
+        () => ok({ data: { status: "SEND_TO_USER_INBOX" }, error: { code: "ok" } }),
+      )],
+    ]);
+    const p = await publish(s, pubId);
+    expect(p).toMatchObject({ status: "published", draft: 1, external_id: "v_inbox_file~v2.5", url: null, ticket: null, token: null, error: null });
+    // No creator info (it needs video.publish), and no caption or privacy: the Upload API takes the file only.
+    expect(calls.map((c) => c.url.pathname)).toEqual([
+      "/v2/post/publish/inbox/video/init/", "/video/", "/video/", "/v2/post/publish/status/fetch/", "/v2/post/publish/status/fetch/",
+    ]);
+    expect(jsonBody(calls[0])).toEqual({ source_info: { source: "FILE_UPLOAD", video_size: size, chunk_size: 10 * MiB, total_chunk_count: 2 } });
+    // The ticket is saved before the first byte goes out, as for a direct post.
+    expect(tickets.map((t) => JSON.parse(t))).toEqual([0, 1].map(() => ({ stage: "status", publishId: "v_inbox_file~v2.5", kind: "draft" })));
+    // The app shows it as sent to drafts, and its stats are never read (we never learn the post made from it).
+    const shown = await call(worker, s.env, "GET", `/api/videos/${video}`, undefined, s.user.cookie);
+    expect(shown.data.video.publications).toMatchObject([{ id: pubId, status: "published", draft: 1, url: null }]);
+    expect(await dueForStats(s.env, 10, now() + DAY)).toEqual([]);
+
+    // A creator who posted it before our first check: the post is recorded, still marked as having come from a draft.
+    mockFetch([
+      ["POST", "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/", tiktokInit("v_inbox_file~v2.6")],
+      ["PUT", "https://open-upload.tiktokapis.com/video/", () => new Response(null, { status: 201 })],
+      ["POST", "https://open.tiktokapis.com/v2/post/publish/status/fetch/", () => ok({ data: { status: "PUBLISH_COMPLETE", publicaly_available_post_id: [] }, error: { code: "ok" } })],
+    ]);
+    const quick = await publish(s, addPublication(s, await addVideo(s), account, "tiktok"));
+    expect(quick).toMatchObject({ status: "published", draft: 1, external_id: "v_inbox_file~v2.6" });
+  });
+
+  it("asks people to clear their TikTok inbox when too many drafts are waiting", async () => {
+    const s = setup({ TIKTOK_DIRECT_POST: "" });
+    const account = await addAccount(s, "tiktok");
+    const pubId = addPublication(s, await addVideo(s), account, "tiktok");
+    const calls = mockFetch([
+      ["POST", "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/", () => ok({ error: { code: "spam_risk_too_many_pending_share", message: "x" } }, { status: 403 })],
+    ]);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const p = await publish(s, pubId);
+    // Tried again after 1, 5 and 15 minutes, then a message saying what to do.
+    expect(calls).toHaveLength(4);
+    expect(p).toMatchObject({ status: "failed", draft: 0 });
+    expect(p.error).toBe("Too many TikTok drafts from this app are waiting in your TikTok inbox. Post or delete some in TikTok, then try again.");
   });
 
   it("labels a post as AI-made when its video contains AI media", async () => {

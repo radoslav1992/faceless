@@ -73,7 +73,7 @@ export function SchedulePage() {
                       <small className="row" style={{ gap: 6 }}><PlatformBadge platform={item.row.platform} /> {time(item.at)} · {item.row.accountName}{item.row.private ? " · private" : ""}</small>
                       {item.row.status === "failed" && item.row.error && <small className="error">{item.row.error}</small>}
                     </div>
-                    <span className={`chip ${statusChip[item.row.status]}`}>{item.row.status === "scheduled" && item.row.renderStatus !== "ready" ? "Being made" : statusText[item.row.status]}</span>
+                    <span className={`chip ${statusChip[item.row.status]}`}>{item.row.status === "scheduled" && item.row.renderStatus !== "ready" ? "Being made" : item.row.status === "published" && item.row.draft ? "Sent to drafts" : statusText[item.row.status]}</span>
                   </Link>
                 ) : (
                   <Link key={`${item.series.id}-${item.at}`} to={`/app/series/${item.series.id}`} className="slot schedule-item planned">

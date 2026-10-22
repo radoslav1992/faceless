@@ -59,6 +59,8 @@ export function failureMessage(platform: PlatformId | null, code: string, detail
   const name = platform ? platforms[platform].name : "the network";
   if (platform === "tiktok" && detail === "unaudited_client_can_only_post_to_private_accounts")
     return "TikTok only accepts private posts from this app for now. Set your TikTok account to private, or try again later.";
+  if (platform === "tiktok" && detail === "spam_risk_too_many_pending_share")
+    return "Too many TikTok drafts from this app are waiting in your TikTok inbox. Post or delete some in TikTok, then try again.";
   if (platform === "tiktok" && detail === "private_not_offered")
     return "TikTok doesn't offer private posting for this account, so nothing was posted. Post it publicly, or check the account's privacy settings on TikTok.";
   switch (code) {

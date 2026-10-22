@@ -4,13 +4,18 @@ import type { FailureCode, Platform, PostStats, PublishContext, PublishResult, T
 import { SocialError, failure, oauthFailure, providerId, safeCode } from "./errors";
 import { bearer, checkedUrl, clip, count, form, hexChallenge, json, readRange, send } from "./http";
 
-// TikTok: Login Kit (OAuth 2 v2) and the Content Posting API (Direct Post).
+// TikTok: Login Kit (OAuth 2 v2) and the Content Posting API. Until TikTok audits the app for Direct Post (and
+// TIKTOK_DIRECT_POST is "true"), videos go to the creator's TikTok inbox as drafts (Upload, `video.upload`): TikTok
+// notifies them, and they add the caption, choose who sees it and post it in the TikTok app.
 const AUTHORIZE = "https://www.tiktok.com/v2/auth/authorize/";
 const API = "https://open.tiktokapis.com/v2";
 const MiB = 1024 * 1024;
 // video.list (Display API) reads the stats of the account's public videos; connections made before it was asked for
 // lack it and are asked to reconnect.
 const SCOPES = ["user.info.basic", "video.publish", "video.list"] as const;
+const DRAFT_SCOPES = ["user.info.basic", "video.upload", "video.list"] as const;
+/** Videos go to the creator's inbox as drafts, not straight to their profile. */
+export const tiktokDrafts = (env: Env) => env.TIKTOK_DIRECT_POST !== "true";
 const STATS_FIELDS = "id,view_count,like_count,comment_count,share_count";
 const VIDEO_ID = /^\d{1,25}$/;
 
@@ -176,6 +181,26 @@ export function tiktokStats(text: string): Map<string, PostStats> {
   return out;
 }
 
+/**
+ * Sends the video to the creator's TikTok inbox as a draft. The Upload API takes the file only: the caption, who can
+ * see it, the interaction settings and the AI-content label are set by the creator in TikTok when they post it.
+ */
+async function draft(env: Env, ctx: PublishContext): Promise<PublishResult> {
+  const { chunkSize, count } = tiktokChunks(ctx.media.bytes);
+  // https://developers.tiktok.com/doc/content-posting-api-reference-upload-video
+  const { data } = await api(ctx.tokens, "/post/publish/inbox/video/init/", {
+    source_info: { source: "FILE_UPLOAD", video_size: ctx.media.bytes, chunk_size: chunkSize, total_chunk_count: count },
+  });
+  const publishId = providerId(data.publish_id);
+  if (!publishId) throw failure("tiktok", 200, ["PROVIDER_ERROR", false], "no_publish_id");
+  const uploadUrl = checkedUrl("tiktok", data.upload_url, ["tiktokapis.com"]);
+  // Once the last chunk is in, TikTok delivers the draft on its own: from here on it is only polled.
+  const ticket: Ticket = { stage: "status", publishId, kind: "draft" };
+  await ctx.checkpoint(ticket);
+  await upload(env, ctx, uploadUrl);
+  return { state: "processing", ticket };
+}
+
 export const tiktok: Platform = {
   id: "tiktok",
   configured: (env) => !!(env.TIKTOK_CLIENT_KEY && env.TIKTOK_CLIENT_SECRET),
@@ -188,7 +213,7 @@ export const tiktok: Platform = {
     const q = new URLSearchParams({
       client_key: env.TIKTOK_CLIENT_KEY!,
       response_type: "code",
-      scope: SCOPES.join(","),
+      scope: (tiktokDrafts(env) ? DRAFT_SCOPES : SCOPES).join(","),
       redirect_uri: redirectUri,
       state,
       code_challenge: await hexChallenge(codeVerifier),
@@ -200,7 +225,8 @@ export const tiktok: Platform = {
   async exchange(env, { code, redirectUri, codeVerifier }) {
     const tokens = await token(env, { code, grant_type: "authorization_code", redirect_uri: redirectUri, code_verifier: codeVerifier });
     const granted = (tokens.scope || "").split(/[,\s]+/);
-    if (!granted.includes("video.publish")) throw new SocialError("PERMISSION");
+    const drafts = tiktokDrafts(env);
+    if (!granted.includes(drafts ? "video.upload" : "video.publish")) throw new SocialError("PERMISSION");
     // https://developers.tiktok.com/doc/tiktok-api-v2-get-user-info (`username` needs user.info.profile; the
     // creator info below has it with video.publish).
     const r = await send("tiktok", `${API}/user/info/?fields=open_id,union_id,avatar_url,display_name`, { headers: bearer(tokens.accessToken) });
@@ -208,8 +234,9 @@ export const tiktok: Platform = {
     const code2 = safeCode(body?.error?.code);
     const user = body?.data?.user;
     if (!r.ok || (code2 && code2 !== "ok") || typeof user?.open_id !== "string") throw failure("tiktok", r.status, codes[code2] ?? null, code2);
+    // The creator info (with the username) needs video.publish, which a drafts connection doesn't ask for.
     let handle: string | undefined;
-    try { handle = (await creator(tokens)).username || undefined; } catch { handle = undefined; }
+    if (!drafts) try { handle = (await creator(tokens)).username || undefined; } catch { handle = undefined; }
     return {
       tokens,
       profile: {
@@ -228,6 +255,7 @@ export const tiktok: Platform = {
   },
 
   async publish(env, ctx): Promise<PublishResult> {
+    if (tiktokDrafts(env)) return draft(env, ctx);
     const c = await creator(ctx.tokens);
     const username = ctx.account.handle || c.username;
     const media = ctx.media;
@@ -276,15 +304,22 @@ export const tiktok: Platform = {
     if (!ticket.publishId) return { state: "failed", code: "INTERRUPTED", retryable: false };
     // https://developers.tiktok.com/doc/content-posting-api-reference-get-video-status
     const { data, text } = await api(ctx.tokens, "/post/publish/status/fetch/", { publish_id: ticket.publishId });
+    const sentAsDraft = ticket.kind === "draft";
     switch (data.status) {
+      case "SEND_TO_USER_INBOX":
+        // A draft is done once it is in the creator's inbox: they post it in TikTok, and we don't hear when.
+        if (sentAsDraft) return { state: "published", externalId: ticket.publishId, draft: true };
+        return { state: "processing", ticket };
       case "PUBLISH_COMPLETE": {
-        // Public posts get their ID once TikTok's moderation is done; a private (SELF_ONLY) post never gets one.
+        // Public posts get their ID once TikTok's moderation is done; a private (SELF_ONLY) post never gets one. A draft
+        // the creator already posted by the time we asked is complete too.
         const id = postId(text);
         const user = ticket.username || ctx.account.handle;
         return {
           state: "published",
           externalId: id || ticket.publishId,
           url: id && user ? `https://www.tiktok.com/@${encodeURIComponent(user)}/video/${id}` : undefined,
+          ...(sentAsDraft ? { draft: true } : {}),
         };
       }
       case "FAILED": {
@@ -294,7 +329,7 @@ export const tiktok: Platform = {
         return { state: "failed", code, retryable, detail: reason };
       }
       default:
-        // PROCESSING_UPLOAD, PROCESSING_DOWNLOAD (and SEND_TO_USER_INBOX, which Direct Post does not use).
+        // PROCESSING_UPLOAD, PROCESSING_DOWNLOAD.
         return { state: "processing", ticket };
     }
   },

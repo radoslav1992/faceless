@@ -22,12 +22,12 @@ type Due = { id: string; account_id: string; platform: string; external_id: stri
 /** Why nothing was read for a post: shown with the video's stats as a short note. */
 export type MetricsError = "scope" | "reconnect" | "not_found" | "failed";
 
-/** Published posts whose stats are due, oldest check first. */
+/** Published posts whose stats are due, oldest check first (not TikTok drafts: we never learn their post). */
 export async function dueForStats(env: Env, limit: number, t = now()): Promise<Due[]> {
   const platforms = statsPlatforms.map(() => "?").join(",");
   const rows = await env.DB.prepare(
     `SELECT id,account_id,platform,external_id FROM publications
-     WHERE status='published' AND published_at>=? AND published_at<=? AND platform IN (${platforms}) AND external_id IS NOT NULL AND account_id IS NOT NULL
+     WHERE status='published' AND draft=0 AND published_at>=? AND published_at<=? AND platform IN (${platforms}) AND external_id IS NOT NULL AND account_id IS NOT NULL
        AND (metrics_checked_at IS NULL OR metrics_checked_at<CASE WHEN published_at>=? THEN ? ELSE ? END)
      ORDER BY COALESCE(metrics_checked_at,0),published_at DESC LIMIT ?`,
   ).bind(t - STATS_WINDOW, t - FIRST_READ, ...statsPlatforms, t - FRESH_FOR, t - FRESH_EVERY, t - DAILY_EVERY, limit).all<Due>();

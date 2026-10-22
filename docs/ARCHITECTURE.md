@@ -447,8 +447,11 @@ outages) are started again after 1, 5 and 15 minutes; then it polls every 15 sec
 the URL. A run that cannot tell whether the post went out fails with a message asking the person to check their
 profile before retrying. Failures are stored as plain-English messages; an `AUTH_EXPIRED` marks the account expired.
 
-- **TikTok**: Content Posting API, direct post, the file uploaded in chunks from R2 (`FILE_UPLOAD`); `is_aigc` set for
-  AI-made videos.
+- **TikTok**: Content Posting API, the file uploaded in chunks from R2 (`FILE_UPLOAD`). By default as a draft to the
+  person's TikTok inbox (`/post/publish/inbox/video/init/`): done once TikTok reports `SEND_TO_USER_INBOX`, recorded
+  as published with `draft=1`, no link and no stats; the video's page offers its caption to copy and reminds them to
+  turn on TikTok's AI label. With `TIKTOK_DIRECT_POST=true`, direct post with the caption and `is_aigc` set for AI-made
+  videos.
 - **YouTube**: a resumable upload from R2 with `#Shorts` in the description and `containsSyntheticMedia` for AI-made
   videos.
 - **Instagram**: a `REELS` container whose `video_url` is the capability link
