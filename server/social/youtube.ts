@@ -7,6 +7,7 @@ import { bearer, challenge, checkedUrl, clip, count, form, json, readRange, send
 // YouTube: Google OAuth 2 (web server flow with PKCE) and the YouTube Data API v3 resumable upload.
 const AUTHORIZE = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN = "https://oauth2.googleapis.com/token";
+const REVOKE = "https://oauth2.googleapis.com/revoke";
 export const API = "https://www.googleapis.com/youtube/v3";
 const UPLOAD = "https://www.googleapis.com/upload/youtube/v3/videos";
 const UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload";
@@ -238,5 +239,19 @@ export const youtube: Platform = {
     // The session expired before the upload finished: no video was created.
     if (r.status === 404 || r.status === 410) return { state: "failed", code: "PROVIDER_ERROR", retryable: true, detail: "upload_session_expired" };
     throw await googleFailure(r);
+  },
+
+  async revoke(_env, tokens) {
+    // https://developers.google.com/identity/protocols/oauth2/web-server#tokenrevoke — revoking the refresh token also
+    // revokes its access tokens and the person's grant, so the app leaves their Google account's connections list.
+    const r = await send("youtube", REVOKE, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: form({ token: tokens.refreshToken || tokens.accessToken }),
+      timeout: 10_000,
+    });
+    await r.body?.cancel().catch(() => {});
+    // 400 invalid_token: already revoked or expired, which is the outcome we want.
+    if (!r.ok && r.status !== 400) throw new SocialError("PROVIDER_ERROR", true, r.status);
   },
 };

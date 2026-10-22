@@ -5,14 +5,14 @@ import type { App, Env } from "./types";
 import { now, uid, MINUTE } from "./types";
 import { dbFailure, json } from "./db";
 import { allowance } from "./billing";
-import { rate, sha, token } from "./security";
+import { defer, rate, sha, token } from "./security";
 import { siteUrl } from "./config";
 import { encryptionReady, seal } from "./crypto";
 import { planById } from "../shared/plans";
 import { isPlatform, platformIds, platforms, type PlatformId } from "../shared/social";
 import { socialPlatforms, SocialError } from "./social";
 import { codeVerifier } from "./social/http";
-import { connectionExpiry } from "./social/credentials";
+import { connectionExpiry, revokeAccess } from "./social/credentials";
 import { STATS_WINDOW } from "./metrics";
 
 // Connecting social accounts with OAuth, listing and disconnecting them. Tokens are sealed with TOKEN_ENCRYPTION_KEY
@@ -146,7 +146,8 @@ accounts.get("/callback/:platform", async (c) => {
 accounts.delete("/:id", async (c) => {
   const user = c.get("user");
   const id = c.req.param("id");
-  const account = await c.env.DB.prepare("SELECT id FROM social_accounts WHERE id=? AND user_id=?").bind(id, user.id).first<{ id: string }>();
+  const account = await c.env.DB.prepare("SELECT id,platform,credentials FROM social_accounts WHERE id=? AND user_id=?").bind(id, user.id)
+    .first<{ id: string; platform: PlatformId; credentials: string }>();
   if (!account) throw new HTTPException(404, { message: "Social account not found." });
   // Posts still scheduled to it are cancelled and series stop posting to it; published history stays (its account
   // becomes "disconnected"). The account_busy trigger refuses while a video is being published to it.
@@ -165,5 +166,6 @@ accounts.delete("/:id", async (c) => {
   } catch (e) {
     dbFailure(e);
   }
+  await defer(c, revokeAccess(c.env, account));
   return c.json({ ok: true });
 });

@@ -3,10 +3,12 @@ import { HTTPException } from "hono/http-exception";
 import { deleteCookie } from "hono/cookie";
 import { z } from "zod";
 import type { App } from "../types";
-import { checkPassword, hashPassword, rate } from "../security";
+import { checkPassword, defer, hashPassword, rate } from "../security";
 import { dbFailure } from "../db";
 import { endPaidAccess } from "../billing";
 import { SESSION_COOKIE } from "../auth";
+import { revokeAccess } from "../social/credentials";
+import type { PlatformId } from "../../shared/social";
 
 // The signed-in person's own account: name, password, deletion. API keys are in server/api.ts.
 export const settings = new Hono<App>();
@@ -34,11 +36,15 @@ settings.delete("/account", async (c) => {
   const d = z.object({ password: z.string().min(1).max(128) }).parse(await c.req.json());
   if (!(await checkPassword(d.password, user.password_hash))) throw new HTTPException(400, { message: "Your password isn't right." });
   if (user.stripe_customer && c.env.STRIPE_SECRET_KEY) await endPaidAccess(c.env, user.stripe_customer, "deletion");
+  const accounts = (await c.env.DB.prepare("SELECT id,platform,credentials FROM social_accounts WHERE user_id=?").bind(user.id)
+    .all<{ id: string; platform: PlatformId; credentials: string }>()).results;
   try {
     await c.env.DB.prepare("DELETE FROM users WHERE id=?").bind(user.id).run();
   } catch (e) {
     dbFailure(e);
   }
+  // Their connected channels go with the account; the networks that allow it are told to withdraw our access too.
+  await defer(c, Promise.all(accounts.map((a) => revokeAccess(c.env, a))));
   deleteCookie(c, SESSION_COOKIE, { path: "/" });
   return c.json({ ok: true });
 });

@@ -90,4 +90,6 @@ export interface Platform {
    * Throws a SocialError for the account as a whole (PERMISSION: the connection lacks the stats scope).
    */
   stats?(env: Env, tokens: Tokens, ids: string[]): Promise<Map<string, PostStats>>;
+  /** Withdraws the app's access at the network once the account is disconnected (or its owner's account deleted). */
+  revoke?(env: Env, tokens: Tokens): Promise<void>;
 }

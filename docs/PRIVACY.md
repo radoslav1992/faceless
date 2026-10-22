@@ -72,7 +72,8 @@ Settings → Danger zone → Delete account, with the password.
    its refund). If Stripe refuses, nothing is deleted.
 3. The account row is deleted. Foreign keys remove sessions, tokens, series, videos, runs, media files' records,
    connected social accounts, OAuth states, publications, API keys, subscriptions and usage windows, and the billing
-   helper rows.
+   helper rows. Connected YouTube channels' tokens are also revoked at Google after the response (best effort), as
+   when a channel is disconnected.
 4. Files: the `media/<user>/` prefix is queued (trigger `user_cleanup`) and removed by the hourly cleanup.
 5. Kept: what the table "Kept after the account is deleted" lists.
 

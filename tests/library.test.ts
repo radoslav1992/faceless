@@ -237,7 +237,8 @@ describe("library", () => {
     expect((await admin("GET", `/api/admin/library/${off}/file`)).status).toBe(200);
     expect((await user("GET", `/api/library/${off}/file`)).status).toBe(404);
     expect((await user("GET", `/api/admin/library/${off}/file`)).status).toBe(404);
-  });
+    // About 20 MB of samples go through the API: with the whole suite running alongside, that can pass 5 seconds.
+  }, 30_000);
 
   it("is used where it fits: music for music, a clip behind a story, a clip or picture in a scene", async () => {
     const { admin, user, upload } = await setup();
