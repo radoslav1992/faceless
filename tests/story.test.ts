@@ -4,7 +4,7 @@ import { ContentGeneration } from "../server/content-workflow";
 import { planRender, type PlanContext } from "../server/render-plan";
 import { acceptScenePlan, acceptStory, conceptToSpec, storyShape } from "../server/story";
 import { alignedWords, ALIGNMENT_URL, forcedAlignment, speak, SPEECH_MODEL } from "../server/providers/elevenlabs";
-import { falRequest, submitFal } from "../server/providers/fal";
+import { falRequest, referenceModel, submitFal } from "../server/providers/fal";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 import { estimatedSeconds, narrationCurrent, pendingMedia, specCredits, specSchema, type StorySpec } from "../shared/formats";
 import {
@@ -255,6 +255,13 @@ describe("the format", () => {
     expect(falRequest("image", "A wave.", { model: "fal-ai/nano-banana-2" })).toMatchObject({ model: "fal-ai/nano-banana-2", body: { aspect_ratio: "9:16", resolution: "1K" } });
     expect(falRequest("image", "A wave.", { model: "fal-ai/flux/schnell" })).toMatchObject({ model: "fal-ai/flux/schnell", body: { image_size: { width: 1088, height: 1920 } } });
     expect(falRequest("image", "A wave.", { model: "someone/else" }).model).toBe("openai/gpt-image-2.5/flare/text-to-image");
+    // A later picture of a video, drawn from its first: Nano Banana 2's edit endpoint, the reference for the look only.
+    const drawn = falRequest("image", "A wave.", { references: [image] });
+    expect(drawn).toEqual({
+      model: "fal-ai/nano-banana-2/edit",
+      body: { prompt: expect.stringMatching(/^The reference picture shows how this video looks\. .*not a copy of the reference: A wave\. No text/), image_urls: [image], num_images: 1, aspect_ratio: "9:16", resolution: "1K", output_format: "jpeg", limit_generations: true },
+    });
+    expect(falRequest("image", "A wave.", { references: [image], referenceModel: "fal-ai/nano-banana-pro/edit" }).model).toBe("fal-ai/nano-banana-pro/edit");
     for (const s of storyStyleIds) expect(storyStyles[s].prompt.length).toBeGreaterThan(60);
   });
 });
@@ -270,12 +277,20 @@ describe("the picture model an operator chooses", () => {
     await submitFal({ FAL_KEY: "k", FAL_IMAGE_QUALITY: " Medium " } as any, "image", "A fox.");
     await submitFal({ FAL_KEY: "k", FAL_IMAGE_QUALITY: "ultra" } as any, "image", "A fox.");
     await submitFal({ FAL_KEY: "k", FAL_IMAGE_MODEL: "fal-ai/nano-banana-2", FAL_IMAGE_QUALITY: "medium" } as any, "image", "A fox.");
+    // A picture drawn from a reference: FAL_REFERENCE_MODEL's endpoint, Nano Banana 2's edit by default.
+    const references = ["https://app.test/api/render-inputs/r/0?token=t"];
+    await submitFal({ FAL_KEY: "k" } as any, "image", "A fox.", { references });
+    await submitFal({ FAL_KEY: "k", FAL_REFERENCE_MODEL: " fal-ai/nano-banana-pro/edit " } as any, "image", "A fox.", { references });
     expect(sent.map((r) => [r.url, r.body.quality ?? null])).toEqual([
       ["https://queue.fal.run/openai/gpt-image-2.5/flare/text-to-image", "high"],
       ["https://queue.fal.run/openai/gpt-image-2.5/flare/text-to-image", "medium"],
       ["https://queue.fal.run/openai/gpt-image-2.5/flare/text-to-image", "high"],
       ["https://queue.fal.run/fal-ai/nano-banana-2", null],
+      ["https://queue.fal.run/fal-ai/nano-banana-2/edit", null],
+      ["https://queue.fal.run/fal-ai/nano-banana-pro/edit", null],
     ]);
+    expect(sent[4].body.image_urls).toEqual(references);
+    expect(referenceModel({ FAL_REFERENCE_MODEL: "OFF" } as any)).toBeNull();
   });
 });
 
@@ -440,8 +455,12 @@ describe("the writer", () => {
       { text: "Two hearts pump blood to the gills.", picture: "An illustration of: Two hearts pump blood to the gills.", keys: ["gills"] },
       { text: "When it swims, the third heart stops.", picture: "The octopus swimming, one heart greyed out", keys: ["stops"] },
     ]);
-    expect(k).toMatchObject({ subject: "a small orange octopus with big round eyes", music: "music2", headline: "Three hearts and blue blood", title: "Three hearts" });
+    expect(k).toMatchObject({ subject: "a small orange octopus with big round eyes", look: "", music: "music2", headline: "Three hearts and blue blood", title: "Three hearts" });
     expect(acceptStory({ ...answer, music: "Lo-fi beats" })!.music).toBe("");
+    // The video's look, kept for every picture's prompt.
+    expect(acceptStory({ ...answer, look: "  A sunlit coral reef, turquoise water, orange and coral pink " })!.look).toBe("A sunlit coral reef, turquoise water, orange and coral pink");
+    expect(scenePrompt("An octopus waves", "a small orange octopus", "doodle", "A sunlit coral reef, turquoise and coral pink."))
+      .toMatch(/^An octopus waves\. Recurring main character, the same in every scene: a small orange octopus\. The same world in every scene: A sunlit coral reef, turquoise and coral pink\. Style: /);
     // Over the length, the script ends at the last whole scene that fits; fewer than two is no script.
     expect(acceptStory(answer, 82)!.scenes.map((x) => x.text)).toEqual(["Octopuses have three hearts and blue blood.", "Two hearts pump blood to the gills."]);
     expect(acceptStory(answer, 60)).toBeNull();
@@ -472,8 +491,8 @@ describe("the writer", () => {
   });
 
   it("plans pictures by scene ID", () => {
-    expect(acceptScenePlan({ subject: "a fox", title: "  The night fox ", scenes: [{ id: "s2", picture: "A fox at night", keys: ["night"] }, { id: "s9", picture: "Nope" }] }, ["Hello.", "It was night."]))
-      .toEqual({ subject: "a fox", title: "The night fox", scenes: [{ description: "", keys: [] }, { description: "A fox at night", keys: ["night"] }] });
+    expect(acceptScenePlan({ subject: "a fox", look: " A snowy pine forest at dusk, blue and amber ", title: "  The night fox ", scenes: [{ id: "s2", picture: "A fox at night", keys: ["night"] }, { id: "s9", picture: "Nope" }] }, ["Hello.", "It was night."]))
+      .toEqual({ subject: "a fox", look: "A snowy pine forest at dusk, blue and amber", title: "The night fox", scenes: [{ description: "", keys: [] }, { description: "A fox at night", keys: ["night"] }] });
     expect(acceptScenePlan({ scenes: [] }, ["Hi."])).toBeNull();
   });
 });
@@ -556,6 +575,17 @@ async function setup() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("narrated videos in the content run", () => {
+  it("draws every picture from its own text when FAL_REFERENCE_MODEL is off", async () => {
+    const { env, user, spec, run } = await setup();
+    env.FAL_REFERENCE_MODEL = "off";
+    const calls = providers();
+    expect((await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie)).status).toBe(201);
+    await run();
+    const pictures = calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/") && !c.url.includes("/kling-video/"));
+    expect(pictures.map((c) => c.url.split("/").slice(3).join("/"))).toEqual(Array(4).fill("openai/gpt-image-2.5/flare/text-to-image"));
+    expect(pictures.every((c) => !c.body.image_urls)).toBe(true);
+  });
+
   it("makes a high-quality clip with the finer model, for 2 credits per 5 seconds", async () => {
     const { env, user, spec, used, run } = await setup();
     const calls = providers();
@@ -579,8 +609,9 @@ describe("narrated videos in the content run", () => {
     expect(used()).toBe(price);
     await run();
     const submits = () => calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/"));
+    // The first picture from its text; the others drawn from it, so the scenes look alike.
     expect(submits().map((c) => c.url.split("/").slice(3).join("/"))).toEqual([
-      ...Array(4).fill("openai/gpt-image-2.5/flare/text-to-image"), "fal-ai/kling-video/v2.5-turbo/standard/image-to-video",
+      "openai/gpt-image-2.5/flare/text-to-image", ...Array(3).fill("fal-ai/nano-banana-2/edit"), "fal-ai/kling-video/v2.5-turbo/standard/image-to-video",
     ]);
     let post = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
     expect(post.renderStatus).toBe("ready");
@@ -589,6 +620,12 @@ describe("narrated videos in the content run", () => {
     const pictureKey = (sqlite.prepare("SELECT object_key FROM media_assets WHERE id=?").get(post.spec.scenes[1].imageId) as any).object_key;
     expect(submits()[4].body.image_url).toMatch(new RegExp(`/api/render-inputs/[0-9a-f-]{36}/${state.inputs.indexOf(pictureKey)}\\?token=`));
     expect(submits()[0].body.prompt).toContain("a small orange octopus");
+    // Every later picture is drawn from scene 1's, read through the run's capability link, with the subject in its text.
+    const firstKey = (sqlite.prepare("SELECT object_key FROM media_assets WHERE id=?").get(post.spec.scenes[0].imageId) as any).object_key;
+    for (const c of submits().slice(1, 4)) {
+      expect(c.body.image_urls).toEqual([expect.stringMatching(new RegExp(`/api/render-inputs/[0-9a-f-]{36}/${state.inputs.indexOf(firstKey)}\\?token=`))]);
+      expect(c.body.prompt).toContain("a small orange octopus");
+    }
     // The voice: spoken once, its words timed as written (no forced alignment needed).
     expect(calls.filter((c) => c.url.includes("api.elevenlabs.io")).map((c) => c.url.split("/")[4])).toEqual(["text-to-speech"]);
     expect(post.spec.generated.words).toHaveLength(words.length);

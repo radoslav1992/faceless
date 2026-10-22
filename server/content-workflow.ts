@@ -8,7 +8,7 @@ import { json } from "./db";
 import { safeEqual, token } from "./security";
 import { extOf, head, imageInfo, mediaKey, serveObject, storedDuration, storeStream } from "./storage";
 import { fetchOutput } from "./providers/http";
-import { falResult, falStatus, submitFal, type FalTicket } from "./providers/fal";
+import { falResult, falStatus, referenceModel, submitFal, type FalTicket } from "./providers/fal";
 import { forcedAlignment, speak } from "./providers/elevenlabs";
 import { avatarVideoStatus, submitAvatarVideo } from "./providers/heygen";
 import { avatarFor, forgetHeyGenVideo } from "./avatars";
@@ -156,18 +156,22 @@ type RunInfo = { id: string; user_id: string; video_id: string; kind: string; pa
 
 /**
  * One AI picture or clip, paid once; returns the stored asset's ID. A clip `from` a picture gets that picture's
- * capability link (read when it is submitted) and is `seconds` long, made at its `quality`.
+ * capability link (read when it is submitted) and is `seconds` long, made at its `quality`; a picture is drawn from the
+ * `references` (read then too) when there are any.
  */
-async function generateMedia(e: Env, step: WorkflowStep, run: RunInfo, name: string, m: PendingMedia, phase: Phase, from?: () => Promise<string>) {
+async function generateMedia(
+  e: Env, step: WorkflowStep, run: RunInfo, name: string, m: PendingMedia, phase: Phase, from?: () => Promise<string>, references?: () => Promise<string[]>,
+) {
   const kind = m.kind;
   const ticket = await step.do(`${name}-submit`, once, async () => {
     const s = await readState(e, run.id);
     if (s.tickets?.[name]) return s.tickets[name] as FalTicket;
     if (s.claims?.[name]) throw new Error("GENERATION_UNCERTAIN");
     const image = from ? await from() : undefined;
+    const refs = references ? await references() : [];
     await patchState(e, run.id, (s) => { (s.claims ||= {})[name] = true; });
     await phase(kind === "clip" ? "clip" : "images");
-    const t = await submitFal(e, kind, m.prompt, { image, seconds: m.seconds, clipQuality: m.quality });
+    const t = await submitFal(e, kind, m.prompt, { image, seconds: m.seconds, clipQuality: m.quality, references: refs.length ? refs : undefined });
     await patchState(e, run.id, (s) => { (s.tickets ||= {})[name] = t; });
     return t;
   });
@@ -231,7 +235,8 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
   const pending = pendingMedia(first);
   for (let i = 0; i < pending.length; i++) {
     const m = pending[i];
-    const assetId = await generateMedia(e, step, run, `ai-${i}`, m, phase, m.from ? () => sourcePicture(e, run, m) : undefined);
+    const assetId = await generateMedia(e, step, run, `ai-${i}`, m, phase, m.from ? () => sourcePicture(e, run, m) : undefined,
+      m.kind === "image" ? () => referencePictures(e, run, m) : undefined);
     await step.do(`ai-${i}-apply`, async () => updateSpec(e, videoId, (spec) => {
       let target = spec;
       for (const part of m.path) target = target[part];
@@ -386,6 +391,24 @@ async function trackMoment(e: Env, step: WorkflowStep, run: RunInfo, spec: Highl
     const measured = track;
     await step.do("track-apply", () => updateSpec(e, run.video_id, (s) => { s.tracked = { key: trackKey(spec), track: measured }; }));
   }
+}
+
+/**
+ * The picture a new one is drawn from so the video's scenes look alike: the video's first other AI picture, by scene
+ * order (scene 1's for every later scene of a new video; a redone picture follows the others). None for a video's
+ * first picture, or when FAL_REFERENCE_MODEL is "off".
+ */
+async function referencePictures(e: Env, run: RunInfo, m: PendingMedia): Promise<string[]> {
+  if (!referenceModel(e)) return [];
+  const row = await e.DB.prepare("SELECT spec FROM videos WHERE id=?").bind(run.video_id).first<{ spec: string }>();
+  const scenes: any[] = json<any>(row?.spec, null)?.scenes || [];
+  for (const [i, s] of scenes.entries()) {
+    if (i === m.path[1] || (s?.source !== "image" && s?.source !== "clip") || typeof s.imageId !== "string") continue;
+    const a = await e.DB.prepare("SELECT object_key FROM media_assets WHERE id=? AND user_id=? AND kind='ai_image' AND status='ready'")
+      .bind(s.imageId, run.user_id).first<{ object_key: string }>();
+    if (a) return [await inputUrl(e, run.id, a.object_key)];
+  }
+  return [];
 }
 
 /** The capability link of the picture a clip is made from: the asset in field `from` of the same scene. */

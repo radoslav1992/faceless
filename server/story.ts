@@ -52,6 +52,8 @@ export type StoryConcept = {
   /** The on-screen line: a POV line, a creature's name, a storytime question, or a short title. */
   headline: string;
   subject: string;
+  /** The world of the whole video for the pictures: place and era, time of day, light, colours. */
+  look: string;
   /** A music code from the list given (musicN), or empty. */
   music: string;
   scenes: { text: string; picture: string; keys: string[] }[];
@@ -62,10 +64,10 @@ const sceneJson = {
 };
 const storyJson = {
   type: "object", additionalProperties: false,
-  required: ["title", "topic", "caption", "hashtags", "headline", "subject", "music", "scenes"],
+  required: ["title", "topic", "caption", "hashtags", "headline", "subject", "look", "music", "scenes"],
   properties: {
     title: { type: "string" }, topic: { type: "string" }, caption: { type: "string" }, headline: { type: "string" }, music: { type: "string" },
-    hashtags: { type: "array", maxItems: 8, items: { type: "string" } }, subject: { type: "string" },
+    hashtags: { type: "array", maxItems: 8, items: { type: "string" } }, subject: { type: "string" }, look: { type: "string" },
     scenes: { type: "array", minItems: 2, maxItems: STORY_MAX_SCENES, items: sceneJson },
   },
 };
@@ -77,7 +79,7 @@ const storyJson = {
 export function acceptStory(value: unknown, maxChars = STORY_MAX_CHARS): StoryConcept | null {
   const r = z.object({
     title: z.string().optional(), topic: z.string().optional(), caption: z.string().optional(), headline: z.string().optional(),
-    hashtags: z.array(z.string()).optional(), subject: z.string().optional(), music: z.string().optional(),
+    hashtags: z.array(z.string()).optional(), subject: z.string().optional(), look: z.string().optional(), music: z.string().optional(),
     scenes: z.array(z.object({ text: z.unknown(), picture: z.unknown(), keys: z.unknown() }).partial()),
   }).safeParse(value);
   if (!r.success) return null;
@@ -98,9 +100,16 @@ export function acceptStory(value: unknown, maxChars = STORY_MAX_CHARS): StoryCo
     title: tidy(d.title, 100), topic: tidy(d.topic, 60), caption: clean(d.caption, 2200),
     hashtags: (d.hashtags || []).map((h) => tidy(h, 60)).filter(Boolean).slice(0, 8),
     headline: tidy(String(d.headline || "").replace(/[\p{Extended_Pictographic}]/gu, ""), 140), subject: tidy(d.subject, 300),
-    music: /^music\d{1,3}$/.test(d.music || "") ? d.music! : "", scenes,
+    look: tidy(d.look, 300), music: /^music\d{1,3}$/.test(d.music || "") ? d.music! : "", scenes,
   };
 }
+
+// The pictures are drawn one by one, so everything they share is written down once: the recurring characters and the
+// world of the video, both repeated in every picture's prompt (shared/story.ts scenePrompt).
+const SUBJECT_RULE =
+  "subject: when a person, creature or object appears in more than one scene, describe it once in 8 to 40 English words (age, face, hair, build, clothing and colours; at most two, each with a short label such as \"the night clerk\"), and call it by that label in every picture it is in, never describing it differently; else an empty string.";
+const LOOK_RULE =
+  "look: the world of the whole video for the pictures, in 15 to 35 English words: the place and era, the time of day, the light and three or four main colours. Every picture keeps to it, so the scenes look like one film.";
 
 /** What a video is written from. */
 export type WriteRequest = {
@@ -163,7 +172,8 @@ export async function writeVideo(env: Env, r: WriteRequest): Promise<StoryConcep
     ...kindRules[t.kind as Exclude<VideoKind, "script">](r),
     r.subject
       ? "subject: keep the owner's recurring character (given as data) and put it in every picture."
-      : "subject: when the video follows one recurring character or object, describe it once in 8 to 20 English words (looks, clothing, colours) so every picture shows the same one; else an empty string.",
+      : SUBJECT_RULE,
+    LOOK_RULE,
     `The pictures are drawn as: ${storyStyles[r.style].short.toLowerCase()}.`,
     "music: a musicN from the music list whose mood fits (it plays quietly under the voice), or an empty string.",
     "Plain spoken text only: no emojis, hashtags, stage directions, brackets or markdown in `text`.",
@@ -195,7 +205,7 @@ export function conceptToSpec(k: StoryConcept, c: SpecChoices): StorySpec | null
     format: "story", kind: c.kind, language: c.language,
     narration: { kind: "voice", voiceId: c.voiceId },
     scenes: k.scenes.map((s, i) => ({ text: s.text, description: s.picture, keys: s.keys, source: !c.backdropId && i < animate ? "clip" : "image" })),
-    style: c.style, subject: c.subject || k.subject,
+    style: c.style, subject: c.subject || k.subject, look: k.look,
     captions: c.captions ?? { enabled: true, style: c.kind === "backdrop" || c.kind === "mashup" ? "bold" : "keyword" },
     headline: headlineFor(c.kind, k.headline || (c.kind === "story" ? k.title : "")),
     backdrop: c.backdropId ? { libraryId: c.backdropId } : null,
@@ -222,7 +232,10 @@ export function scriptScenes(script: string) {
  * an empty description for the owner to write), key words checked against the scene's text, one subject.
  */
 export function acceptScenePlan(value: unknown, texts: string[]) {
-  const r = z.object({ subject: z.string().optional(), title: z.string().optional(), scenes: z.array(z.object({ id: z.string(), picture: z.unknown(), keys: z.unknown() }).partial()) }).safeParse(value);
+  const r = z.object({
+    subject: z.string().optional(), look: z.string().optional(), title: z.string().optional(),
+    scenes: z.array(z.object({ id: z.string(), picture: z.unknown(), keys: z.unknown() }).partial()),
+  }).safeParse(value);
   if (!r.success) return null;
   const byId = new Map(r.data.scenes.map((s) => [String(s.id ?? "").trim(), s]));
   const scenes = texts.map((text, i) => {
@@ -230,12 +243,12 @@ export function acceptScenePlan(value: unknown, texts: string[]) {
     return { description: picture.length >= 3 ? picture : "", keys: sceneKeys(text, s?.keys) };
   });
   if (!scenes.some((s) => s.description)) return null;
-  return { subject: tidy(r.data.subject, 300), title: tidy(r.data.title, 100), scenes };
+  return { subject: tidy(r.data.subject, 300), look: tidy(r.data.look, 300), title: tidy(r.data.title, 100), scenes };
 }
 const planJson = {
-  type: "object", additionalProperties: false, required: ["subject", "title", "scenes"],
+  type: "object", additionalProperties: false, required: ["subject", "look", "title", "scenes"],
   properties: {
-    subject: { type: "string" }, title: { type: "string" },
+    subject: { type: "string" }, look: { type: "string" }, title: { type: "string" },
     scenes: { type: "array", maxItems: STORY_MAX_SCENES, items: {
       type: "object", additionalProperties: false, required: ["id", "picture", "keys"],
       properties: { id: { type: "string" }, picture: { type: "string" }, keys: { type: "array", maxItems: 4, items: { type: "string" } } },
@@ -250,8 +263,8 @@ export async function planScenes(env: Env, texts: string[], style: StoryStyle, s
     "For every scene, `picture`: the picture that shows what is said, in 12 to 30 English words (subject, action, setting, composition), concrete and drawable, no text, captions, logos, existing fictional characters or real, named private people; " +
     "`keys`: one or two key words copied exactly from the scene's words, the ones a viewer should catch (they are coloured in the subtitles). " +
     `The pictures are drawn as: ${storyStyles[style].short.toLowerCase()}. ` +
-    "subject: when the scenes follow one recurring character or object, describe it once in 8 to 20 English words (looks, clothing, colours) so every picture shows the same one" +
-    (subject ? " (keep the given one unless it does not fit)" : "") + "; else an empty string. title: a title of at most 70 characters in the scenes' language. Return ONLY JSON.",
+    (subject ? "subject: keep the given recurring character unless it does not fit, and put it in every picture it belongs in. " : `${SUBJECT_RULE} `) +
+    `${LOOK_RULE} title: a title of at most 70 characters in the scenes' language. Return ONLY JSON.`,
     { subject, scenes: texts.map((text, i) => ({ id: `s${i + 1}`, text: text.slice(0, 600) })) },
     planJson, Math.min(12000, 800 + texts.length * 160), 90000);
   return acceptScenePlan(answer, texts);
@@ -333,7 +346,7 @@ export async function draftVideo(env: Env, input: DraftRequest, recent: string[]
     const plan = t.kind === "backdrop" ? null : await planScenes(env, texts, style, d.subject);
     concept = {
       title: plan?.title || plainText(d.title || texts[0], 100), topic: "", caption: plainText(d.title || texts[0], 300), hashtags: [],
-      headline: t.kind === "backdrop" ? d.title : "", subject: plan?.subject || "", music: catalog[0]?.ref || "",
+      headline: t.kind === "backdrop" ? d.title : "", subject: plan?.subject || "", look: plan?.look || "", music: catalog[0]?.ref || "",
       scenes: texts.map((text, i) => ({ text, picture: plan?.scenes[i]?.description || `An illustration of: ${text}`.slice(0, 300), keys: plan?.scenes[i]?.keys || [] })),
     };
   } else if (t.kind === "script") {

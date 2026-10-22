@@ -98,7 +98,8 @@ formats: `story` (below) or `highlight`, a clip of one of the owner's long video
 A story's spec holds the video type (`kind`: `story`, `pov`, `mashup`, `script`, `backdrop`), the narration (an AI voice by ID, or one of the owner's
 audio/video uploads with an optional exact script), the language, 1–40 scenes (their words, a picture description, key
 words, the picture's source and the transition in), one art style (`shared/story.ts`, 15 prompt suffixes), one
-recurring subject, captions (on/off, one of 21 styles), an optional on-screen headline (`shared/headline.ts`), an
+recurring subject, one look (the video's world: place and era, time of day, light, colours), captions (on/off, one
+of 21 styles), an optional on-screen headline (`shared/headline.ts`), an
 optional background clip that replaces the pictures (storytime), music (a library track or an upload, with a volume),
 and the post text (caption, hashtags, title, topic). `generated` (the recorded AI voice and its word timings) is owned
 by the server: the browser never sets it.
@@ -228,7 +229,8 @@ template's brief, the owner's prompt and recent titles as **data**, never as ins
 only, no existing characters, brands or real private people, no invented statistics or quotes, no hate, sexual
 content, graphic violence or medical, legal or financial advice; spoken text in the narration language, picture
 descriptions in English. It writes about 15 characters per second of the target length as one scene per ~4.5 s
-(3–40 scenes), each with a picture description and one or two key words, plus a recurring subject, a headline, a
+(3–40 scenes), each with a picture description and one or two key words, plus the recurring characters (described
+once, at most two, each with a label every picture uses) and the look of the whole video, a headline, a
 title, a caption, hashtags, a topic and a music code from the library list. Each video type adds rules (POV in the
 second person, the mashup's chanted name, storytime's title question read out first). `acceptStory` cleans and checks
 the answer; fewer than two usable scenes means failure.
@@ -290,6 +292,11 @@ D1 batch, so the credits are reserved by the triggers before any work starts. It
    (GPT Image 2.5 Flare at 864 × 1536, `FAL_IMAGE_QUALITY` high by default; `FAL_IMAGE_MODEL` can choose its Sunburst
    variant, `fal-ai/nano-banana-2` or `fal-ai/flux/schnell`), then every clip made from its
    picture (`fal-ai/kling-video/v2.5-turbo/pro/image-to-video`, which reads the picture through a capability link).
+   Every picture's prompt carries the subject and the look. So the scenes look like one film, only a video's first
+   AI picture is drawn from its text: each later one is drawn from it as a reference (`fal-ai/nano-banana-2/edit`,
+   through a capability link; the reference is for the style, palette, light and characters, never copied). A
+   picture made again later follows the video's first other AI picture. `FAL_REFERENCE_MODEL` names another Nano
+   Banana edit endpoint, or `off` draws every picture from its text alone.
    Each is stored in R2 as an asset of the video (marked `{"ai":true}`) and written back into the spec.
 3. **Voice + alignment** (after the pictures, so a refused picture stops the run before the voice is paid): ElevenLabs
    `eleven_v4` with timestamps of the text as written, saved as a WAV. When the timings do not have one word per word

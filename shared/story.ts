@@ -351,10 +351,14 @@ export function toggleKey(scene: StoryScene, word: string): StoryScene {
   const on = scene.keys.some((k) => normWord(k) === normWord(w));
   return { ...scene, keys: on ? scene.keys.filter((k) => normWord(k) !== normWord(w)) : [...scene.keys, w].slice(0, 8) };
 }
-/** The description sent to the image model: the scene, the recurring subject, the style; calm space low for subtitles. */
-export function scenePrompt(description: string, subject: string, style: StoryStyle) {
+/**
+ * The description sent to the image model: the scene, the recurring subject, the video's look (the same world in every
+ * picture), the style; calm space low for subtitles.
+ */
+export function scenePrompt(description: string, subject: string, style: StoryStyle, look = "") {
   const who = subject.trim() ? ` Recurring main character, the same in every scene: ${subject.trim().replace(/[.!?]$/, "")}.` : "";
-  return `${description.trim().replace(/([^.!?])$/, "$1.")}${who} Style: ${storyStyles[style].prompt}. Vertical 9:16 frame, main subject in the upper two thirds, the bottom third calm and simple.`.slice(0, 1000);
+  const world = look.trim() ? ` The same world in every scene: ${look.trim().replace(/[.!?]$/, "")}.` : "";
+  return `${description.trim().replace(/([^.!?])$/, "$1.")}${who}${world} Style: ${storyStyles[style].prompt}. Vertical 9:16 frame, main subject in the upper two thirds, the bottom third calm and simple.`.slice(0, 1200);
 }
 /** The description sent to the clip model with the scene's picture: gentle motion, the picture kept as it is. */
 export const clipPrompt = (description: string) =>

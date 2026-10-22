@@ -65,6 +65,8 @@ export const storySpec = z.object({
   style: z.enum(storyStyleIds as [StoryStyle, ...StoryStyle[]]).default("doodle"),
   /** One description of the recurring subject or character, repeated in every scene's picture prompt. */
   subject: z.string().trim().max(300).default(""),
+  /** The world of the whole video (place and era, time of day, light, colours), repeated in every picture prompt. */
+  look: z.string().trim().max(300).default(""),
   captions: z.object({ enabled: z.boolean().default(true), style: z.enum(captionStyles).default("keyword" satisfies CaptionStyle) }).default({ enabled: true, style: "keyword" }),
   headline: headlineSchema.nullable().default(null),
   backdrop: backdropSchema.nullable().default(null),
@@ -167,7 +169,7 @@ export function pendingMedia(spec: Spec): PendingMedia[] {
   // A scene the presenter speaks on shows no picture.
   spec.scenes.forEach((s, i) => {
     if ((s.source === "image" || s.source === "clip") && !s.imageId && !showsPresenter(spec, i))
-      out.push({ kind: "image", prompt: scenePrompt(s.description, spec.subject, spec.style), path: ["scenes", i], key: "imageId" });
+      out.push({ kind: "image", prompt: scenePrompt(s.description, spec.subject, spec.style, spec.look), path: ["scenes", i], key: "imageId" });
   });
   spec.scenes.forEach((s, i) => {
     if (s.source === "clip" && !s.clipId && !showsPresenter(spec, i))
