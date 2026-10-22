@@ -63,6 +63,24 @@ export type SceneSource = (typeof sceneSources)[number];
 export const clipLengths = [5, 10] as const;
 
 const uuid = z.uuid();
+/**
+ * How the AI narrator says a scene: Eleven v4 audio tags, sent in square brackets before the scene's words (never
+ * spoken or shown in the subtitles). A tone carries on until the next one; "pause" waits a moment first. A short list
+ * of well-tested tags, so none is ever read out as a word.
+ */
+export const voiceTones = [
+  "calm", "curious", "excited", "cheerful", "playful", "thoughtful", "serious", "mysterious", "nervous", "fearful",
+  "whispers", "softly", "sad", "sarcastic", "surprised", "sighs", "laughs", "pause",
+] as const;
+export type VoiceTone = (typeof voiceTones)[number];
+export const isVoiceTone = (t: unknown): t is VoiceTone => typeof t === "string" && (voiceTones as readonly string[]).includes(t);
+/** How the editor names each tone. */
+export const voiceToneNames: Record<VoiceTone, string> = {
+  calm: "Calm", curious: "Curious", excited: "Excited", cheerful: "Cheerful", playful: "Playful", thoughtful: "Thoughtful", serious: "Serious",
+  mysterious: "Mysterious", nervous: "Nervous", fearful: "Fearful", whispers: "Whispering", softly: "Soft", sad: "Sad", sarcastic: "Sarcastic",
+  surprised: "Surprised", sighs: "With a sigh", laughs: "With a laugh", pause: "Pause first",
+};
+
 export const storySceneSchema = z
   .object({
     /** The words said in this scene (one or two sentences), as written or as transcribed. */
@@ -84,6 +102,8 @@ export const storySceneSchema = z
     /** A clip or picture from the shared library. */
     libraryId: uuid.optional(),
     transition: z.enum(storyTransitions).default("auto"),
+    /** How the AI voice says this scene (voiceTones), or empty to keep the tone it had. */
+    tone: z.union([z.literal(""), z.enum(voiceTones)]).default(""),
   })
   .refine((s) => s.source !== "own" || !!s.assetId, "Choose a picture or video for each scene with your own media.")
   .refine((s) => s.source !== "library" || !!s.libraryId, "Choose a library clip or picture for each scene that uses one.")
@@ -115,6 +135,12 @@ export const plainText = (text: string, max = 600) =>
 export const alignedScriptText = (script: string) => textWords(plainText(script, STORY_MAX_CHARS * 2)).join(" ");
 /** What the AI voice reads: the scenes in order. */
 export const storyScript = (scenes: Pick<StoryScene, "text">[]) => scenes.map((s) => textWords(s.text).join(" ")).join(" ");
+/**
+ * What the AI voice is sent: the script with each scene's tone as an audio tag before its words. The same as the
+ * script without tones, so a voice recorded before tones existed stays current.
+ */
+export const voicedScript = (scenes: Pick<StoryScene, "text" | "tone">[]) =>
+  scenes.map((s) => `${s.tone ? `[${s.tone}] ` : ""}${textWords(s.text).join(" ")}`).join(" ");
 
 /** A short, stable fingerprint of a text (cyrb53): the voice is paid again only when its script changes. */
 export function fingerprint(text: string) {
@@ -351,10 +377,14 @@ export function toggleKey(scene: StoryScene, word: string): StoryScene {
   const on = scene.keys.some((k) => normWord(k) === normWord(w));
   return { ...scene, keys: on ? scene.keys.filter((k) => normWord(k) !== normWord(w)) : [...scene.keys, w].slice(0, 8) };
 }
-/** The description sent to the image model: the scene, the recurring subject, the style; calm space low for subtitles. */
-export function scenePrompt(description: string, subject: string, style: StoryStyle) {
+/**
+ * The description sent to the image model: the scene, the recurring subject, the video's look (the same world in every
+ * picture), the style; calm space low for subtitles.
+ */
+export function scenePrompt(description: string, subject: string, style: StoryStyle, look = "") {
   const who = subject.trim() ? ` Recurring main character, the same in every scene: ${subject.trim().replace(/[.!?]$/, "")}.` : "";
-  return `${description.trim().replace(/([^.!?])$/, "$1.")}${who} Style: ${storyStyles[style].prompt}. Vertical 9:16 frame, main subject in the upper two thirds, the bottom third calm and simple.`.slice(0, 1000);
+  const world = look.trim() ? ` The same world in every scene: ${look.trim().replace(/[.!?]$/, "")}.` : "";
+  return `${description.trim().replace(/([^.!?])$/, "$1.")}${who}${world} Style: ${storyStyles[style].prompt}. Vertical 9:16 frame, main subject in the upper two thirds, the bottom third calm and simple.`.slice(0, 1200);
 }
 /** The description sent to the clip model with the scene's picture: gentle motion, the picture kept as it is. */
 export const clipPrompt = (description: string) =>

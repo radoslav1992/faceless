@@ -9,6 +9,12 @@ export const IMAGE_MODEL = "openai/gpt-image-2.5/flare/text-to-image";
 /** Pictures an operator can choose instead with FAL_IMAGE_MODEL (the Sunburst variant of GPT Image 2.5 works too). */
 export const NANO_BANANA_MODEL = "fal-ai/nano-banana-2";
 export const FAST_IMAGE_MODEL = "fal-ai/flux/schnell";
+/**
+ * A video's later pictures, drawn from its first one as a reference so the characters, palette, light and style stay
+ * the same from scene to scene: Nano Banana 2's edit endpoint (up to 14 reference pictures). FAL_REFERENCE_MODEL can
+ * name another Nano Banana edit endpoint, or "off" to draw every picture from its text alone.
+ */
+export const REFERENCE_MODEL = "fal-ai/nano-banana-2/edit";
 /** GPT Image 2.5's quality levels (price rises with each); FAL_IMAGE_QUALITY picks one, "high" by default. */
 export const imageQualities = ["low", "medium", "high", "xhigh", "max"] as const;
 export type ImageQuality = (typeof imageQualities)[number];
@@ -30,11 +36,23 @@ const auth = (e: Env) => {
  * How a picture or clip is made: a clip from `image` (a capability link to the picture it starts from), `seconds`
  * long (5 or 10) and of `clipQuality` (regular unless said); a picture with `model` and, for GPT Image, `quality`.
  */
-export type FalOptions = { image?: string; seconds?: number; clipQuality?: ClipQuality; model?: string; quality?: ImageQuality };
+export type FalOptions = {
+  image?: string; seconds?: number; clipQuality?: ClipQuality; model?: string; quality?: ImageQuality;
+  /** A picture drawn from these (capability links to the video's earlier pictures) with `referenceModel`. */
+  references?: string[]; referenceModel?: string;
+};
+/** How the reference is used: for the look only, never copied. */
+const REFERENCE_USE =
+  "The reference picture shows how this video looks. Keep its art style, colour palette and light, and draw any character or object from it exactly the same (face, hair, body, clothing, colours). Draw a new picture with its own composition, not a copy of the reference:";
 /** The model and its input (pure, for tests). Pictures are portrait 9:16 for short-form; no text is drawn in them. */
 export function falRequest(kind: "image" | "clip", prompt: string, options: FalOptions = {}) {
   const text = `${prompt.trim()} No text, captions, logos or watermarks in the picture.`;
   if (kind === "image") {
+    if (options.references?.length)
+      return {
+        model: options.referenceModel || REFERENCE_MODEL,
+        body: { prompt: `${REFERENCE_USE} ${text}`, image_urls: options.references, num_images: 1, aspect_ratio: "9:16", resolution: "1K", output_format: "jpeg", limit_generations: true },
+      };
     const model = options.model || IMAGE_MODEL;
     if (model === NANO_BANANA_MODEL)
       return { model, body: { prompt: text, num_images: 1, aspect_ratio: "9:16", resolution: "1K", output_format: "jpeg", limit_generations: true } };
@@ -49,11 +67,19 @@ export function falRequest(kind: "image" | "clip", prompt: string, options: FalO
   if (options.image) return { model: IMAGE_CLIP_MODELS[options.clipQuality ?? "regular"], body: { ...common, image_url: options.image } };
   return { model: CLIP_MODEL, body: { ...common, aspect_ratio: "9:16" } };
 }
+/** The model later pictures are drawn with from the first (FAL_REFERENCE_MODEL), or null when that is switched off. */
+export function referenceModel(e: Env) {
+  const name = e.FAL_REFERENCE_MODEL?.trim();
+  if (name?.toLowerCase() === "off") return null;
+  return name || REFERENCE_MODEL;
+}
 /** The operator's picture quality (FAL_IMAGE_QUALITY), when it is one GPT Image knows. */
 const imageQuality = (e: Env) => imageQualities.find((q) => q === e.FAL_IMAGE_QUALITY?.trim().toLowerCase());
 /** Submits once; the caller stores the ticket before anything else so a retry polls instead of paying again. */
 export async function submitFal(e: Env, kind: "image" | "clip", prompt: string, options: FalOptions = {}): Promise<FalTicket> {
-  const { model, body } = falRequest(kind, prompt, { ...options, model: e.FAL_IMAGE_MODEL?.trim() || IMAGE_MODEL, quality: imageQuality(e) });
+  const { model, body } = falRequest(kind, prompt, {
+    ...options, model: e.FAL_IMAGE_MODEL?.trim() || IMAGE_MODEL, quality: imageQuality(e), referenceModel: referenceModel(e) || undefined,
+  });
   const r = await providerFetch(`https://queue.fal.run/${model}`, {
     method: "POST",
     headers: { ...auth(e), "Content-Type": "application/json" },

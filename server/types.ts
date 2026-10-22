@@ -55,6 +55,8 @@ export interface Env {
   FAL_IMAGE_MODEL?: string;
   /** GPT Image 2.5's quality: low, medium, high (default), xhigh or max. */
   FAL_IMAGE_QUALITY?: string;
+  /** Later pictures of a video drawn from its first as a reference (server/providers/fal.ts); "off" to stop it. */
+  FAL_REFERENCE_MODEL?: string;
   ELEVENLABS_API_KEY?: string;
   /** 32 random bytes, base64: encrypts social OAuth tokens at rest. */
   TOKEN_ENCRYPTION_KEY?: string;

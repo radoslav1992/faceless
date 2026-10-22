@@ -8,7 +8,7 @@ import { HIGHLIGHT_MAX_SECONDS, HIGHLIGHT_MIN_SECONDS, layoutSchema } from "./hi
 import { LONG_VIDEO_SECONDS } from "./speech";
 import { trackSchema } from "./track";
 import {
-  clipPrompt, narrationKey, narrationSchema, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_SCENES, type StoryStyle,
+  clipPrompt, narrationKey, narrationSchema, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_SCENES, voicedScript, type StoryStyle,
 } from "./story";
 
 // The editable description ("spec") of a video, one of two formats:
@@ -65,6 +65,8 @@ export const storySpec = z.object({
   style: z.enum(storyStyleIds as [StoryStyle, ...StoryStyle[]]).default("doodle"),
   /** One description of the recurring subject or character, repeated in every scene's picture prompt. */
   subject: z.string().trim().max(300).default(""),
+  /** The world of the whole video (place and era, time of day, light, colours), repeated in every picture prompt. */
+  look: z.string().trim().max(300).default(""),
   captions: z.object({ enabled: z.boolean().default(true), style: z.enum(captionStyles).default("keyword" satisfies CaptionStyle) }).default({ enabled: true, style: "keyword" }),
   headline: headlineSchema.nullable().default(null),
   backdrop: backdropSchema.nullable().default(null),
@@ -133,13 +135,13 @@ export function momentOverlap(a: { start: number; end: number }, b: { start: num
 
 /** The AI voice is recorded for the video's current words and voice (no new recording is paid). */
 export function narrationCurrent(spec: StorySpec) {
-  return spec.narration.kind === "voice" && !!spec.generated?.voiceAssetId && spec.generated.key === narrationKey(spec.narration.voiceId, storyScript(spec.scenes));
+  return spec.narration.kind === "voice" && !!spec.generated?.voiceAssetId && spec.generated.key === narrationKey(spec.narration.voiceId, voicedScript(spec.scenes));
 }
 
 /** What a presenter video is made from: the avatar, its quality and the AI voice's words (a change needs a new one). */
 export const presenterKey = (spec: StorySpec) =>
   spec.presenter && spec.narration.kind === "voice"
-    ? `${spec.presenter.avatarId}:${spec.presenter.quality}:${narrationKey(spec.narration.voiceId, storyScript(spec.scenes))}` : "";
+    ? `${spec.presenter.avatarId}:${spec.presenter.quality}:${narrationKey(spec.narration.voiceId, voicedScript(spec.scenes))}` : "";
 /**
  * The presenter's video is made for the video's current avatar, quality and words, from the recording it keeps (no
  * new one is paid). A new recording always needs a new presenter video: the lips follow the recording.
@@ -167,7 +169,7 @@ export function pendingMedia(spec: Spec): PendingMedia[] {
   // A scene the presenter speaks on shows no picture.
   spec.scenes.forEach((s, i) => {
     if ((s.source === "image" || s.source === "clip") && !s.imageId && !showsPresenter(spec, i))
-      out.push({ kind: "image", prompt: scenePrompt(s.description, spec.subject, spec.style), path: ["scenes", i], key: "imageId" });
+      out.push({ kind: "image", prompt: scenePrompt(s.description, spec.subject, spec.style, spec.look), path: ["scenes", i], key: "imageId" });
   });
   spec.scenes.forEach((s, i) => {
     if (s.source === "clip" && !s.clipId && !showsPresenter(spec, i))
