@@ -13,6 +13,8 @@ const KEYS = {
   INSTAGRAM_APP_SECRET: "ig-secret",
   GOOGLE_CLIENT_ID: "g-client",
   GOOGLE_CLIENT_SECRET: "g-secret",
+  // Most tests connect TikTok for Direct Post; the drafts test unsets it.
+  TIKTOK_DIRECT_POST: "true",
 };
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const now = () => Math.floor(Date.now() / 1000);
@@ -143,6 +145,28 @@ describe("connecting accounts", () => {
     expect(row.back).toBe("/app/channels");
     expect(row.expires_at).toBeGreaterThan(Date.now() / 1000 + 500);
     expect(q.get("code_challenge")).toBe(sha256(row.verifier));
+  });
+
+  it("connects TikTok for drafts: asks for video.upload instead of video.publish, and the Channels page says so", async () => {
+    const s = setup({ TIKTOK_DIRECT_POST: "" });
+    const url = await connect(s, "tiktok");
+    expect(url.searchParams.get("scope")).toBe("user.info.basic,video.upload");
+    const [token, userInfo] = tiktokRoutes();
+    const granting = (scope: string): Route => [token[0], token[1], () =>
+      ok({ access_token: "tt-access", expires_in: 86400, open_id: "open-1", refresh_token: "tt-refresh", refresh_expires_in: 31536000, scope, token_type: "Bearer" })];
+    // Without the upload permission there is nothing to connect.
+    mockFetch([granting("user.info.basic,video.publish"), userInfo]);
+    expect((await callback(s, "tiktok", `code=c&state=${url.searchParams.get("state")}`)).headers.get("Location")).toBe("/app/channels?error=permissions");
+    const calls = mockFetch([granting("user.info.basic,video.upload"), userInfo]);
+    expect((await callback(s, "tiktok", `code=c&state=${await stateOf(s, "tiktok")}`)).headers.get("Location")).toBe("/app/channels?connected=tiktok");
+    // No creator info (it needs video.publish), so the account has no handle.
+    expect(calls.map((c) => c.url.pathname)).toEqual(["/v2/oauth/token/", "/v2/user/info/"]);
+    expect(s.sqlite.prepare("SELECT name,handle FROM social_accounts").get()).toEqual({ name: "Brand Co", handle: null });
+    const list = await call(worker, s.env, "GET", "/api/accounts", undefined, s.user.cookie);
+    expect(list.data.platforms.map((p: any) => [p.id, p.drafts])).toEqual([["tiktok", true], ["youtube", false], ["instagram", false]]);
+    // With Direct Post on, TikTok isn't in drafts mode.
+    const direct = setup();
+    expect((await call(worker, direct.env, "GET", "/api/accounts", undefined, direct.user.cookie)).data.platforms[0]).toMatchObject({ id: "tiktok", drafts: false });
   });
 
   it("builds Google's authorize URL for offline access with an S256 challenge", async () => {
@@ -386,9 +410,9 @@ describe("connecting accounts", () => {
     expect(r.data.accounts[0]).toMatchObject({ platform: "tiktok", name: "Brand Co", handle: "brandco", avatarUrl: "https://p16.tiktokcdn.com/a.jpg", status: "active" });
     expect(JSON.stringify(r.data)).not.toMatch(/credentials|tt-access|tt-refresh/);
     expect(r.data.platforms).toEqual([
-      { id: "tiktok", name: "TikTok", configured: true },
-      { id: "youtube", name: "YouTube", configured: false },
-      { id: "instagram", name: "Instagram", configured: true },
+      { id: "tiktok", name: "TikTok", configured: true, drafts: false },
+      { id: "youtube", name: "YouTube", configured: false, drafts: false },
+      { id: "instagram", name: "Instagram", configured: true, drafts: false },
     ]);
     expect(r.data.limit).toEqual({ max: 1, used: 1 });
     // A connection that ended shows as expired before maintenance notices.

@@ -60,6 +60,8 @@ export interface Env {
   TOKEN_ENCRYPTION_KEY?: string;
   TIKTOK_CLIENT_KEY?: string;
   TIKTOK_CLIENT_SECRET?: string;
+  /** "true" once TikTok has audited the app: videos post straight to the profile instead of arriving as drafts. */
+  TIKTOK_DIRECT_POST?: string;
   INSTAGRAM_APP_ID?: string;
   INSTAGRAM_APP_SECRET?: string;
   GOOGLE_CLIENT_ID?: string;

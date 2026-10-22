@@ -47,7 +47,7 @@ export type PublishContext = {
 };
 
 export type PublishResult =
-  | { state: "published"; externalId: string; url?: string }
+  | { state: "published"; externalId: string; url?: string; /** Delivered as a draft for the person to post (TikTok). */ draft?: boolean }
   | { state: "processing"; ticket: Ticket }
   | { state: "failed"; code: FailureCode; retryable: boolean; detail?: string };
 

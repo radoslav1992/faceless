@@ -52,6 +52,8 @@ MEDIA_ENABLED=false
 TOKEN_ENCRYPTION_KEY=
 TIKTOK_CLIENT_KEY=
 TIKTOK_CLIENT_SECRET=
+# "true" once TikTok has audited the app for Direct Post; unset, videos go to people's TikTok inbox as drafts.
+TIKTOK_DIRECT_POST=
 INSTAGRAM_APP_ID=
 INSTAGRAM_APP_SECRET=
 GOOGLE_CLIENT_ID=

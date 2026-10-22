@@ -26,6 +26,7 @@ on YouTube, videos on TikTok.
 | `SITE_URL` | Public `https://` origin. Redirect URIs and media links are built from it. |
 | `TOKEN_ENCRYPTION_KEY` | 32 random bytes, base64: `openssl rand -base64 32`. Encrypts every OAuth token at rest. Changing it disconnects every account (people reconnect). |
 | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` | TikTok app. |
+| `TIKTOK_DIRECT_POST` | `true` once TikTok has audited the app: videos post straight to the profile. Unset, they go to the person's TikTok inbox as drafts (see TikTok below). |
 | `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET` | The Instagram app ID/secret of the Meta app (Instagram product, not the Facebook app ID). |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth client (Web application). |
 
@@ -54,27 +55,54 @@ Instagram gets no flag through the API; the file itself carries the renderer's A
 
 ## TikTok (Login Kit + Content Posting API)
 
+Two modes (`server/social/tiktok.ts`):
+
+- **Drafts** (the default): the video goes to the person's TikTok inbox (Upload API, scopes `user.info.basic` and
+  `video.upload`; no `video.list`, since drafts have no stats). TikTok
+  notifies them; they add the caption, choose who can see it, set the AI-content label and post it in the TikTok app.
+  Only the normal app review is needed, not the Direct Post audit, and there is no private-only restriction.
+- **Direct Post** (`TIKTOK_DIRECT_POST=true`, once TikTok has audited the app): the video posts straight to the profile
+  with its caption (scope `video.publish`).
+
+Setup:
+
 1. developers.tiktok.com → Manage apps → create an app. Platform: Web. Fill in the terms and privacy policy URLs
    (`${SITE_URL}/terms`, `${SITE_URL}/privacy`).
-2. Add products **Login Kit** and **Content Posting API**. In Content Posting API turn on **Direct Post**.
-3. Scopes: `user.info.basic`, `video.publish` and `video.list` (post stats; see "Post stats" below).
+2. Add products **Login Kit** and **Content Posting API** (Upload; turn on **Direct Post** only for the audit).
+3. Scopes: `user.info.basic` and `video.upload` for drafts; for Direct Post `user.info.basic`, `video.publish` and
+   `video.list` (post stats; see "Post stats" below). The app asks for the mode's set only, so each must be approved
+   before people outside the app's test users can connect.
 4. Login Kit → Redirect URI: `${SITE_URL}/api/accounts/callback/tiktok`.
 5. No media domain verification is needed: videos are uploaded as files (`FILE_UPLOAD`). (`server/social/tiktok.ts`
    still has a photo-post branch that would fetch from our media links and need it; the Publication workflow only
    ever sends videos.)
-6. Submit the app for review, then apply for the **Direct Post audit**.
+6. Submit the app for review. Later, for Direct Post, apply for the **Direct Post audit**, then set
+   `TIKTOK_DIRECT_POST=true`; people connected for drafts reconnect once to grant `video.publish` (until then their
+   posts fail with "Reconnect your TikTok account and allow posting").
 
-Before the audit (unaudited client): at most 5 users can post in 24 hours, every post is private (`SELF_ONLY`), and
-the posting account must itself be set to private. The publisher picks `PUBLIC_TO_EVERYONE` when TikTok offers it and
-otherwise the first allowed level; when TikTok refuses a public post from an unaudited app it retries once as
-`SELF_ONLY`, and if that is refused too the person is told to make the account private. "Post privately" sends
-`SELF_ONLY` whenever TikTok offers it. The Channels page warns that videos may post as private until the audit.
+**Drafts.** The upload works like Direct Post (init, then the file in chunks after a checkpoint) on
+`/post/publish/inbox/video/init/`, which takes the file only. The publication is done when the status is
+`SEND_TO_USER_INBOX`: it is recorded as published with `draft=1` and the publish ID, without a link or stats (we don't
+learn the post the person makes from it; if they posted before our first status check, `PUBLISH_COMPLETE` is recorded
+with its link). The video's page says the draft is waiting, offers its caption to copy (`postCaption` in
+`shared/social.ts`, the same text Direct Post would send) and reminds them to turn on TikTok's AI-generated content
+label. "Post privately" has no effect on a draft: they choose who can see it in TikTok. TikTok limits how many drafts
+from apps can wait in a person's inbox (`spam_risk_too_many_pending_share`, retried after 1, 5 and 15 minutes, then a
+message asking them to post or delete some). The connection asks for no `video.publish`, so it has no creator info:
+the account's handle is empty unless it was connected for Direct Post.
+
+**Direct Post before the audit** (unaudited client): at most 5 users can post in 24 hours, every post is private
+(`SELF_ONLY`), and the posting account must itself be set to private. The publisher picks `PUBLIC_TO_EVERYONE` when
+TikTok offers it and otherwise the first allowed level; when TikTok refuses a public post from an unaudited app it
+retries once as `SELF_ONLY`, and if that is refused too the person is told to make the account private. "Post
+privately" sends `SELF_ONLY` whenever TikTok offers it.
 
 The audit checks TikTok's Content Sharing Guidelines in the UI: the creator's nickname and avatar shown before
 posting, the privacy level **chosen by the person (no default)**, comment/duet/stitch toggles respecting
 `creator_info`, the commercial content disclosure, a preview, and the consent line ("By posting, you agree to TikTok's
-Music Usage Confirmation"). Fully automatic publishing (series on autopilot) needs those choices made once per account
-in our UI and stored (see "Open items"); expect the audit to ask about it.
+Music Usage Confirmation"); and no watermark or branding added to the video (the free trial's mark would need to go
+for TikTok). Fully automatic publishing (series on autopilot) needs those choices made once per account in our UI and
+stored (see "Open items"); expect the audit to ask about it.
 
 Tokens: access 24 hours, refresh 365 days (renewed automatically when publishing). Uploads go in 10 MiB chunks
 (TikTok: 5–64 MB per chunk, the last up to 128 MB, `total_chunk_count = floor(size / chunk_size)`). A video longer

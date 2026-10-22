@@ -182,7 +182,7 @@ const views = {
   all: "1=1",
 } as const;
 /** The video's publications (where and when it posts, and how it went), as a JSON list for list views. */
-export const PUBLICATIONS = `(SELECT json_group_array(json_object('id',x.id,'platform',x.platform,'accountName',x.account_name,'scheduledAt',x.scheduled_at,'status',x.status,'url',x.url,'error',x.error,'views',x.views,'likes',x.likes)) FROM publications x WHERE x.video_id=v.id AND x.status<>'canceled') AS publications`;
+export const PUBLICATIONS = `(SELECT json_group_array(json_object('id',x.id,'platform',x.platform,'accountName',x.account_name,'scheduledAt',x.scheduled_at,'status',x.status,'draft',x.draft,'url',x.url,'error',x.error,'views',x.views,'likes',x.likes)) FROM publications x WHERE x.video_id=v.id AND x.status<>'canceled') AS publications`;
 videos.get("/", async (c) => {
   const user = c.get("user");
   const q = z.object({

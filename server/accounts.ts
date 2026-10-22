@@ -12,6 +12,7 @@ import { planById } from "../shared/plans";
 import { isPlatform, platformIds, platforms, type PlatformId } from "../shared/social";
 import { socialPlatforms, SocialError } from "./social";
 import { codeVerifier } from "./social/http";
+import { tiktokDrafts } from "./social/tiktok";
 import { connectionExpiry, revokeAccess } from "./social/credentials";
 import { STATS_WINDOW } from "./metrics";
 
@@ -48,7 +49,8 @@ accounts.get("/", async (c) => {
       status: a.status === "active" && a.expires_at && a.expires_at < t ? "expired" : a.status,
       createdAt: a.created_at,
     })),
-    platforms: platformIds.map((id) => ({ id, name: platforms[id].name, configured: ready(c.env, id) })),
+    // drafts: videos arrive in the person's TikTok inbox for them to post (server/social/tiktok.ts).
+    platforms: platformIds.map((id) => ({ id, name: platforms[id].name, configured: ready(c.env, id), drafts: id === "tiktok" && tiktokDrafts(c.env) })),
     limit: await limits(c.env, user),
   });
 });

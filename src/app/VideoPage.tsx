@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Check, Download, RotateCcw, Send, Trash2, X } from "lucide-react";
+import { ArrowLeft, Check, Copy, Download, RotateCcw, Send, Trash2, X } from "lucide-react";
 import { del, errorText, fileUrl, newKey, post, put, useApi, useAuth, usePoll, when, type Account, type Publication, type Video } from "../lib";
 import { useToast } from "../ui";
 import { ConfirmDialog } from "./pickers";
@@ -9,7 +9,7 @@ import { HighlightEditor } from "./clip-editor";
 import { PlatformBadge, PublicationLine, StatusChip, making, phaseText } from "./video-ui";
 import { specCredits, visualPart, type HighlightSpec, type Spec, type StorySpec } from "../../shared/formats";
 import { creditsLabel } from "../../shared/credits";
-import { platforms } from "../../shared/social";
+import { platforms, postCaption } from "../../shared/social";
 import "./create.css";
 
 // One video: watch it, approve or reject it (series episodes in review), post it now or later, download it, and edit
@@ -19,15 +19,38 @@ import "./create.css";
 /** "2026-10-12T18:00" in the viewer's zone, for datetime-local inputs. */
 const local = (at: number) => { const d = new Date(at * 1000); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
 
+/** A TikTok draft waits in the person's TikTok inbox, without its caption (TikTok's Upload API can't carry it). */
+function DraftNote({ video }: { video: Video }) {
+  const toast = useToast();
+  const caption = postCaption((video.caption || "").trim(), video.hashtags || [], "tiktok").text;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(caption);
+      toast("Caption copied. Paste it in TikTok.", "good");
+    } catch {
+      toast("Couldn't copy the caption. Try again.", "bad");
+    }
+  };
+  return (
+    <p className="small muted">
+      It's waiting in your TikTok inbox: open TikTok's notification, paste the caption, choose who can see it and post. If it has an AI voice or AI
+      pictures, turn on TikTok's “AI-generated content” label.{" "}
+      {caption && <button type="button" className="link" onClick={() => void copy()}><Copy size={13} aria-hidden="true" /> Copy caption</button>}
+    </p>
+  );
+}
+
 function PostPanel({ video, onDone }: { video: Video; onDone: () => void }) {
   const toast = useToast();
-  const accounts = useApi<{ accounts: Account[] }>("/accounts");
+  const accounts = useApi<{ accounts: Account[]; platforms?: { id: string; drafts?: boolean }[] }>("/accounts");
   const [chosen, setChosen] = useState<string[]>([]);
   const [later, setLater] = useState(false);
   const [at, setAt] = useState(() => local(Math.floor(Date.now() / 1000) + 3600));
   const [privately, setPrivately] = useState(false);
   const [busy, setBusy] = useState(false);
   const usable = (accounts.data?.accounts || []).filter((a) => a.status === "active");
+  const tiktokDrafts = !!accounts.data?.platforms?.find((p) => p.id === "tiktok")?.drafts;
+  const toDrafts = tiktokDrafts && usable.some((a) => a.platform === "tiktok" && chosen.includes(a.id));
   const pubs = (video.publications || []).filter((p) => p.status !== "canceled");
   const send = async () => {
     setBusy(true);
@@ -56,6 +79,7 @@ function PostPanel({ video, onDone }: { video: Video; onDone: () => void }) {
         <div key={p.id} className="stack" style={{ gap: 4 }}>
           <PublicationLine p={p} />
           {p.error && <p className="small error">{p.error}</p>}
+          {p.draft && p.status === "published" && !p.url ? <DraftNote video={video} /> : null}
           <div className="row" style={{ gap: 6 }}>
             {p.status === "scheduled" && <button type="button" className="btn sm ghost" onClick={() => act(p, "cancel")}><X size={14} aria-hidden="true" /> Cancel</button>}
             {p.status === "failed" && <button type="button" className="btn sm" onClick={() => act(p, "retry")}><RotateCcw size={14} aria-hidden="true" /> Try again</button>}
@@ -81,7 +105,8 @@ function PostPanel({ video, onDone }: { video: Video; onDone: () => void }) {
             <button type="button" aria-pressed={later} onClick={() => setLater(true)}>Later</button>
           </div>
           {later && <input type="datetime-local" className="input" value={at} onChange={(e) => setAt(e.target.value)} aria-label="Post at" />}
-          <label className="check"><input type="checkbox" checked={privately} onChange={(e) => setPrivately(e.target.checked)} /> Post privately (only you can see it; not on Instagram)</label>
+          {toDrafts && <p className="small muted">TikTok: it goes to your TikTok inbox as a draft, and you post it in the TikTok app.</p>}
+          <label className="check"><input type="checkbox" checked={privately} onChange={(e) => setPrivately(e.target.checked)} /> Post privately (only you can see it; not on Instagram{tiktokDrafts ? " or TikTok drafts" : ""})</label>
           <button type="button" className="btn primary" disabled={busy || !chosen.length} onClick={send}>{busy ? <span className="spinner" aria-hidden="true" /> : <Send size={16} aria-hidden="true" />} {later ? "Schedule" : "Post"}</button>
         </>
       )}

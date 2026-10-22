@@ -29,7 +29,8 @@ export function PlatformBadge({ platform }: { platform: PlatformId }) {
 }
 /** One line per post of a video: where, when, how it went. */
 export function PublicationLine({ p }: { p: Publication }) {
-  const label = p.status === "published" ? "Posted" : p.status === "scheduled" ? "Posts" : p.status === "publishing" ? "Posting now" : p.status === "failed" ? "Failed" : "Canceled";
+  const label = p.status === "published" ? (p.draft ? "Sent to drafts" : "Posted") : p.status === "scheduled" ? "Posts" : p.status === "publishing" ? "Posting now"
+    : p.status === "failed" ? "Failed" : "Canceled";
   return (
     <div className="row small" style={{ gap: 8 }}>
       <PlatformBadge platform={p.platform} />

@@ -233,8 +233,9 @@ function terms(op: Operator): Section[] {
           </p>
           <p>
             Videos with an AI voice, AI pictures or AI clips are marked as AI-generated in their file metadata. When we publish such a video to a platform
-            that offers an AI-content disclosure through its API (currently TikTok and YouTube), we switch it on. Where a platform or the law asks you to
-            label AI content yourself, you must do so. Don't remove or hide these markers to make AI content look real.
+            that offers an AI-content disclosure through its API (currently TikTok and YouTube), we switch it on. A TikTok draft can't carry it: turn on
+            TikTok's AI-generated content label when you post it. Where a platform or the law asks you to label AI content yourself, you must do so.
+            Don't remove or hide these markers to make AI content look real.
           </p>
         </>
       ),
@@ -247,14 +248,18 @@ function terms(op: Operator): Section[] {
           <p>
             You can connect TikTok, YouTube and Instagram accounts through each platform's own sign-in. By connecting an account you allow us to publish
             videos to it on your behalf and to read the details needed for that: the account's name, handle and picture, the status of the videos we
-            published, and the views, likes, comments, shares and saves the platform reports for them.
+            published, and the views, likes, comments, shares and saves the platform reports for them. Until TikTok approves our app for posting
+            directly, we send videos to your TikTok inbox as drafts instead, and you post them yourself in the TikTok app.
           </p>
           <ul>
             <li>
               We only publish videos that you post or schedule yourself, and the episodes of a series that you set to post to that account — automatically,
               or once you approve them when review is on.
             </li>
-            <li>On TikTok and YouTube you can choose to post privately, so that only the account can see the video.</li>
+            <li>
+              On YouTube, and on TikTok when we post there directly, you can choose to post privately, so that only the account can see the video. For a
+              TikTok draft, you choose who can see it when you post it.
+            </li>
             <li>You can cancel or move a scheduled post until it starts publishing.</li>
             <li>
               Where importing from YouTube is available on your plan, we also use your YouTube connection to list your channel's latest videos and, when

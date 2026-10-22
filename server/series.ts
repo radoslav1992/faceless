@@ -113,7 +113,7 @@ series.get("/:id", async (c) => {
   const upcoming = s.status === "active" ? slots(settings.schedule, t, 14).slice(0, 30) : [];
   const videos = (await c.env.DB.prepare(
     `SELECT v.*,(SELECT phase FROM runs r WHERE r.video_id=v.id AND r.status IN ('queued','running') LIMIT 1) AS phase,
-      (SELECT json_group_array(json_object('id',x.id,'platform',x.platform,'accountName',x.account_name,'scheduledAt',x.scheduled_at,'status',x.status,'url',x.url,'error',x.error,'views',x.views,'likes',x.likes)) FROM publications x WHERE x.video_id=v.id AND x.status<>'canceled') AS publications
+      (SELECT json_group_array(json_object('id',x.id,'platform',x.platform,'accountName',x.account_name,'scheduledAt',x.scheduled_at,'status',x.status,'draft',x.draft,'url',x.url,'error',x.error,'views',x.views,'likes',x.likes)) FROM publications x WHERE x.video_id=v.id AND x.status<>'canceled') AS publications
      FROM videos v WHERE v.series_id=? AND v.user_id=? ORDER BY COALESCE(v.slot_at,v.created_at) DESC LIMIT 60`,
   ).bind(s.id, user.id).all<any>()).results;
   const made = new Set(videos.map((v) => v.slot_at).filter(Boolean));

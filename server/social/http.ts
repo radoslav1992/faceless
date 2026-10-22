@@ -3,6 +3,8 @@ import type { PlatformId } from "../../shared/social";
 import { b64url } from "../crypto";
 import { SocialError, failure } from "./errors";
 
+export { clipText as clip } from "../../shared/social";
+
 /**
  * Every provider call: no redirects followed (a credential is never sent on to another host), a bounded timeout,
  * and nothing about the request or answer logged except platform, status and a short code.
@@ -57,15 +59,6 @@ export async function readRange(env: Env, key: string, offset: number, length: n
   const bytes = await o.arrayBuffer();
   if (bytes.byteLength !== length) throw new SocialError("NOT_READY");
   return bytes;
-}
-
-/** At most `max` UTF-16 units (what the networks count), never splitting a surrogate pair. */
-export function clip(text: string, max: number) {
-  if (text.length <= max) return text;
-  let out = text.slice(0, max);
-  const last = out.charCodeAt(out.length - 1);
-  if (last >= 0xd800 && last <= 0xdbff) out = out.slice(0, -1);
-  return out.trimEnd();
 }
 
 /** A PKCE code verifier (RFC 7636): 64 unreserved characters. */

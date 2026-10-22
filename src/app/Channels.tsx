@@ -26,7 +26,9 @@ export const callbackErrors: Record<string, string> = {
   limit: "You've connected as many channels as your plan includes. Disconnect one or upgrade to connect more.",
   failed: "We couldn't connect the account. Please try again.",
 };
-type Response = { accounts: Account[]; platforms: { id: PlatformId; configured: boolean }[]; limit: { max: number; used: number } };
+/** While TikTok posting goes through drafts (server/social/tiktok.ts). */
+export const TIKTOK_DRAFTS_NOTE = "Videos arrive in your TikTok inbox as drafts: open TikTok's notification, paste the caption (the video's page has it ready to copy), choose who can see it and post.";
+type Response = { accounts: Account[]; platforms: { id: PlatformId; configured: boolean; drafts?: boolean }[]; limit: { max: number; used: number } };
 
 /** Shows what the network's consent screen came back with, once, and cleans the address. */
 export function useConnectOutcome() {
@@ -88,7 +90,8 @@ export function ChannelsPage() {
       ) : (
         <div className="grid two">
           {platformIds.map((id) => {
-            const configured = data?.platforms.find((p) => p.id === id)?.configured ?? false;
+            const facts = data?.platforms.find((p) => p.id === id);
+            const configured = facts?.configured ?? false;
             const mine = accounts.filter((a) => a.platform === id);
             const reason = !configured ? `Posting to ${platforms[id].name} isn't set up on this site yet.` : full ? "Your plan's channels are in use." : null;
             return (
@@ -97,14 +100,14 @@ export function ChannelsPage() {
                   <PlatformBadge platform={id} />
                   <div className="grow">
                     <h2 id={`channel-${id}`} style={{ fontSize: 18 }}>{platforms[id].name}</h2>
-                    <p className="small muted">{platforms[id].note}</p>
+                    <p className="small muted">{facts?.drafts ? "Sends videos to your TikTok inbox as drafts." : platforms[id].note}</p>
                   </div>
                   <button type="button" className="btn primary sm" onClick={() => void connect(id)} disabled={!!reason || !!connecting}>
                     {connecting === id ? <Spinner label="Opening" /> : <Plus size={14} aria-hidden="true" />} Connect{mine.length ? " another" : ""}
                   </button>
                 </div>
                 {reason && <p className="small muted">{reason} {full && configured && <Link className="link" to="/app/billing">See plans</Link>}</p>}
-                <p className="small muted row" style={{ gap: 6, alignItems: "flex-start" }}><Info size={14} aria-hidden="true" style={{ flex: "none", marginTop: 3 }} /> {beforeYouConnect[id]}</p>
+                <p className="small muted row" style={{ gap: 6, alignItems: "flex-start" }}><Info size={14} aria-hidden="true" style={{ flex: "none", marginTop: 3 }} /> {facts?.drafts ? TIKTOK_DRAFTS_NOTE : beforeYouConnect[id]}</p>
                 {mine.map((a) => {
                   const active = a.status === "active";
                   return (

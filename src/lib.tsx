@@ -21,6 +21,8 @@ export type User = {
 export type Publication = {
   id: string; platform: PlatformId; accountName: string; scheduledAt: number; status: "scheduled" | "publishing" | "published" | "failed" | "canceled";
   url: string | null; error: string | null; views: number | null; likes: number | null; private?: number;
+  /** 1: sent to the person's TikTok inbox as a draft, for them to post in TikTok. */
+  draft?: number;
 };
 export type Video = {
   id: string; seriesId: string | null; seriesName: string | null; slotAt: number | null; status: "pending" | "approved" | "rejected";

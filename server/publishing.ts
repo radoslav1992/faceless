@@ -60,7 +60,7 @@ async function insertPublications(env: Env, video: VideoRow, accounts: AccountRo
 }
 /** A publication with its account (and its stats from the network, once read), as the browser sees it. */
 const SELECT_PUBLICATION =
-  "SELECT p.id,p.video_id AS videoId,p.account_id AS accountId,p.platform,p.scheduled_at AS scheduledAt,p.status,p.private,p.attempts,p.url,p.external_id AS externalId,p.error,p.published_at AS publishedAt,p.views,p.likes,p.comments,p.shares,p.saves,p.metrics_at AS metricsAt,COALESCE(a.name,NULLIF(p.account_name,''),'Disconnected account') AS accountName,a.handle AS accountHandle FROM publications p LEFT JOIN social_accounts a ON a.id=p.account_id";
+  "SELECT p.id,p.video_id AS videoId,p.account_id AS accountId,p.platform,p.scheduled_at AS scheduledAt,p.status,p.private,p.draft,p.attempts,p.url,p.external_id AS externalId,p.error,p.published_at AS publishedAt,p.views,p.likes,p.comments,p.shares,p.saves,p.metrics_at AS metricsAt,COALESCE(a.name,NULLIF(p.account_name,''),'Disconnected account') AS accountName,a.handle AS accountHandle FROM publications p LEFT JOIN social_accounts a ON a.id=p.account_id";
 
 /** Why an account cannot take this video now, or null. */
 function refusal(a: AccountRow, video: VideoRow, privately: boolean) {
