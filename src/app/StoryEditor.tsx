@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Film, Image as ImageIcon, Library, Merge, RefreshCw, Scissors, Sparkles, Star, Trash2, Type, Wand2 } from "lucide-react";
-import { api, fileUrl, useAvatars, useVoices, type Asset, type LibraryItem } from "../lib";
+import { api, fileUrl, useAuth, useAvatars, useVoices, type Asset, type LibraryItem } from "../lib";
 import { Switch } from "../ui";
 import { CaptionStylePicker, EditorSection } from "./CaptionPickers";
 import { LibraryPicker, MediaPicker, PlayButton, useOfferedVoice, usePreviewAudio, VoiceSelect } from "./pickers";
@@ -21,7 +21,8 @@ import { styledCaptions } from "../../shared/captions";
 import { overlayItems } from "../../shared/overlay";
 import { FRAME } from "../../shared/render";
 import {
-  CLIP_CREDITS, CLIP_SECONDS, PICTURES_PER_CREDIT, clipCredits, clipQualities, creditsLabel, pictureCredits, presenterCredits, speechSeconds, videoCredits, voiceCredits, type ClipQuality,
+  CLIP_CREDITS, CLIP_SECONDS, PICTURES_PER_CREDIT, clipCredits, clipModelNames, clipQualities, creditsLabel, pictureCredits, presenterCredits, speechSeconds, videoCredits,
+  voiceCredits, type ClipModel, type ClipQuality,
 } from "../../shared/credits";
 import { headlineFor } from "../../shared/headline";
 import "./story.css";
@@ -224,6 +225,8 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
   const [word, setWord] = useState<number | null>(null);
   useEffect(() => setWord(null), [index]);
   const w = textWords(scene.text), voice = spec.narration.kind === "voice";
+  // Administrators can choose the clip model per scene, to compare them (FAL_CLIP_MODEL_ADMIN).
+  const clipModels = useAuth().user?.clipModels ?? [];
   const isKey = (text: string) => scene.keys.some((k) => normWord(k) === normWord(text));
   // What choosing a source costs: an AI picture is part of a new video (1 credit per 5 when redone), a clip by length.
   const price = (source: SceneSource) => source === "clip" ? (scene.clipId ? 0 : clipCredits([{ seconds: scene.clipSeconds, quality: scene.clipQuality }])) : source === "image" && !scene.imageId && !initial ? `1 per ${PICTURES_PER_CREDIT}` : 0;
@@ -306,6 +309,15 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
               </div>
               <span className="hint">{scene.clipQuality === "high" ? "1080p, finer motion and detail." : "720p, smooth motion; the video is still 1080p."}</span>
             </div>
+            {clipModels.length > 1 && (
+              <label className="field"><span className="small">Clip model <span className="muted">(administrators only)</span></span>
+                <select className="select" value={scene.clipModel ?? ""} onChange={(e) => onChange({ clipModel: (e.target.value || undefined) as ClipModel | undefined, clipId: undefined })}>
+                  <option value="">The default (what customers get)</option>
+                  {clipModels.map((m) => <option key={m} value={m}>{clipModelNames[m]}</option>)}
+                </select>
+                <span className="hint">{scene.clipId ? "Choosing another model makes this clip again, at the clip's price." : "Customers don't see this; their clips use the default."}</span>
+              </label>
+            )}
             <div className="field"><span className="small">Clip length (made from the picture)</span>
               <div className="seg small-seg" role="group" aria-label="Clip length">
                 {([5, 10] as const).map((n) => <button key={n} type="button" aria-pressed={scene.clipSeconds === n} disabled={!!scene.clipId} onClick={() => onChange({ clipSeconds: n })}>{n} s · {creditsLabel(clipCredits([{ seconds: n, quality: scene.clipQuality }]))}</button>)}

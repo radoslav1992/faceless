@@ -8,6 +8,7 @@ import type { PlatformId } from "../shared/social";
 import type { Moment, MomentRequest } from "../shared/highlights";
 import type { Voice } from "../shared/voices";
 import type { Avatar } from "../shared/presenter";
+import type { ClipModel } from "../shared/credits";
 
 // The app's API client, signed-in state and shared types. Every request goes to /api on this site.
 
@@ -17,6 +18,8 @@ export type User = {
   trialEndsAt: number | null; trialEnded: boolean; renewsAt: number | null; periodEnd: number | null; hasSubscription: boolean; paymentIssue: boolean;
   /** The plan is an administrator's free month (until periodEnd), not a paid subscription. */
   granted?: boolean;
+  /** Administrators: the clip models they can choose per scene to compare them. */
+  clipModels?: ClipModel[];
 };
 export type Publication = {
   id: string; platform: PlatformId; accountName: string; scheduledAt: number; status: "scheduled" | "publishing" | "published" | "failed" | "canceled";

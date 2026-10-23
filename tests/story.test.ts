@@ -4,7 +4,7 @@ import { ContentGeneration } from "../server/content-workflow";
 import { planRender, type PlanContext } from "../server/render-plan";
 import { acceptScenePlan, acceptStory, conceptToSpec, storyShape } from "../server/story";
 import { alignedWords, ALIGNMENT_URL, forcedAlignment, speak, SPEECH_MODEL } from "../server/providers/elevenlabs";
-import { clipModelFor, falRequest, referenceModel, submitFal } from "../server/providers/fal";
+import { adminClipModels, clipModelFor, falRequest, referenceModel, submitFal } from "../server/providers/fal";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 import { estimatedSeconds, narrationCurrent, pendingMedia, specCredits, specSchema, type StorySpec } from "../shared/formats";
 import {
@@ -254,12 +254,18 @@ describe("the format", () => {
     });
     expect(falRequest("clip", "A wave.", { image, clipModel: "flux-3-max", clipQuality: "high" }).body).toMatchObject({ resolution: "1080p" });
     expect(falRequest("clip", "A wave.", { image, clipModel: "kling", clipQuality: "high" }).model).toBe("fal-ai/kling-video/v2.5-turbo/pro/image-to-video");
-    // Kling unless set; an administrator's trial model only for administrators; anything unknown is Kling.
+    // Everyone's model: Kling unless set (anything unknown is Kling). Administrators may choose per scene among Kling,
+    // everyone's model and FAL_CLIP_MODEL_ADMIN's list; anyone else's choice, or one not on the list, is ignored.
     expect(clipModelFor({} as any, true)).toBe("kling");
     expect(clipModelFor({ FAL_CLIP_MODEL: " MiniMax-H3 " } as any, false)).toBe("minimax-h3");
-    expect(clipModelFor({ FAL_CLIP_MODEL_ADMIN: "flux-3-max" } as any, false)).toBe("kling");
-    expect(clipModelFor({ FAL_CLIP_MODEL: "minimax-h3", FAL_CLIP_MODEL_ADMIN: "flux-3-max" } as any, true)).toBe("flux-3-max");
     expect(clipModelFor({ FAL_CLIP_MODEL: "veo-9" } as any, false)).toBe("kling");
+    const trial = { FAL_CLIP_MODEL_ADMIN: " minimax-h3, FLUX-3-Max , veo-9" } as any;
+    expect(adminClipModels(trial)).toEqual(["kling", "minimax-h3", "flux-3-max"]);
+    expect(adminClipModels({ FAL_CLIP_MODEL: "flux-3-max" } as any)).toEqual(["kling", "flux-3-max"]);
+    expect(clipModelFor(trial, true, "flux-3-max")).toBe("flux-3-max");
+    expect(clipModelFor(trial, false, "flux-3-max")).toBe("kling");
+    expect(clipModelFor({ FAL_CLIP_MODEL_ADMIN: "minimax-h3" } as any, true, "flux-3-max")).toBe("kling");
+    expect(clipModelFor({ FAL_CLIP_MODEL: "minimax-h3" } as any, true, "kling")).toBe("kling");
     // Without a picture: the text-to-video model, 5 s, as before.
     expect(falRequest("clip", "A wave.")).toMatchObject({ model: "fal-ai/kling-video/v2.5-turbo/pro/text-to-video", body: { duration: "5", aspect_ratio: "9:16" } });
     // Pictures: GPT Image 2.5 Flare at high quality by default, exactly 9:16 in multiples of 16.
@@ -631,28 +637,35 @@ describe("narrated videos in the content run", () => {
     expect(pictures.every((c) => !c.body.image_urls)).toBe(true);
   });
 
-  it("lets administrators try another clip model before everyone gets it", async () => {
+  it("lets administrators choose the clip model per scene from FAL_CLIP_MODEL_ADMIN's list, and no one else", async () => {
     const { env, sqlite, user, spec, run } = await setup();
     const calls = providers();
     const clipModels = () => calls.filter((c) => c.method === "POST" && /kling-video|minimax\/h3|flux-3-max/.test(c.url)).map((c) => c.url.split("/").slice(3).join("/"));
-    const make = async () => {
-      expect((await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie)).status).toBe(201);
+    const make = async (clipModel?: string) => {
+      const chosen = { ...spec, scenes: spec.scenes.map((s) => (s.source === "clip" ? { ...s, clipModel } : s)) };
+      expect((await call(worker, env, "POST", "/api/videos", { spec: chosen, idempotencyKey: crypto.randomUUID() }, user.cookie)).status).toBe(201);
       await run();
+      return clipModels().at(-1);
     };
-    // The trial model is only for administrators: everyone else keeps Kling.
-    env.FAL_CLIP_MODEL_ADMIN = "minimax-h3";
-    await make();
-    expect(clipModels()).toEqual(["fal-ai/kling-video/v2.5-turbo/standard/image-to-video"]);
+    env.FAL_CLIP_MODEL_ADMIN = "minimax-h3,flux-3-max";
+    // A customer's choice is ignored: their clips use everyone's model, and they are offered no models.
+    expect(await make("minimax-h3")).toBe("fal-ai/kling-video/v2.5-turbo/standard/image-to-video");
+    expect((await call(worker, env, "GET", "/api/auth/me", undefined, user.cookie)).data.user.clipModels).toBeUndefined();
+    // An administrator's is used, each model in its own request; no choice is everyone's model.
     sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
-    await make();
-    expect(clipModels().at(-1)).toBe("minimax/h3/image-to-video");
+    expect((await call(worker, env, "GET", "/api/auth/me", undefined, user.cookie)).data.user.clipModels).toEqual(["kling", "minimax-h3", "flux-3-max"]);
+    expect(await make("minimax-h3")).toBe("minimax/h3/image-to-video");
     expect(calls.filter((c) => c.url.endsWith("/minimax/h3/image-to-video")).at(-1)!.body).toMatchObject({ resolution: "768P", duration: 5 });
-    // Chosen for everyone, a model is everyone's (the administrator's trial model still comes first for them).
-    env.FAL_CLIP_MODEL_ADMIN = "";
-    env.FAL_CLIP_MODEL = "flux-3-max";
-    await make();
-    expect(clipModels().at(-1)).toBe("blackforestlabs/flux-3-max/image-to-video");
+    expect(await make("flux-3-max")).toBe("blackforestlabs/flux-3-max/image-to-video");
     expect(calls.filter((c) => c.url.endsWith("/flux-3-max/image-to-video")).at(-1)!.body).toMatchObject({ generate_audio: false, resolution: "720p" });
+    expect(await make()).toBe("fal-ai/kling-video/v2.5-turbo/standard/image-to-video");
+    // A model taken off the list is no longer used, even for an administrator.
+    env.FAL_CLIP_MODEL_ADMIN = "minimax-h3";
+    expect(await make("flux-3-max")).toBe("fal-ai/kling-video/v2.5-turbo/standard/image-to-video");
+    // Chosen for everyone, a model is everyone's.
+    env.FAL_CLIP_MODEL = "flux-3-max";
+    sqlite.prepare("UPDATE users SET email='someone@example.com' WHERE id=?").run(user.id);
+    expect(await make()).toBe("blackforestlabs/flux-3-max/image-to-video");
   });
 
   it("makes a high-quality clip with the finer model, for 2 credits per 5 seconds", async () => {

@@ -170,7 +170,8 @@ async function generateMedia(
     if (s.claims?.[name]) throw new Error("GENERATION_UNCERTAIN");
     const image = from ? await from() : undefined;
     const refs = references ? await references() : [];
-    const clipModel = kind === "clip" ? clipModelFor(e, await ownerIsAdmin(e, run.user_id)) : undefined;
+    // A model chosen for the scene counts only when its owner is an administrator who may choose it.
+    const clipModel = kind === "clip" ? clipModelFor(e, m.clipModel ? await ownerIsAdmin(e, run.user_id) : false, m.clipModel) : undefined;
     await patchState(e, run.id, (s) => { (s.claims ||= {})[name] = true; });
     await phase(kind === "clip" ? "clip" : "images");
     const t = await submitFal(e, kind, m.prompt, { image, seconds: m.seconds, clipQuality: m.quality, clipModel, references: refs.length ? refs : undefined });
@@ -413,9 +414,8 @@ async function referencePictures(e: Env, run: RunInfo, m: PendingMedia): Promise
   return [];
 }
 
-/** Whether the run's owner is an administrator, who gets FAL_CLIP_MODEL_ADMIN's clip model when one is set. */
+/** Whether the run's owner is an administrator, who may choose a scene's clip model (FAL_CLIP_MODEL_ADMIN). */
 async function ownerIsAdmin(e: Env, userId: string) {
-  if (!e.FAL_CLIP_MODEL_ADMIN?.trim()) return false;
   const user = await e.DB.prepare("SELECT * FROM users WHERE id=?").bind(userId).first<DbUser>();
   return !!user && isAdmin(e, user);
 }

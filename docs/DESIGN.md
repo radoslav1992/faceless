@@ -116,7 +116,8 @@ heading receives focus and the title updates; icons beside text are `aria-hidden
   credits*. Nothing is made or charged before that.
 - **The video editor** (`StoryEditor.tsx`, `StoryTimeline.tsx`, `StoryPreview.tsx`): a phone preview that plays the
   scenes on the voice's clock with their transitions, subtitles and title; the selected scene (its words as chips to
-  mark key words, split or merge; the AI voice's tone; its picture source with prices; the transition in); the timeline of the voice with
+  mark key words, split or merge; the AI voice's tone; its picture source with prices, and for administrators the
+  clip model; the transition in); the timeline of the voice with
   scene edges that snap to pauses between words; sections for the background clip, on-screen title, subtitles (21
   live style samples), music, and *Plan and price*, whose button is the only thing that spends credits.
 - **Clips** (`/app/clips`, `Clips.tsx`): the owner's long videos as 16:9 cards with where each stands (Checking,

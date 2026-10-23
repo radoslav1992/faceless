@@ -1,5 +1,5 @@
 import type { Env } from "../types";
-import { CLIP_SECONDS, type ClipQuality } from "../../shared/credits";
+import { CLIP_SECONDS, clipModels, isClipModel, type ClipModel, type ClipQuality } from "../../shared/credits";
 import { failureCode, falQueueUrl, providerFetch, ProviderError } from "./http";
 
 // AI pictures (a video's scenes) and short AI video clips through fal's queue API. A clip is made from a scene's
@@ -36,22 +36,25 @@ const auth = (e: Env) => {
  * How a picture or clip is made: a clip from `image` (a capability link to the picture it starts from), `seconds`
  * long (5 or 10) and of `clipQuality` (regular unless said); a picture with `model` and, for GPT Image, `quality`.
  */
-/**
- * The model families a scene's picture can be brought to life with (FAL_CLIP_MODEL for everyone, FAL_CLIP_MODEL_ADMIN
- * for administrators trying one): Kling 2.5 Turbo (Standard at regular quality, Pro at high), MiniMax H3 (768P at both:
- * its 2K is an upscale at about twice the price) and FLUX 3 Max (720p at regular, 1080p at high). The clips' own sound,
- * which H3 and FLUX 3 Max can make, is never played: the render takes only their picture.
- */
-export const clipModels = ["kling", "minimax-h3", "flux-3-max"] as const;
-export type ClipModel = (typeof clipModels)[number];
-export const isClipModel = (m: unknown): m is ClipModel => typeof m === "string" && (clipModels as readonly string[]).includes(m);
+// The clip models (shared/credits.ts clipModels), each from the scene's picture in its own request: Kling 2.5 Turbo
+// (Standard at regular quality, Pro at high), MiniMax H3 (768P at both: its 2K is an upscale at about twice the price)
+// and FLUX 3 Max (720p at regular, 1080p at high). The clips' own sound, which H3 and FLUX 3 Max can make, is never
+// played: the render takes only their picture.
 const H3_CLIP_MODEL = "minimax/h3/image-to-video";
 const FLUX_CLIP_MODEL = "blackforestlabs/flux-3-max/image-to-video";
-/** The clip model for an owner: an administrator's trial model when one is set, else everyone's, else Kling. */
-export function clipModelFor(e: Env, admin: boolean): ClipModel {
-  const own = e.FAL_CLIP_MODEL_ADMIN?.trim().toLowerCase(), all = e.FAL_CLIP_MODEL?.trim().toLowerCase();
-  if (admin && isClipModel(own)) return own;
-  return isClipModel(all) ? all : "kling";
+/** Everyone's clip model (FAL_CLIP_MODEL), Kling unless set. */
+const everyoneClipModel = (e: Env): ClipModel => {
+  const m = e.FAL_CLIP_MODEL?.trim().toLowerCase();
+  return isClipModel(m) ? m : "kling";
+};
+/** The models administrators can choose per scene: Kling, everyone's and those FAL_CLIP_MODEL_ADMIN lists (comma-separated). */
+export function adminClipModels(e: Env): ClipModel[] {
+  const listed = (e.FAL_CLIP_MODEL_ADMIN || "").toLowerCase().split(",").map((m) => m.trim()).filter(isClipModel);
+  return clipModels.filter((m) => m === "kling" || m === everyoneClipModel(e) || listed.includes(m));
+}
+/** A scene's clip model: the one an administrator chose for it, when it is one they may choose; else everyone's. */
+export function clipModelFor(e: Env, admin: boolean, chosen?: ClipModel): ClipModel {
+  return admin && chosen && adminClipModels(e).includes(chosen) ? chosen : everyoneClipModel(e);
 }
 
 export type FalOptions = {
