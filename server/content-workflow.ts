@@ -1,14 +1,15 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
-import type { Env } from "./types";
+import type { DbUser, Env } from "./types";
 import { MB, now, uid } from "./types";
 import { withDefaults, siteUrl } from "./config";
 import { json } from "./db";
 import { safeEqual, token } from "./security";
 import { extOf, head, imageInfo, mediaKey, serveObject, storedDuration, storeStream } from "./storage";
 import { fetchOutput } from "./providers/http";
-import { falResult, falStatus, referenceModel, submitFal, type FalTicket } from "./providers/fal";
+import { clipModelFor, falResult, falStatus, referenceModel, submitFal, type FalTicket } from "./providers/fal";
+import { isAdmin } from "./auth";
 import { forcedAlignment, speak } from "./providers/elevenlabs";
 import { avatarVideoStatus, submitAvatarVideo } from "./providers/heygen";
 import { avatarFor, forgetHeyGenVideo } from "./avatars";
@@ -169,9 +170,11 @@ async function generateMedia(
     if (s.claims?.[name]) throw new Error("GENERATION_UNCERTAIN");
     const image = from ? await from() : undefined;
     const refs = references ? await references() : [];
+    // A model chosen for the scene counts only when its owner is an administrator who may choose it.
+    const clipModel = kind === "clip" ? clipModelFor(e, m.clipModel ? await ownerIsAdmin(e, run.user_id) : false, m.clipModel) : undefined;
     await patchState(e, run.id, (s) => { (s.claims ||= {})[name] = true; });
     await phase(kind === "clip" ? "clip" : "images");
-    const t = await submitFal(e, kind, m.prompt, { image, seconds: m.seconds, clipQuality: m.quality, references: refs.length ? refs : undefined });
+    const t = await submitFal(e, kind, m.prompt, { image, seconds: m.seconds, clipQuality: m.quality, clipModel, references: refs.length ? refs : undefined });
     await patchState(e, run.id, (s) => { (s.tickets ||= {})[name] = t; });
     return t;
   });
@@ -409,6 +412,12 @@ async function referencePictures(e: Env, run: RunInfo, m: PendingMedia): Promise
     if (a) return [await inputUrl(e, run.id, a.object_key)];
   }
   return [];
+}
+
+/** Whether the run's owner is an administrator, who may choose a scene's clip model (FAL_CLIP_MODEL_ADMIN). */
+async function ownerIsAdmin(e: Env, userId: string) {
+  const user = await e.DB.prepare("SELECT * FROM users WHERE id=?").bind(userId).first<DbUser>();
+  return !!user && isAdmin(e, user);
 }
 
 /** The capability link of the picture a clip is made from: the asset in field `from` of the same scene. */

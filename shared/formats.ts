@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { captionStyles, type CaptionStyle } from "./captions";
-import { clipCredits, highlightCredits, pictureCredits, presenterCredits, speechSeconds, videoCredits, voiceCredits, type ClipQuality } from "./credits";
+import { clipCredits, highlightCredits, pictureCredits, presenterCredits, speechSeconds, videoCredits, voiceCredits, type ClipModel, type ClipQuality } from "./credits";
 import { presenterScene, presenterSchema } from "./presenter";
 import { defaultLook, textLookSchema } from "./overlay";
 import { videoKinds } from "./templates";
@@ -160,7 +160,11 @@ export const presenterNeeded = (spec: StorySpec) => presenterShown(spec) && !pre
  * An AI picture or clip to make: its asset goes to `key` of the scene at `path`. A clip `from` a picture is made from
  * the asset in that field of the same scene (made earlier in the same run); `seconds`: its length.
  */
-export type PendingMedia = { kind: "image" | "clip"; prompt: string; path: (string | number)[]; key: string; from?: string; seconds?: 5 | 10; quality?: ClipQuality };
+export type PendingMedia = {
+  kind: "image" | "clip"; prompt: string; path: (string | number)[]; key: string; from?: string; seconds?: 5 | 10; quality?: ClipQuality;
+  /** The clip model an administrator chose for the scene. */
+  clipModel?: ClipModel;
+};
 /** Every AI picture or clip the video still asks for, pictures first and then the clips made from them. */
 export function pendingMedia(spec: Spec): PendingMedia[] {
   const out: PendingMedia[] = [];
@@ -173,7 +177,7 @@ export function pendingMedia(spec: Spec): PendingMedia[] {
   });
   spec.scenes.forEach((s, i) => {
     if (s.source === "clip" && !s.clipId && !showsPresenter(spec, i))
-      out.push({ kind: "clip", prompt: clipPrompt(s.description), path: ["scenes", i], key: "clipId", from: "imageId", seconds: s.clipSeconds, quality: s.clipQuality });
+      out.push({ kind: "clip", prompt: clipPrompt(s.description), path: ["scenes", i], key: "clipId", from: "imageId", seconds: s.clipSeconds, quality: s.clipQuality, clipModel: s.clipModel });
   });
   return out;
 }

@@ -1,5 +1,5 @@
 import type { Env } from "../types";
-import { CLIP_SECONDS, type ClipQuality } from "../../shared/credits";
+import { CLIP_SECONDS, clipModels, isClipModel, type ClipModel, type ClipQuality } from "../../shared/credits";
 import { failureCode, falQueueUrl, providerFetch, ProviderError } from "./http";
 
 // AI pictures (a video's scenes) and short AI video clips through fal's queue API. A clip is made from a scene's
@@ -36,8 +36,31 @@ const auth = (e: Env) => {
  * How a picture or clip is made: a clip from `image` (a capability link to the picture it starts from), `seconds`
  * long (5 or 10) and of `clipQuality` (regular unless said); a picture with `model` and, for GPT Image, `quality`.
  */
+// The clip models (shared/credits.ts clipModels), each from the scene's picture in its own request: Kling 2.5 Turbo
+// (Standard at regular quality, Pro at high), MiniMax H3 (768P at both: its 2K is an upscale at about twice the price)
+// and FLUX 3 Max (720p at regular, 1080p at high). The clips' own sound, which H3 and FLUX 3 Max can make, is never
+// played: the render takes only their picture.
+const H3_CLIP_MODEL = "minimax/h3/image-to-video";
+const FLUX_CLIP_MODEL = "blackforestlabs/flux-3-max/image-to-video";
+/** Everyone's clip model (FAL_CLIP_MODEL), Kling unless set. */
+const everyoneClipModel = (e: Env): ClipModel => {
+  const m = e.FAL_CLIP_MODEL?.trim().toLowerCase();
+  return isClipModel(m) ? m : "kling";
+};
+/** The models administrators can choose per scene: Kling, everyone's and those FAL_CLIP_MODEL_ADMIN lists (comma-separated). */
+export function adminClipModels(e: Env): ClipModel[] {
+  const listed = (e.FAL_CLIP_MODEL_ADMIN || "").toLowerCase().split(",").map((m) => m.trim()).filter(isClipModel);
+  return clipModels.filter((m) => m === "kling" || m === everyoneClipModel(e) || listed.includes(m));
+}
+/** A scene's clip model: the one an administrator chose for it, when it is one they may choose; else everyone's. */
+export function clipModelFor(e: Env, admin: boolean, chosen?: ClipModel): ClipModel {
+  return admin && chosen && adminClipModels(e).includes(chosen) ? chosen : everyoneClipModel(e);
+}
+
 export type FalOptions = {
   image?: string; seconds?: number; clipQuality?: ClipQuality; model?: string; quality?: ImageQuality;
+  /** The family a clip from a picture is made with (Kling unless said). */
+  clipModel?: ClipModel;
   /** A picture drawn from these (capability links to the video's earlier pictures) with `referenceModel`. */
   references?: string[]; referenceModel?: string;
 };
@@ -63,8 +86,13 @@ export function falRequest(kind: "image" | "clip", prompt: string, options: FalO
     return { model: gpt, body: { prompt: text, num_images: 1, image_size: { width: 864, height: 1536 }, quality: options.quality || "high", output_format: "jpeg" } };
   }
   // Clips are silent: the post's music and voice play over them. From a picture, the clip keeps its shape.
-  const common = { prompt: text, duration: String(options.seconds === 10 ? 10 : CLIP_SECONDS), negative_prompt: NEGATIVE, cfg_scale: 0.5 };
-  if (options.image) return { model: IMAGE_CLIP_MODELS[options.clipQuality ?? "regular"], body: { ...common, image_url: options.image } };
+  const seconds = options.seconds === 10 ? 10 : CLIP_SECONDS, quality = options.clipQuality ?? "regular";
+  if (options.image && options.clipModel === "minimax-h3")
+    return { model: H3_CLIP_MODEL, body: { prompt: text, image_url: options.image, duration: seconds, resolution: "768P" } };
+  if (options.image && options.clipModel === "flux-3-max")
+    return { model: FLUX_CLIP_MODEL, body: { prompt: text, image_url: options.image, duration: seconds, resolution: quality === "high" ? "1080p" : "720p", generate_audio: false } };
+  const common = { prompt: text, duration: String(seconds), negative_prompt: NEGATIVE, cfg_scale: 0.5 };
+  if (options.image) return { model: IMAGE_CLIP_MODELS[quality], body: { ...common, image_url: options.image } };
   return { model: CLIP_MODEL, body: { ...common, aspect_ratio: "9:16" } };
 }
 /** The model later pictures are drawn with from the first (FAL_REFERENCE_MODEL), or null when that is switched off. */

@@ -7,6 +7,7 @@ import { now, uid, ready, DAY, HOUR } from "./types";
 import { checkPassword, hashPassword, token, sha, rate, hit, limited, tooMany, clientIp, defer, sendMail, origin, verifyTurnstile } from "./security";
 import { allowance, touchTrial } from "./billing";
 import { referrerFor } from "./affiliates";
+import { adminClipModels } from "./providers/fal";
 import { PRODUCT } from "../shared/brand";
 
 export const auth = new Hono<App>();
@@ -45,6 +46,8 @@ auth.get("/me", async (c) => {
       email: user.email,
       verified: !!user.verified,
       admin: isAdmin(c.env, user),
+      // The clip models an administrator can choose per scene to compare them.
+      ...(isAdmin(c.env, user) && { clipModels: adminClipModels(c.env) }),
       ...limits,
       window: undefined,
     },

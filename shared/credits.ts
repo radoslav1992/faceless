@@ -12,6 +12,15 @@ export const PICTURES_PER_CREDIT = 5;
 export const clipQualities = ["regular", "high"] as const;
 export type ClipQuality = (typeof clipQualities)[number];
 export const CLIP_CREDITS: Record<ClipQuality, number> = { regular: 1, high: 2 };
+/**
+ * The models a scene's picture can be brought to life with (server/providers/fal.ts). Everyone gets the operator's
+ * choice (FAL_CLIP_MODEL, Kling unless set); administrators can pick one per scene from FAL_CLIP_MODEL_ADMIN's list to
+ * compare them. A clip costs the same credits whatever its model.
+ */
+export const clipModels = ["kling", "minimax-h3", "flux-3-max"] as const;
+export type ClipModel = (typeof clipModels)[number];
+export const isClipModel = (m: unknown): m is ClipModel => typeof m === "string" && (clipModels as readonly string[]).includes(m);
+export const clipModelNames: Record<ClipModel, string> = { kling: "Kling 2.5 Turbo", "minimax-h3": "MiniMax H3", "flux-3-max": "FLUX 3 Max" };
 export const CLIP_SECONDS = 5;
 /**
  * An on-screen presenter (shared/presenter.ts): an avatar who speaks the whole AI voice, lip-synced, per started 5
