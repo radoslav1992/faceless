@@ -55,6 +55,10 @@ export interface Env {
   FAL_IMAGE_MODEL?: string;
   /** GPT Image 2.5's quality: low, medium, high (default), xhigh or max. */
   FAL_IMAGE_QUALITY?: string;
+  /** The model scenes are brought to life with: "kling" (default), "minimax-h3" or "flux-3-max" (server/providers/fal.ts). */
+  FAL_CLIP_MODEL?: string;
+  /** The same for administrators only, to try a model on their own videos before everyone gets it. */
+  FAL_CLIP_MODEL_ADMIN?: string;
   /** Later pictures of a video drawn from its first as a reference (server/providers/fal.ts); "off" to stop it. */
   FAL_REFERENCE_MODEL?: string;
   ELEVENLABS_API_KEY?: string;

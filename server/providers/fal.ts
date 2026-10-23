@@ -36,8 +36,28 @@ const auth = (e: Env) => {
  * How a picture or clip is made: a clip from `image` (a capability link to the picture it starts from), `seconds`
  * long (5 or 10) and of `clipQuality` (regular unless said); a picture with `model` and, for GPT Image, `quality`.
  */
+/**
+ * The model families a scene's picture can be brought to life with (FAL_CLIP_MODEL for everyone, FAL_CLIP_MODEL_ADMIN
+ * for administrators trying one): Kling 2.5 Turbo (Standard at regular quality, Pro at high), MiniMax H3 (768P at both:
+ * its 2K is an upscale at about twice the price) and FLUX 3 Max (720p at regular, 1080p at high). The clips' own sound,
+ * which H3 and FLUX 3 Max can make, is never played: the render takes only their picture.
+ */
+export const clipModels = ["kling", "minimax-h3", "flux-3-max"] as const;
+export type ClipModel = (typeof clipModels)[number];
+export const isClipModel = (m: unknown): m is ClipModel => typeof m === "string" && (clipModels as readonly string[]).includes(m);
+const H3_CLIP_MODEL = "minimax/h3/image-to-video";
+const FLUX_CLIP_MODEL = "blackforestlabs/flux-3-max/image-to-video";
+/** The clip model for an owner: an administrator's trial model when one is set, else everyone's, else Kling. */
+export function clipModelFor(e: Env, admin: boolean): ClipModel {
+  const own = e.FAL_CLIP_MODEL_ADMIN?.trim().toLowerCase(), all = e.FAL_CLIP_MODEL?.trim().toLowerCase();
+  if (admin && isClipModel(own)) return own;
+  return isClipModel(all) ? all : "kling";
+}
+
 export type FalOptions = {
   image?: string; seconds?: number; clipQuality?: ClipQuality; model?: string; quality?: ImageQuality;
+  /** The family a clip from a picture is made with (Kling unless said). */
+  clipModel?: ClipModel;
   /** A picture drawn from these (capability links to the video's earlier pictures) with `referenceModel`. */
   references?: string[]; referenceModel?: string;
 };
@@ -63,8 +83,13 @@ export function falRequest(kind: "image" | "clip", prompt: string, options: FalO
     return { model: gpt, body: { prompt: text, num_images: 1, image_size: { width: 864, height: 1536 }, quality: options.quality || "high", output_format: "jpeg" } };
   }
   // Clips are silent: the post's music and voice play over them. From a picture, the clip keeps its shape.
-  const common = { prompt: text, duration: String(options.seconds === 10 ? 10 : CLIP_SECONDS), negative_prompt: NEGATIVE, cfg_scale: 0.5 };
-  if (options.image) return { model: IMAGE_CLIP_MODELS[options.clipQuality ?? "regular"], body: { ...common, image_url: options.image } };
+  const seconds = options.seconds === 10 ? 10 : CLIP_SECONDS, quality = options.clipQuality ?? "regular";
+  if (options.image && options.clipModel === "minimax-h3")
+    return { model: H3_CLIP_MODEL, body: { prompt: text, image_url: options.image, duration: seconds, resolution: "768P" } };
+  if (options.image && options.clipModel === "flux-3-max")
+    return { model: FLUX_CLIP_MODEL, body: { prompt: text, image_url: options.image, duration: seconds, resolution: quality === "high" ? "1080p" : "720p", generate_audio: false } };
+  const common = { prompt: text, duration: String(seconds), negative_prompt: NEGATIVE, cfg_scale: 0.5 };
+  if (options.image) return { model: IMAGE_CLIP_MODELS[quality], body: { ...common, image_url: options.image } };
   return { model: CLIP_MODEL, body: { ...common, aspect_ratio: "9:16" } };
 }
 /** The model later pictures are drawn with from the first (FAL_REFERENCE_MODEL), or null when that is switched off. */

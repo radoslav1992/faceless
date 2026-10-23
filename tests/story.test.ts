@@ -4,7 +4,7 @@ import { ContentGeneration } from "../server/content-workflow";
 import { planRender, type PlanContext } from "../server/render-plan";
 import { acceptScenePlan, acceptStory, conceptToSpec, storyShape } from "../server/story";
 import { alignedWords, ALIGNMENT_URL, forcedAlignment, speak, SPEECH_MODEL } from "../server/providers/elevenlabs";
-import { falRequest, referenceModel, submitFal } from "../server/providers/fal";
+import { clipModelFor, falRequest, referenceModel, submitFal } from "../server/providers/fal";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 import { estimatedSeconds, narrationCurrent, pendingMedia, specCredits, specSchema, type StorySpec } from "../shared/formats";
 import {
@@ -242,6 +242,24 @@ describe("the format", () => {
         negative_prompt: "blur, distortion, low quality, text, captions, subtitles, watermark, logo", cfg_scale: 0.5, image_url: "https://app.test/api/render-inputs/r/0?token=t",
       },
     });
+    // The other clip models an operator can choose, each from the scene's picture in its own request shape: MiniMax H3
+    // at 768P (its 2K is an upscale), FLUX 3 Max at 720p or 1080p by quality and without its sound.
+    expect(falRequest("clip", "A wave.", { image, seconds: 10, clipModel: "minimax-h3", clipQuality: "high" })).toEqual({
+      model: "minimax/h3/image-to-video",
+      body: { prompt: "A wave. No text, captions, logos or watermarks in the picture.", image_url: image, duration: 10, resolution: "768P" },
+    });
+    expect(falRequest("clip", "A wave.", { image, clipModel: "flux-3-max" })).toEqual({
+      model: "blackforestlabs/flux-3-max/image-to-video",
+      body: { prompt: "A wave. No text, captions, logos or watermarks in the picture.", image_url: image, duration: 5, resolution: "720p", generate_audio: false },
+    });
+    expect(falRequest("clip", "A wave.", { image, clipModel: "flux-3-max", clipQuality: "high" }).body).toMatchObject({ resolution: "1080p" });
+    expect(falRequest("clip", "A wave.", { image, clipModel: "kling", clipQuality: "high" }).model).toBe("fal-ai/kling-video/v2.5-turbo/pro/image-to-video");
+    // Kling unless set; an administrator's trial model only for administrators; anything unknown is Kling.
+    expect(clipModelFor({} as any, true)).toBe("kling");
+    expect(clipModelFor({ FAL_CLIP_MODEL: " MiniMax-H3 " } as any, false)).toBe("minimax-h3");
+    expect(clipModelFor({ FAL_CLIP_MODEL_ADMIN: "flux-3-max" } as any, false)).toBe("kling");
+    expect(clipModelFor({ FAL_CLIP_MODEL: "minimax-h3", FAL_CLIP_MODEL_ADMIN: "flux-3-max" } as any, true)).toBe("flux-3-max");
+    expect(clipModelFor({ FAL_CLIP_MODEL: "veo-9" } as any, false)).toBe("kling");
     // Without a picture: the text-to-video model, 5 s, as before.
     expect(falRequest("clip", "A wave.")).toMatchObject({ model: "fal-ai/kling-video/v2.5-turbo/pro/text-to-video", body: { duration: "5", aspect_ratio: "9:16" } });
     // Pictures: GPT Image 2.5 Flare at high quality by default, exactly 9:16 in multiples of 16.
@@ -548,7 +566,7 @@ function providers({ refuseClip = false, timings = true } = {}) {
       return Response.json({ request_id: r, status_url: `https://queue.fal.run/${fal[1]}/requests/${r}/status`, response_url: `https://queue.fal.run/${fal[1]}/requests/${r}` });
     }
     if (fal && url.endsWith("/status")) return Response.json({ status: "COMPLETED" });
-    if (fal) return Response.json(fal[1].includes("kling") ? { video: { url: "https://v3.fal.media/files/clip.mp4" } } : { images: [{ url: "https://v3.fal.media/files/shot.jpg" }] });
+    if (fal) return Response.json(/kling|minimax\/h3|flux-3-max/.test(fal[1]) ? { video: { url: "https://v3.fal.media/files/clip.mp4" } } : { images: [{ url: "https://v3.fal.media/files/shot.jpg" }] });
     if (url === "https://v3.fal.media/files/shot.jpg") return new Response(jpeg());
     if (url === "https://v3.fal.media/files/clip.mp4") return new Response(new Uint8Array(3000).fill(2));
     throw new Error("unexpected " + url);
@@ -611,6 +629,30 @@ describe("narrated videos in the content run", () => {
     const pictures = calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/") && !c.url.includes("/kling-video/"));
     expect(pictures.map((c) => c.url.split("/").slice(3).join("/"))).toEqual(Array(4).fill("openai/gpt-image-2.5/flare/text-to-image"));
     expect(pictures.every((c) => !c.body.image_urls)).toBe(true);
+  });
+
+  it("lets administrators try another clip model before everyone gets it", async () => {
+    const { env, sqlite, user, spec, run } = await setup();
+    const calls = providers();
+    const clipModels = () => calls.filter((c) => c.method === "POST" && /kling-video|minimax\/h3|flux-3-max/.test(c.url)).map((c) => c.url.split("/").slice(3).join("/"));
+    const make = async () => {
+      expect((await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie)).status).toBe(201);
+      await run();
+    };
+    // The trial model is only for administrators: everyone else keeps Kling.
+    env.FAL_CLIP_MODEL_ADMIN = "minimax-h3";
+    await make();
+    expect(clipModels()).toEqual(["fal-ai/kling-video/v2.5-turbo/standard/image-to-video"]);
+    sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
+    await make();
+    expect(clipModels().at(-1)).toBe("minimax/h3/image-to-video");
+    expect(calls.filter((c) => c.url.endsWith("/minimax/h3/image-to-video")).at(-1)!.body).toMatchObject({ resolution: "768P", duration: 5 });
+    // Chosen for everyone, a model is everyone's (the administrator's trial model still comes first for them).
+    env.FAL_CLIP_MODEL_ADMIN = "";
+    env.FAL_CLIP_MODEL = "flux-3-max";
+    await make();
+    expect(clipModels().at(-1)).toBe("blackforestlabs/flux-3-max/image-to-video");
+    expect(calls.filter((c) => c.url.endsWith("/flux-3-max/image-to-video")).at(-1)!.body).toMatchObject({ generate_audio: false, resolution: "720p" });
   });
 
   it("makes a high-quality clip with the finer model, for 2 credits per 5 seconds", async () => {
