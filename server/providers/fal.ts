@@ -8,11 +8,13 @@ import { failureCode, falQueueUrl, providerFetch, ProviderError } from "./http";
 export const IMAGE_MODEL = "openai/gpt-image-2.5/flare/text-to-image";
 /** Pictures an operator can choose instead with FAL_IMAGE_MODEL (the Sunburst variant of GPT Image 2.5 works too). */
 export const NANO_BANANA_MODEL = "fal-ai/nano-banana-2";
+/** Google's Nano Banana 2.1, in its own namespace on fal; chosen, it draws the later pictures too (its edit endpoint). */
+export const NANO_BANANA_21_MODEL = "google/nano-banana-2.1";
 export const FAST_IMAGE_MODEL = "fal-ai/flux/schnell";
 /**
- * A video's later pictures, drawn from its first one as a reference so the characters, palette, light and style stay
- * the same from scene to scene: Nano Banana 2's edit endpoint (up to 14 reference pictures). FAL_REFERENCE_MODEL can
- * name another Nano Banana edit endpoint, or "off" to draw every picture from its text alone.
+ * A video's later pictures, drawn from its earlier ones as references so the characters, palette, light, style and
+ * places stay the same from scene to scene: Nano Banana 2's edit endpoint (up to 14 reference pictures).
+ * FAL_REFERENCE_MODEL can name another Nano Banana edit endpoint, or "off" to draw every picture from its text alone.
  */
 export const REFERENCE_MODEL = "fal-ai/nano-banana-2/edit";
 /** GPT Image 2.5's quality levels (price rises with each); FAL_IMAGE_QUALITY picks one, "high" by default. */
@@ -83,18 +85,20 @@ export function referencePrompt(references: Reference[]) {
     : references.map((r, i) => `Reference picture ${i + 1} ${referenceUse[r.role]}`);
   return `${uses.join(" ")} Draw a new picture with its own composition, not a copy of ${references.length === 1 ? "the reference" : "either reference"}:`;
 }
+/** Nano Banana's input (2 and 2.1 alike): one 9:16 picture at 1K (768 × 1376). */
+const nanoBanana = (prompt: string, imageUrls?: string[]) => ({
+  prompt, ...(imageUrls && { image_urls: imageUrls }), num_images: 1, aspect_ratio: "9:16", resolution: "1K", output_format: "jpeg", limit_generations: true,
+});
 /** The model and its input (pure, for tests). Pictures are portrait 9:16 for short-form; no text is drawn in them. */
 export function falRequest(kind: "image" | "clip", prompt: string, options: FalOptions = {}) {
   const text = `${prompt.trim()} No text, captions, logos or watermarks in the picture.`;
   if (kind === "image") {
-    if (options.references?.length)
-      return {
-        model: options.referenceModel || REFERENCE_MODEL,
-        body: { prompt: `${referencePrompt(options.references)} ${text}`, image_urls: options.references.map((r) => r.url), num_images: 1, aspect_ratio: "9:16", resolution: "1K", output_format: "jpeg", limit_generations: true },
-      };
+    if (options.references?.length) {
+      const model = options.referenceModel || REFERENCE_MODEL;
+      return { model, body: nanoBanana(`${referencePrompt(options.references)} ${text}`, options.references.map((r) => r.url)) };
+    }
     const model = options.model || IMAGE_MODEL;
-    if (model === NANO_BANANA_MODEL)
-      return { model, body: { prompt: text, num_images: 1, aspect_ratio: "9:16", resolution: "1K", output_format: "jpeg", limit_generations: true } };
+    if (model === NANO_BANANA_MODEL || model === NANO_BANANA_21_MODEL) return { model, body: nanoBanana(text) };
     if (model === FAST_IMAGE_MODEL)
       return { model, body: { prompt: text, num_images: 1, image_size: { width: 1088, height: 1920 }, num_inference_steps: 4, output_format: "jpeg", enable_safety_checker: true } };
     // GPT Image 2.5 (Flare or Sunburst): exactly 9:16 in multiples of 16; the renderer scales it to the 1080 × 1920 frame.
@@ -111,11 +115,14 @@ export function falRequest(kind: "image" | "clip", prompt: string, options: FalO
   if (options.image) return { model: IMAGE_CLIP_MODELS[quality], body: { ...common, image_url: options.image } };
   return { model: CLIP_MODEL, body: { ...common, aspect_ratio: "9:16" } };
 }
-/** The model later pictures are drawn with from the first (FAL_REFERENCE_MODEL), or null when that is switched off. */
+/**
+ * The model later pictures are drawn with from earlier ones: FAL_REFERENCE_MODEL, else Nano Banana 2.1's edit endpoint
+ * when it draws the first pictures (one model for the whole video), else Nano Banana 2's; null when switched off.
+ */
 export function referenceModel(e: Env) {
   const name = e.FAL_REFERENCE_MODEL?.trim();
   if (name?.toLowerCase() === "off") return null;
-  return name || REFERENCE_MODEL;
+  return name || (e.FAL_IMAGE_MODEL?.trim() === NANO_BANANA_21_MODEL ? `${NANO_BANANA_21_MODEL}/edit` : REFERENCE_MODEL);
 }
 /** The operator's picture quality (FAL_IMAGE_QUALITY), when it is one GPT Image knows. */
 const imageQuality = (e: Env) => imageQualities.find((q) => q === e.FAL_IMAGE_QUALITY?.trim().toLowerCase());

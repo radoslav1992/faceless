@@ -293,7 +293,7 @@ D1 batch, so the credits are reserved by the triggers before any work starts. It
 1. **Load**: the run becomes `running`, gets a capability token and a render job ID.
 2. **AI pictures and clips** (fal, `server/providers/fal.ts`): every picture the spec still needs
    (GPT Image 2.5 Flare at 864 × 1536, `FAL_IMAGE_QUALITY` high by default; `FAL_IMAGE_MODEL` can choose its Sunburst
-   variant, `fal-ai/nano-banana-2` or `fal-ai/flux/schnell`), then every clip made from its
+   variant, `fal-ai/nano-banana-2`, `google/nano-banana-2.1` or `fal-ai/flux/schnell`), then every clip made from its
    picture (`fal-ai/kling-video/v2.5-turbo/pro/image-to-video`, which reads the picture through a capability link;
    `FAL_CLIP_MODEL` can choose MiniMax H3 or FLUX 3 Max instead for everyone; administrators can pick one per scene
    (`scene.clipModel`) from `FAL_CLIP_MODEL_ADMIN`'s list, which `clipModelFor` honours only for an administrator's
