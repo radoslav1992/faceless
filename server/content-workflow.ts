@@ -8,7 +8,7 @@ import { json } from "./db";
 import { safeEqual, token } from "./security";
 import { extOf, head, imageInfo, mediaKey, serveObject, storedDuration, storeStream } from "./storage";
 import { fetchOutput } from "./providers/http";
-import { clipModelFor, falResult, falStatus, referenceModel, submitFal, type FalTicket, type Reference } from "./providers/fal";
+import { canFallBack, clipModelFor, falResult, falStatus, referenceModel, submitFal, type FalTicket, type Reference } from "./providers/fal";
 import { isAdmin } from "./auth";
 import { forcedAlignment, speak } from "./providers/elevenlabs";
 import { avatarVideoStatus, submitAvatarVideo } from "./providers/heygen";
@@ -158,10 +158,12 @@ type RunInfo = { id: string; user_id: string; video_id: string; kind: string; pa
 /**
  * One AI picture or clip, paid once; returns the stored asset's ID. A clip `from` a picture gets that picture's
  * capability link (read when it is submitted) and is `seconds` long, made at its `quality`; a picture is drawn from the
- * `references` (read then too) when there are any.
+ * `references` (read then too) when there are any, with the fallback models when `fallback` (refused again at once
+ * when they are the models that refused it).
  */
 async function generateMedia(
   e: Env, step: WorkflowStep, run: RunInfo, name: string, m: PendingMedia, phase: Phase, from?: () => Promise<string>, references?: () => Promise<Reference[]>,
+  fallback = false,
 ) {
   const kind = m.kind;
   const ticket = await step.do(`${name}-submit`, once, async () => {
@@ -170,11 +172,12 @@ async function generateMedia(
     if (s.claims?.[name]) throw new Error("GENERATION_UNCERTAIN");
     const image = from ? await from() : undefined;
     const refs = references ? await references() : [];
+    if (fallback && !canFallBack(e, refs.length > 0)) throw new Error("GENERATION_REJECTED");
     // A model chosen for the scene counts only when its owner is an administrator who may choose it.
     const clipModel = kind === "clip" ? clipModelFor(e, m.clipModel ? await ownerIsAdmin(e, run.user_id) : false, m.clipModel) : undefined;
     await patchState(e, run.id, (s) => { (s.claims ||= {})[name] = true; });
     await phase(kind === "clip" ? "clip" : "images");
-    const t = await submitFal(e, kind, m.prompt, { image, seconds: m.seconds, clipQuality: m.quality, clipModel, references: refs.length ? refs : undefined });
+    const t = await submitFal(e, kind, m.prompt, { image, seconds: m.seconds, clipQuality: m.quality, clipModel, references: refs.length ? refs : undefined, fallback });
     await patchState(e, run.id, (s) => { (s.tickets ||= {})[name] = t; });
     return t;
   });
@@ -238,8 +241,15 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
   const pending = pendingMedia(first);
   for (let i = 0; i < pending.length; i++) {
     const m = pending[i];
-    const assetId = await generateMedia(e, step, run, `ai-${i}`, m, phase, m.from ? () => sourcePicture(e, run, m) : undefined,
-      m.kind === "image" ? () => referencePictures(e, run, m) : undefined);
+    const draw = (name: string, fallback?: boolean) => generateMedia(e, step, run, name, m, phase, m.from ? () => sourcePicture(e, run, m) : undefined,
+      m.kind === "image" ? () => referencePictures(e, run, m) : undefined, fallback);
+    // A picture the model refused (its filter is sometimes wrong) is drawn once more with the fallback model; a
+    // second refusal stops the run.
+    const assetId = await draw(`ai-${i}`).catch((error) => {
+      if (m.kind !== "image" || (error as Error)?.message !== "GENERATION_REJECTED") throw error;
+      console.warn("Picture refused, drawing it with the fallback model", { runId: run.id, index: i });
+      return draw(`ai-${i}-again`, true);
+    });
     await step.do(`ai-${i}-apply`, async () => updateSpec(e, videoId, (spec) => {
       let target = spec;
       for (const part of m.path) target = target[part];

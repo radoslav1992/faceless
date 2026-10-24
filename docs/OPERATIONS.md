@@ -121,7 +121,7 @@ video is attached to it); its failure refunds the credits and the Clips page say
 
 | Code | Meaning |
 | --- | --- |
-| `GENERATION_REJECTED` | fal's content filter refused a picture or clip. Caused by the request; never counted as an outage |
+| `GENERATION_REJECTED` | fal's content filter refused a clip, or a picture twice (the operator's model, then Nano Banana 2). Caused by the request; never counted as an outage |
 | `GENERATION_UNAVAILABLE` | fal refused the key, plan or balance (401/402/403, or `FAL_KEY` missing) |
 | `GENERATION_BUSY` | fal rate limit (429) |
 | `GENERATION_FAILED`, `GENERATION_STATUS`, `GENERATION_RESULT` | fal failed the request, its status check or its result; or the output was not a readable picture |

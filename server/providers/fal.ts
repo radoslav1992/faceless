@@ -65,6 +65,8 @@ export type FalOptions = {
   clipModel?: ClipModel;
   /** A picture drawn from these (capability links to the video's earlier pictures) with `referenceModel`. */
   references?: Reference[]; referenceModel?: string;
+  /** Drawn with the fallback models (Nano Banana 2), after the operator's model refused the picture. */
+  fallback?: boolean;
 };
 /**
  * An earlier picture of the video a new one is drawn from, and what it is kept for: the video's look and characters
@@ -124,13 +126,23 @@ export function referenceModel(e: Env) {
   if (name?.toLowerCase() === "off") return null;
   return name || (e.FAL_IMAGE_MODEL?.trim() === NANO_BANANA_21_MODEL ? `${NANO_BANANA_21_MODEL}/edit` : REFERENCE_MODEL);
 }
+/** The model a picture is drawn with: the operator's (FAL_IMAGE_MODEL, FAL_REFERENCE_MODEL), or the fallback. */
+function pictureModels(e: Env, fallback = false) {
+  return fallback ? { model: NANO_BANANA_MODEL, referenceModel: REFERENCE_MODEL } : { model: e.FAL_IMAGE_MODEL?.trim() || IMAGE_MODEL, referenceModel: referenceModel(e) || undefined };
+}
+/**
+ * Whether a picture the operator's model refused can be drawn once more with Nano Banana 2 (its edit endpoint with
+ * references), the model videos were drawn with before: only when another model refused it.
+ */
+export function canFallBack(e: Env, references: boolean) {
+  const drawn = (fallback: boolean) => falRequest("image", "", { ...pictureModels(e, fallback), references: references ? [{ url: "", role: "look" }] : undefined }).model;
+  return drawn(false) !== drawn(true);
+}
 /** The operator's picture quality (FAL_IMAGE_QUALITY), when it is one GPT Image knows. */
 const imageQuality = (e: Env) => imageQualities.find((q) => q === e.FAL_IMAGE_QUALITY?.trim().toLowerCase());
 /** Submits once; the caller stores the ticket before anything else so a retry polls instead of paying again. */
 export async function submitFal(e: Env, kind: "image" | "clip", prompt: string, options: FalOptions = {}): Promise<FalTicket> {
-  const { model, body } = falRequest(kind, prompt, {
-    ...options, model: e.FAL_IMAGE_MODEL?.trim() || IMAGE_MODEL, quality: imageQuality(e), referenceModel: referenceModel(e) || undefined,
-  });
+  const { model, body } = falRequest(kind, prompt, { ...options, ...pictureModels(e, options.fallback), quality: imageQuality(e) });
   const r = await providerFetch(`https://queue.fal.run/${model}`, {
     method: "POST",
     headers: { ...auth(e), "Content-Type": "application/json" },
