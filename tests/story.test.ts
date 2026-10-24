@@ -6,7 +6,7 @@ import { acceptScenePlan, acceptStory, conceptToSpec, storyShape } from "../serv
 import { alignedWords, ALIGNMENT_URL, forcedAlignment, speak, SPEECH_MODEL } from "../server/providers/elevenlabs";
 import { adminClipModels, clipModelFor, falRequest, referenceModel, referencePrompt, submitFal } from "../server/providers/fal";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
-import { estimatedSeconds, narrationCurrent, pendingMedia, specCredits, specSchema, storySpec, type StorySpec } from "../shared/formats";
+import { estimatedSeconds, narrationCurrent, pendingMedia, pictureSheets, specCredits, specSchema, storySpec, type StorySpec } from "../shared/formats";
 import {
   AUTO_TRANSITIONS, clipFor, estimatedTimings, mergeScenes, moveEdge, narrationKey, placeOf, splitScene, toggleKey, resolveTransition, scenePrompt, scenesFromCounts, splitScenes, storyScript, storySegments,
   storyStyleIds, storyStyles, storyTiming, textWords, timedScript, transitionInfo, transitionKinds, voicedScript, FPS, STORY_MAX_SCENES,
@@ -280,25 +280,31 @@ describe("the format", () => {
     // Nano Banana 2.1 lives in Google's namespace on fal, with the same input.
     expect(falRequest("image", "A wave.", { model: "google/nano-banana-2.1" })).toEqual({
       model: "google/nano-banana-2.1",
-      body: { prompt: "A wave. No text, captions, logos or watermarks in the picture.", num_images: 1, aspect_ratio: "9:16", resolution: "1K", output_format: "jpeg", limit_generations: true },
+      body: { prompt: "A wave. No text, captions, logos or watermarks in the picture.", num_images: 1, aspect_ratio: "9:16", resolution: "1K", output_format: "jpeg", limit_generations: true, safety_tolerance: "5" },
     });
-    const edited = falRequest("image", "A wave.", { references: [{ url: image, role: "look" }], referenceModel: "google/nano-banana-2.1/edit" });
+    const edited = falRequest("image", "A wave.", { references: [{ url: image, role: "character" }], referenceModel: "google/nano-banana-2.1/edit" });
     expect(edited).toMatchObject({ model: "google/nano-banana-2.1/edit", body: { image_urls: [image], aspect_ratio: "9:16", resolution: "1K", limit_generations: true } });
+    // Nano Banana 2.1's filter is one step less strict than fal's default; Nano Banana 2 keeps fal's.
+    expect([falRequest("image", "A wave.", { model: "google/nano-banana-2.1" }).body, edited.body].map((b: any) => b.safety_tolerance)).toEqual(["5", "5"]);
+    expect(falRequest("image", "A wave.", { model: "fal-ai/nano-banana-2" }).body).not.toHaveProperty("safety_tolerance");
     expect(falRequest("image", "A wave.", { model: "fal-ai/flux/schnell" })).toMatchObject({ model: "fal-ai/flux/schnell", body: { image_size: { width: 1088, height: 1920 } } });
     expect(falRequest("image", "A wave.", { model: "someone/else" }).model).toBe("openai/gpt-image-2.5/flare/text-to-image");
-    // A later picture of a video, drawn from its first: Nano Banana 2's edit endpoint, the reference for the look only.
-    const drawn = falRequest("image", "A wave.", { references: [{ url: image, role: "look" }] });
+    // A scene picture, drawn from the video's reference sheets: Nano Banana 2's edit endpoint; the scene comes first,
+    // then what each sheet is for (never the picture to draw).
+    const drawn = falRequest("image", "A wave.", { references: [{ url: image, role: "character" }] });
     expect(drawn).toEqual({
       model: "fal-ai/nano-banana-2/edit",
-      body: { prompt: expect.stringMatching(/^The reference picture shows how this video looks: .*not a copy of the reference: A wave\. No text/), image_urls: [image], num_images: 1, aspect_ratio: "9:16", resolution: "1K", output_format: "jpeg", limit_generations: true },
+      body: {
+        prompt: expect.stringMatching(/^Draw a new picture of this scene: A wave\. No text, captions, logos or watermarks in the picture\. The reference picture shows only what the recurring characters look like: .*never standing as in the reference\. Match the art style and colours of the reference\.$/),
+        image_urls: [image], num_images: 1, aspect_ratio: "9:16", resolution: "1K", output_format: "jpeg", limit_generations: true,
+      },
     });
-    expect(falRequest("image", "A wave.", { references: [{ url: image, role: "look" }], referenceModel: "fal-ai/nano-banana-pro/edit" }).model).toBe("fal-ai/nano-banana-pro/edit");
-    // A scene in a place already drawn: that picture first, kept for the place; the video's first one for the look.
+    expect(falRequest("image", "A wave.", { references: [{ url: image, role: "character" }], referenceModel: "fal-ai/nano-banana-pro/edit" }).model).toBe("fal-ai/nano-banana-pro/edit");
     const place = "https://app.test/api/render-inputs/r/3?token=t";
-    const both = falRequest("image", "A wave.", { references: [{ url: place, role: "place" }, { url: image, role: "elsewhere" }] }).body as any;
-    expect(both.image_urls).toEqual([place, image]);
-    expect(both.prompt).toMatch(/^Reference picture 1 shows the place this scene is set in: keep the place exactly the same .*Reference picture 2 shows how this video looks, in another place: .*but not its background\. Draw a new picture with its own composition, not a copy of either reference: A wave\./);
-    expect(referencePrompt([{ url: place, role: "both" }])).toMatch(/^The reference picture shows the place this scene is set in and how this video looks: keep the place exactly the same .*; keep its art style/);
+    const both = falRequest("image", "A wave.", { references: [{ url: image, role: "character" }, { url: place, role: "place" }] }).body as any;
+    expect(both.image_urls).toEqual([image, place]);
+    expect(both.prompt).toMatch(/A wave\. .*Reference picture 1 shows only what the recurring characters look like: .*Reference picture 2 shows only how the place is built: .*never copy the reference's view\. Match the art style and colours of the references\.$/);
+    expect(referencePrompt([{ url: place, role: "place" }])).toMatch(/^The reference picture shows only how the place is built: keep its layout/);
     for (const s of storyStyleIds) expect(storyStyles[s].prompt.length).toBeGreaterThan(60);
   });
 });
@@ -315,7 +321,7 @@ describe("the picture model an operator chooses", () => {
     await submitFal({ FAL_KEY: "k", FAL_IMAGE_QUALITY: "ultra" } as any, "image", "A fox.");
     await submitFal({ FAL_KEY: "k", FAL_IMAGE_MODEL: "fal-ai/nano-banana-2", FAL_IMAGE_QUALITY: "medium" } as any, "image", "A fox.");
     // A picture drawn from a reference: FAL_REFERENCE_MODEL's endpoint, Nano Banana 2's edit by default.
-    const references = [{ url: "https://app.test/api/render-inputs/r/0?token=t", role: "look" as const }];
+    const references = [{ url: "https://app.test/api/render-inputs/r/0?token=t", role: "character" as const }];
     await submitFal({ FAL_KEY: "k" } as any, "image", "A fox.", { references });
     await submitFal({ FAL_KEY: "k", FAL_REFERENCE_MODEL: " fal-ai/nano-banana-pro/edit " } as any, "image", "A fox.", { references });
     expect(sent.map((r) => [r.url, r.body.quality ?? null])).toEqual([
@@ -539,6 +545,13 @@ describe("the writer", () => {
     expect(storySpec.safeParse({ ...spec, places: [...spec.places, { label: "the REEF cave", description: "" }] }).success).toBe(false);
     expect(placeOf(undefined, "the cave")).toBeUndefined();
     expect(placeOf(spec.places, undefined)).toBeUndefined();
+    // Reference sheets: the main character, and the reef (two pictures there); none without two AI pictures or with a
+    // background clip; no character sheet without a main character.
+    expect(pictureSheets(spec).map((x) => [x.kind, x.place ?? null])).toEqual([["character", null], ["place", "the reef cave"]]);
+    expect(pictureSheets({ ...spec, subject: "" }).map((x) => x.kind)).toEqual(["place"]);
+    expect(pictureSheets({ ...spec, scenes: spec.scenes.map((s, i) => (i ? { ...s, source: "own" as const, assetId: id(1) } : s)) })).toEqual([]);
+    expect(pictureSheets({ ...spec, backdrop: { libraryId: id(4) } })).toEqual([]);
+    expect(pictureSheets(spec)[0].key).toBe(pictureSheets({ ...spec, places: [] })[0].key);
   });
 
   it("turns a script into a video of the chosen type, voice, style and language", () => {
@@ -692,7 +705,7 @@ describe("narrated videos in the content run", () => {
     expect(pictures.every((c) => !c.body.image_urls)).toBe(true);
   });
 
-  it("draws a scene in a place already drawn from that place's picture, and the video's first one for its look", async () => {
+  it("draws reference sheets of the characters and of each place shown twice, and every scene from them", async () => {
     const { env, sqlite, user, spec, run } = await setup();
     const calls = providers();
     const placed = {
@@ -700,31 +713,42 @@ describe("narrated videos in the content run", () => {
       places: [{ label: "the reef", description: "A bright coral reef, pink corals on the left, a sandy slope" }, { label: "the cave", description: "A low rock cave, purple sponges, blue light" }],
       scenes: spec.scenes.map((s, i) => ({ ...s, place: ["the reef", "the cave", "", "", "The Cave"][i] })),
     };
+    // Sheets: the octopus, and the cave (two AI pictures there); the reef has one, so its words are enough.
+    expect(pictureSheets(storySpec.parse(placed)).map((x) => [x.kind, x.place ?? null])).toEqual([["character", null], ["place", "the cave"]]);
     const created = await call(worker, env, "POST", "/api/videos", { spec: placed, idempotencyKey: crypto.randomUUID() }, user.cookie);
-    expect(created.status).toBe(201);
+    expect(created).toMatchObject({ status: 201, data: { credits: videoCredits(estimatedSeconds(spec)) + CLIP_CREDITS.regular } });
     await run();
     const video = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
+    expect(video.renderStatus).toBe("ready");
     const state = JSON.parse((sqlite.prepare("SELECT provider FROM runs WHERE video_id=?").get(video.id) as any).provider);
-    const link = (scene: number) => {
-      const key = (sqlite.prepare("SELECT object_key FROM media_assets WHERE id=?").get(video.spec.scenes[scene].imageId) as any).object_key;
-      return expect.stringMatching(new RegExp(`/api/render-inputs/[0-9a-f-]{36}/${state.inputs.indexOf(key)}\\?token=`));
-    };
+    const sheet = (kind: string) => (sqlite.prepare("SELECT object_key FROM media_assets WHERE video_id=? AND json_extract(meta,'$.sheet') IS NOT NULL AND meta LIKE ?").get(video.id, `%${kind}%`) as any).object_key;
+    const link = (key: string) => expect.stringMatching(new RegExp(`/api/render-inputs/[0-9a-f-]{36}/${state.inputs.indexOf(key)}\\?token=`));
+    const octopus = link(sheet("Character reference sheet")), cave = link(sheet("Establishing shot of the cave"));
     const pictures = calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/") && !c.url.includes("/kling-video/"));
-    // Scenes 1, 2, 3 and 5 in order: the reef from its text; the cave's first picture and a scene set nowhere in
-    // particular keep the reef picture's style and characters but not its background; the cave again, from its picture.
-    expect(pictures.map((c) => c.body.image_urls ?? null)).toEqual([null, [link(0)], [link(0)], [link(1), link(0)]]);
-    expect(pictures[1].body.prompt).toMatch(/^The reference picture shows how this video looks, in another place: .*but not its background\./);
-    expect(pictures[2].body.prompt).toMatch(/^The reference picture shows how this video looks, in another place: .*not a copy of the reference: Doodle of sentence 3\. Recurring main character, the same in every scene: a small orange octopus\. Style: /);
-    expect(pictures[3].body.prompt).toMatch(/^Reference picture 1 shows the place this scene is set in: .*Reference picture 2 shows how this video looks, in another place: /);
-    expect(pictures[3].body.prompt).toContain("The place, the cave, the same in every scene set there: A low rock cave, purple sponges, blue light.");
-    // Scene 1 moved into the cave: a redone cave picture is drawn from it alone, the place's first and the video's first.
+    // The two sheets from their text, then scenes 1, 2, 3 and 5, each from the octopus and, in the cave, the cave.
+    expect(pictures.map((c) => c.body.image_urls ?? null)).toEqual([null, null, [octopus], [octopus, cave], [octopus], [octopus, cave]]);
+    expect(pictures[0].body.prompt).toMatch(/^Character reference sheet: a small orange octopus\. .*plain light grey background/);
+    expect(pictures[1].body.prompt).toMatch(/^Establishing shot of the cave: A low rock cave, purple sponges, blue light\. A wide view of the whole place, empty/);
+    expect(pictures[5].body.prompt).toMatch(/^Draw a new picture of this scene: Doodle of sentence 5\. .*The place, the cave, the same in every scene set there: A low rock cave, purple sponges, blue light\. .*Reference picture 2 shows only how the place is built/);
+    // A redone picture uses the sheets kept with the video (none is drawn again), even after scene 1 moved into the cave.
     const redo = { ...video.spec, scenes: video.spec.scenes.map((s: any, i: number) => (i === 0 ? { ...s, place: "the cave" } : i === 4 ? { ...s, imageId: undefined } : s)) };
+    const before = calls.length;
     const edited = await call(worker, env, "PUT", `/api/videos/${video.id}`, { spec: redo, idempotencyKey: crypto.randomUUID() }, user.cookie);
     expect(edited.data).toMatchObject({ rendering: true, credits: pictureCredits(1) });
     await run();
-    const again = calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/")).at(-1)!;
-    expect(again.body.image_urls).toHaveLength(1);
-    expect(again.body.prompt).toMatch(/^The reference picture shows the place this scene is set in and how this video looks: /);
+    const again = calls.slice(before).filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/"));
+    expect(again.map((c) => c.body.image_urls.length)).toEqual([2]);
+    expect(sqlite.prepare("SELECT COUNT(*) AS n FROM media_assets WHERE video_id=? AND json_extract(meta,'$.sheet') IS NOT NULL").get(video.id)).toEqual({ n: 2 });
+    // A new main character is a new sheet; the old one goes with the next render.
+    const redone = (await call(worker, env, "GET", `/api/videos/${video.id}`, undefined, user.cookie)).data.video.spec;
+    const renamed = { ...redone, subject: "a tall green squid", scenes: redone.scenes.map((s: any, i: number) => (i === 2 ? { ...s, imageId: undefined } : s)) };
+    const next = calls.length;
+    await call(worker, env, "PUT", `/api/videos/${video.id}`, { spec: renamed, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    await run();
+    expect(calls.slice(next).filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/")).map((c) => (c.body.prompt as string).slice(0, 44)))
+      .toEqual(["Character reference sheet: a tall green squi", "Draw a new picture of this scene: Doodle of "]);
+    expect((sqlite.prepare("SELECT meta FROM media_assets WHERE video_id=? AND json_extract(meta,'$.sheet') IS NOT NULL ORDER BY json_extract(meta,'$.prompt')").all(video.id) as any[]).map((r) => JSON.parse(r.meta).prompt.slice(0, 30)))
+      .toEqual(["Character reference sheet: a t", "Establishing shot of the cave:"]);
   });
 
   it("draws a picture the model refused once more with Nano Banana 2, and stops when that is refused too", async () => {
@@ -736,10 +760,11 @@ describe("narrated videos in the content run", () => {
     const price = videoCredits(estimatedSeconds(spec)) + CLIP_CREDITS.regular;
     const created = await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
     await run();
-    // Every picture 2.1 refused is drawn by Nano Banana 2 (its edit endpoint from the same references), for no more credits.
+    // Every picture 2.1 refused (the octopus's sheet, then the four scenes) is drawn by Nano Banana 2 (its edit endpoint
+    // from the same references), for no more credits.
     expect(pictures()).toEqual([
       "google/nano-banana-2.1", "fal-ai/nano-banana-2",
-      ...Array(3).fill(["google/nano-banana-2.1/edit", "fal-ai/nano-banana-2/edit"]).flat(),
+      ...Array(4).fill(["google/nano-banana-2.1/edit", "fal-ai/nano-banana-2/edit"]).flat(),
     ]);
     const edits = calls.filter((c) => c.method === "POST" && c.url.includes("/edit"));
     expect(edits[1].body.image_urls).toEqual(edits[0].body.image_urls);
@@ -817,20 +842,20 @@ describe("narrated videos in the content run", () => {
     expect(used()).toBe(price);
     await run();
     const submits = () => calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/"));
-    // The first picture from its text; the others drawn from it, so the scenes look alike.
+    // The octopus's reference sheet from its text; every scene's picture drawn from it, so the scenes look alike.
     expect(submits().map((c) => c.url.split("/").slice(3).join("/"))).toEqual([
-      "openai/gpt-image-2.5/flare/text-to-image", ...Array(3).fill("fal-ai/nano-banana-2/edit"), "fal-ai/kling-video/v2.5-turbo/standard/image-to-video",
+      "openai/gpt-image-2.5/flare/text-to-image", ...Array(4).fill("fal-ai/nano-banana-2/edit"), "fal-ai/kling-video/v2.5-turbo/standard/image-to-video",
     ]);
     let post = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
     expect(post.renderStatus).toBe("ready");
     // The clip starts from scene 2's own picture, read through the run's capability link.
     const state = JSON.parse((sqlite.prepare("SELECT provider FROM runs WHERE video_id=?").get(post.id) as any).provider);
     const pictureKey = (sqlite.prepare("SELECT object_key FROM media_assets WHERE id=?").get(post.spec.scenes[1].imageId) as any).object_key;
-    expect(submits()[4].body.image_url).toMatch(new RegExp(`/api/render-inputs/[0-9a-f-]{36}/${state.inputs.indexOf(pictureKey)}\\?token=`));
-    expect(submits()[0].body.prompt).toContain("a small orange octopus");
-    // Every later picture is drawn from scene 1's, read through the run's capability link, with the subject in its text.
-    const firstKey = (sqlite.prepare("SELECT object_key FROM media_assets WHERE id=?").get(post.spec.scenes[0].imageId) as any).object_key;
-    for (const c of submits().slice(1, 4)) {
+    expect(submits()[5].body.image_url).toMatch(new RegExp(`/api/render-inputs/[0-9a-f-]{36}/${state.inputs.indexOf(pictureKey)}\\?token=`));
+    expect(submits()[0].body.prompt).toMatch(/^Character reference sheet: a small orange octopus\./);
+    // Every scene's picture is drawn from the sheet, read through the run's capability link, with the subject in its text.
+    const firstKey = (sqlite.prepare("SELECT object_key FROM media_assets WHERE video_id=? AND json_extract(meta,'$.sheet') IS NOT NULL").get(post.id) as any).object_key;
+    for (const c of submits().slice(1, 5)) {
       expect(c.body.image_urls).toEqual([expect.stringMatching(new RegExp(`/api/render-inputs/[0-9a-f-]{36}/${state.inputs.indexOf(firstKey)}\\?token=`))]);
       expect(c.body.prompt).toContain("a small orange octopus");
     }
@@ -864,12 +889,12 @@ describe("narrated videos in the content run", () => {
     expect(moved.segments[2].transition.kind).toBe("slideup");
     // A new picture for one scene: only that scene is charged and made.
     await edit((s) => ({ ...s, scenes: s.scenes.map((x: any, n: number) => (n === 4 ? { ...x, imageId: undefined, description: "The octopus crawling" } : x)) }), pictureCredits(1));
-    expect(submits()).toHaveLength(6);
+    expect(submits()).toHaveLength(7);
     expect(calls.filter((c) => c.url.includes("api.elevenlabs.io"))).toHaveLength(1);
     expect(used()).toBe(price + pictureCredits(1));
-    // Older pictures were cleaned up; the voice, the pictures, the clip and the latest render stay.
+    // Older pictures were cleaned up; the voice, the pictures, the octopus's sheet, the clip and the latest render stay.
     const left = (sqlite.prepare("SELECT kind FROM media_assets WHERE video_id=? ORDER BY kind").all(post.id) as any[]).map((r) => r.kind);
-    expect(left).toEqual(["ai_clip", "ai_image", "ai_image", "ai_image", "ai_image", "cover", "render", "voice"]);
+    expect(left).toEqual(["ai_clip", ...Array(5).fill("ai_image"), "cover", "render", "voice"]);
   });
 
   it("refunds everything once when a clip is refused, before the voice is paid for", async () => {

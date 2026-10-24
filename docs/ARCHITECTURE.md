@@ -299,15 +299,19 @@ D1 batch, so the credits are reserved by the triggers before any work starts. It
    (`scene.clipModel`) from `FAL_CLIP_MODEL_ADMIN`'s list, which `clipModelFor` honours only for an administrator's
    video and only while the model is on the list; the render never plays a clip's own sound).
    Every picture's prompt carries the subject, the look and the description of the scene's place. So the scenes look
-   like one film, only a video's first AI picture is drawn from its text: each later one is drawn from earlier ones
-   as references (`fal-ai/nano-banana-2/edit`, through capability links, never copied), by scene order: the video's
-   first other AI picture for the style, palette, light and characters ("elsewhere", without its background, when it
-   is set in another place), and the first other one set in the same place for the place itself (its layout,
-   furniture, objects, light and colours, seen from a new angle), one picture when they are the same. A picture made
-   again later follows the others the same way. `FAL_REFERENCE_MODEL` names another Nano Banana edit endpoint, or
-   `off` draws every picture from its text alone. A picture the operator's model refuses is drawn once more with
-   Nano Banana 2 (its edit endpoint, from the same references), unless that is the model that refused it; a second
-   refusal stops the run (`GENERATION_REJECTED`).
+   like one film, the video's reference sheets are drawn first from their text (`pictureSheets`): its recurring
+   characters alone on a plain background (when it has a subject), and each place at least two AI pictures are set
+   in, empty. Every scene's picture is then drawn from the sheets it needs (`fal-ai/nano-banana-2/edit`, through
+   capability links): the characters' sheet, and its place's. The prompt gives the scene first (the writer starts
+   each picture with its camera position) and says what each sheet is for, never the picture to draw, so no scene's
+   framing or mistake is carried into another. Sheets are kept with the video (`meta.sheet`, the fingerprint of their
+   prompt) while its subject and places stay the same, so a picture made again later uses them too. Scenes whose
+   place has no sheet are drawn from the characters' sheet alone, or from their text. `FAL_REFERENCE_MODEL` names
+   another Nano Banana edit endpoint, or `off` draws every picture from its text alone (and no sheets). A picture
+   the operator's model refuses is drawn once more with Nano Banana 2 (from the same sheets), unless that is the
+   model that refused it; a second refusal stops the run (`GENERATION_REJECTED`), except for a sheet, which is left
+   out. Nano Banana 2.1 is asked for `safety_tolerance` 5 (fal's default is 4 of 1–6), as it refused ordinary
+   scenes of dark stories.
    Each is stored in R2 as an asset of the video (marked `{"ai":true}`) and written back into the spec.
 3. **Voice + alignment** (after the pictures, so a refused picture stops the run before the voice is paid): ElevenLabs
    `eleven_v4` with timestamps of the text as written, saved as a WAV. The text is the script with each scene's tone

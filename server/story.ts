@@ -151,7 +151,11 @@ const SUBJECT_RULE =
 const LOOK_RULE =
   "look: the world of the whole video for the pictures, in 15 to 35 English words: the era and part of the world, the time of day, the light and three or four main colours. Every picture keeps to it, so the scenes look like one film.";
 const PLACES_RULE =
-  `places: the places the scenes are set in, at most four, each with a \`label\` of 2 to 4 English words (such as "the corner shop") and a \`description\` of 15 to 35 English words: its layout, walls and floor, the furniture and main objects and where they stand, its light and main colours. Each scene's \`place\`: the label of the place it is set in, written exactly the same, or an empty string when it is set in none of them (a close-up of an object, a map, a diagram). A place keeps the same look in every scene set there: that scene's picture says what happens and from where it is seen (wide, close-up, from the doorway), never describing the place differently.`;
+  `places: the places the scenes are set in, at most four, each with a \`label\` of 2 to 4 English words (such as "the corner shop") and a \`description\` of 15 to 35 English words: its layout, walls and floor, the furniture and main objects and where they stand, its light and main colours. Each scene's \`place\`: the label of the place the camera is in, written exactly the same, or an empty string when it is in none of them (a close-up of an object, a map, a diagram). A picture taken inside a vehicle or a room is set there even when the street shows through its windows, and a picture never shows the inside and the outside of a place at once. A place keeps the same look in every scene set there: that scene's picture says what happens and from where it is seen, never describing the place differently.`;
+// The pictures are drawn from reference sheets of the characters and places, so only the words of a picture give it
+// its own camera position: a scene in a place shown before needs a new one.
+const CAMERA_RULE =
+  "Every `picture` starts with where the camera is and how close it is (wide shot from the doorway, close-up of the hands, over the shoulder, from the back of the room), and scenes set in the same place never repeat a camera position.";
 
 /** What a video is written from. */
 export type WriteRequest = {
@@ -217,6 +221,7 @@ export async function writeVideo(env: Env, r: WriteRequest): Promise<StoryConcep
       : SUBJECT_RULE,
     LOOK_RULE,
     PLACES_RULE,
+    CAMERA_RULE,
     TONE_RULE,
     `The pictures are drawn as: ${storyStyles[r.style].short.toLowerCase()}.`,
     "music: a musicN from the music list whose mood fits (it plays quietly under the voice), or an empty string.",
@@ -311,7 +316,7 @@ export async function planScenes(env: Env, texts: string[], style: StoryStyle, s
     "`keys`: one or two key words copied exactly from the scene's words, the ones a viewer should catch (they are coloured in the subtitles). " +
     `The pictures are drawn as: ${storyStyles[style].short.toLowerCase()}. ` +
     (subject ? "subject: keep the given recurring character unless it does not fit, and put it in every picture it belongs in. " : `${SUBJECT_RULE} `) +
-    `${LOOK_RULE} ${PLACES_RULE} ${TONE_RULE} title: a title of at most 70 characters in the scenes' language. Return ONLY JSON.`,
+    `${LOOK_RULE} ${PLACES_RULE} ${CAMERA_RULE} ${TONE_RULE} title: a title of at most 70 characters in the scenes' language. Return ONLY JSON.`,
     { subject, scenes: texts.map((text, i) => ({ id: `s${i + 1}`, text: text.slice(0, 600) })) },
     planJson, Math.min(12000, 1100 + texts.length * 170), 90000);
   return acceptScenePlan(answer, texts);

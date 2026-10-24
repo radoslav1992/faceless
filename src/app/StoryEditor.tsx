@@ -309,7 +309,7 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
               </select>
               <span className="hint">
                 {place?.description ? `${place.description.replace(/([^.!?])$/, "$1.")} ` : ""}
-                Scenes in the same place are drawn alike, from its first picture.{made ? " A change shows in a new picture." : ""}
+                Scenes in the same place are drawn from one reference picture of it.{made ? " A change shows in a new picture." : ""}
               </span>
             </label>
           )}

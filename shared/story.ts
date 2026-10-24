@@ -401,12 +401,22 @@ export function toggleKey(scene: StoryScene, word: string): StoryScene {
  * scene there), the video's look (the same world in every picture), the style; calm space low for subtitles.
  */
 export function scenePrompt(description: string, subject: string, style: StoryStyle, look = "", place?: StoryPlace) {
-  const bare = (text: string) => text.trim().replace(/[.!?]$/, "");
   const who = subject.trim() ? ` Recurring main character, the same in every scene: ${bare(subject)}.` : "";
   const where = place?.description.trim() ? ` The place, ${bare(place.label)}, the same in every scene set there: ${bare(place.description)}.` : "";
   const world = look.trim() ? ` The same world in every scene: ${bare(look)}.` : "";
   return `${description.trim().replace(/([^.!?])$/, "$1.")}${who}${where}${world} Style: ${storyStyles[style].prompt}. Vertical 9:16 frame, main subject in the upper two thirds, the bottom third calm and simple.`.slice(0, 1600);
 }
+/** A text without its closing full stop, to go inside a sentence. */
+const bare = (text: string) => text.trim().replace(/[.!?]$/, "");
+/**
+ * A video's reference sheets, drawn before its scenes: its recurring characters alone on a plain background, and each
+ * place several scenes are set in, empty. A scene's picture is drawn from the sheets it needs, never from another
+ * scene's picture, so no scene's framing or mistake is carried into the next.
+ */
+export const characterSheetPrompt = (subject: string, style: StoryStyle) =>
+  `Character reference sheet: ${bare(subject)}. Each recurring character once, full body with the face clearly visible, standing in a relaxed neutral pose, side by side on a plain light grey background, with no scenery and nobody else. Style: ${storyStyles[style].prompt}.`.slice(0, 1600);
+export const placeSheetPrompt = (place: StoryPlace, style: StoryStyle, look = "") =>
+  `Establishing shot of ${bare(place.label)}: ${bare(place.description)}. A wide view of the whole place, empty, with no people or animals.${look.trim() ? ` The world of the video: ${bare(look)}.` : ""} Style: ${storyStyles[style].prompt}. Vertical 9:16 frame.`.slice(0, 1600);
 /** The description sent to the clip model with the scene's picture: gentle motion, the picture kept as it is. */
 export const clipPrompt = (description: string) =>
   `${description.trim().replace(/([^.!?])$/, "$1.")} Gentle natural motion of the subject and one slow camera move; keep the drawing style, characters and colours exactly as in the image.`.slice(0, 900);

@@ -24,7 +24,7 @@ import { narrationContext } from "./story";
 import { runEpisode, videoReady, videoFailed } from "./series";
 import { LONG_VIDEO_SECONDS, SPEECH_MAX_SECONDS, speechSpans } from "../shared/speech";
 import {
-  isHighlight, narrationCurrent, pendingMedia, presenterKey, presenterNeeded, referencedAssets, referencedLibrary, specSchema, trackKey,
+  isHighlight, narrationCurrent, pendingMedia, pictureSheets, presenterKey, presenterNeeded, referencedAssets, referencedLibrary, specSchema, trackKey,
   type HighlightSpec, type PendingMedia, type Spec, type StorySpec,
 } from "../shared/formats";
 import { PRESENTER_ENGINES } from "../shared/presenter";
@@ -209,7 +209,7 @@ async function generateMedia(
     await e.DB.prepare(
       "INSERT OR REPLACE INTO media_assets(id,user_id,video_id,kind,name,object_key,mime,bytes,duration,width,height,status,meta,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'ready',?,?,?)",
     ).bind(assetId, run.user_id, run.video_id, kind === "clip" ? "ai_clip" : "ai_image", `AI ${kind === "clip" ? "clip" : "picture"}: ${m.prompt}`.slice(0, 160), key, actual, bytes, duration, width, height,
-      JSON.stringify({ prompt: m.prompt.slice(0, 400), ai: true }), now(), now()).run();
+      JSON.stringify({ prompt: m.prompt.slice(0, 400), ai: true, ...(m.sheet && { sheet: m.sheet }) }), now(), now()).run();
     return assetId;
   });
 }
@@ -237,19 +237,15 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
     if (needsTracking(first)) await trackMoment(e, step, run, first, phase);
     return renderAndSave(e, step, run, phase);
   }
-  // AI pictures and clips the video asks for (clips are made from their pictures, made first).
+  // AI pictures and clips the video asks for (clips are made from their pictures, made first), the pictures drawn from
+  // the video's reference sheets, made before them.
   const pending = pendingMedia(first);
+  const sheets = pending.some((m) => m.kind === "image") ? await makeSheets(e, step, run, first, phase) : { places: {} };
   for (let i = 0; i < pending.length; i++) {
     const m = pending[i];
-    const draw = (name: string, fallback?: boolean) => generateMedia(e, step, run, name, m, phase, m.from ? () => sourcePicture(e, run, m) : undefined,
-      m.kind === "image" ? () => referencePictures(e, run, m) : undefined, fallback);
-    // A picture the model refused (its filter is sometimes wrong) is drawn once more with the fallback model; a
-    // second refusal stops the run.
-    const assetId = await draw(`ai-${i}`).catch((error) => {
-      if (m.kind !== "image" || (error as Error)?.message !== "GENERATION_REJECTED") throw error;
-      console.warn("Picture refused, drawing it with the fallback model", { runId: run.id, index: i });
-      return draw(`ai-${i}-again`, true);
-    });
+    const assetId = m.kind === "image"
+      ? await drawPicture(e, step, run, `ai-${i}`, m, phase, () => referencePictures(e, run, sheets, first.scenes[m.path[1] as number]?.place))
+      : await generateMedia(e, step, run, `ai-${i}`, m, phase, m.from ? () => sourcePicture(e, run, m) : undefined);
     await step.do(`ai-${i}-apply`, async () => updateSpec(e, videoId, (spec) => {
       let target = spec;
       for (const part of m.path) target = target[part];
@@ -351,8 +347,10 @@ async function renderAndSave(e: Env, step: WorkflowStep, run: RunInfo, phase: Ph
     // Files of earlier versions of this video that the new one no longer uses are deleted (R2 cleanup follows).
     const current = await loadSpec(e, videoId);
     const keep = new Set([video, cover, ...referencedAssets(current), isHighlight(current) ? null : current.generated?.voiceAssetId].filter(Boolean) as string[]);
-    const owned = (await e.DB.prepare("SELECT id FROM media_assets WHERE video_id=?").bind(videoId).all<{ id: string }>()).results;
-    const stale = owned.map((r) => r.id).filter((x) => !keep.has(x));
+    // The reference sheets the video's pictures are still drawn from stay for its next new picture.
+    const sheets = new Set(isHighlight(current) ? [] : pictureSheets(current).map((s) => s.key));
+    const owned = (await e.DB.prepare("SELECT id,json_extract(meta,'$.sheet') AS sheet FROM media_assets WHERE video_id=?").bind(videoId).all<{ id: string; sheet: string | null }>()).results;
+    const stale = owned.filter((r) => !keep.has(r.id) && !(r.sheet && sheets.has(r.sheet))).map((r) => r.id);
     await e.DB.batch([
       e.DB.prepare("UPDATE videos SET video_asset=?,cover_asset=?,duration=?,render_status='ready',render_error=NULL,updated_at=? WHERE id=?")
         .bind(video, cover, duration, now(), videoId),
@@ -406,37 +404,58 @@ async function trackMoment(e: Env, step: WorkflowStep, run: RunInfo, spec: Highl
   }
 }
 
+/** A video's reference sheets as stored files: the characters' and each place's (by placeKey). */
+type Sheets = { character?: string; places: Record<string, string> };
 /**
- * The pictures a new one is drawn from so the video's scenes look alike, by scene order (a redone picture follows the
- * others): the video's first other AI picture, for its look and characters (scene 1's for every later scene of a new
- * video), and the first other one set in the same place, for the place (one picture when that is the same one). None
- * for a video's first picture, or when FAL_REFERENCE_MODEL is "off".
+ * A picture, paid once; one the model refused (its filter is sometimes wrong) is drawn once more with the fallback
+ * model, and a second refusal is thrown.
  */
-async function referencePictures(e: Env, run: RunInfo, m: PendingMedia): Promise<Reference[]> {
-  if (!referenceModel(e)) return [];
-  const row = await e.DB.prepare("SELECT spec FROM videos WHERE id=?").bind(run.video_id).first<{ spec: string }>();
-  const scenes: any[] = json<any>(row?.spec, null)?.scenes || [];
-  const placeAt = (s: any) => placeKey(typeof s?.place === "string" ? s.place : "");
-  const here = placeAt(scenes[m.path[1] as number]);
-  let look: { key: string; place: string } | undefined, place: string | undefined;
-  for (const [i, s] of scenes.entries()) {
-    if (look && (place || !here)) break;
-    if (i === m.path[1] || (s?.source !== "image" && s?.source !== "clip") || typeof s.imageId !== "string") continue;
-    const there = placeAt(s);
-    if (look && there !== here) continue;
-    const a = await e.DB.prepare("SELECT object_key FROM media_assets WHERE id=? AND user_id=? AND kind='ai_image' AND status='ready'")
-      .bind(s.imageId, run.user_id).first<{ object_key: string }>();
-    if (!a) continue;
-    look ||= { key: a.object_key, place: there };
-    if (here && there === here) place = a.object_key;
+async function drawPicture(e: Env, step: WorkflowStep, run: RunInfo, name: string, m: PendingMedia, phase: Phase, references?: () => Promise<Reference[]>) {
+  return generateMedia(e, step, run, name, m, phase, undefined, references).catch((error) => {
+    if ((error as Error)?.message !== "GENERATION_REJECTED") throw error;
+    console.warn("Picture refused, drawing it with the fallback model", { runId: run.id, name });
+    return generateMedia(e, step, run, `${name}-again`, m, phase, undefined, references, true);
+  });
+}
+/**
+ * The video's reference sheets (shared/formats.ts pictureSheets), each made once and kept with the video (its
+ * picture's meta.sheet): a sheet made for an earlier version is used again while its prompt is the same. None when
+ * FAL_REFERENCE_MODEL is "off"; a sheet refused twice is left out (its scenes are drawn without it).
+ */
+async function makeSheets(e: Env, step: WorkflowStep, run: RunInfo, spec: StorySpec, phase: Phase): Promise<Sheets> {
+  const out: Sheets = { places: {} };
+  if (!referenceModel(e)) return out;
+  for (const [n, sheet] of pictureSheets(spec).entries()) {
+    const key = await step.do(`sheet-${n}`, safe, async () => {
+      const known = await e.DB.prepare(
+        "SELECT object_key FROM media_assets WHERE video_id=? AND user_id=? AND kind='ai_image' AND status='ready' AND json_extract(meta,'$.sheet')=? ORDER BY created_at DESC LIMIT 1",
+      ).bind(run.video_id, run.user_id, sheet.key).first<{ object_key: string }>();
+      return known?.object_key ?? null;
+    }) ?? await (async () => {
+      const m: PendingMedia = { kind: "image", prompt: sheet.prompt, path: [], key: "", sheet: sheet.key };
+      const assetId = await drawPicture(e, step, run, `sheet-${n}-draw`, m, phase).catch((error) => {
+        if ((error as Error)?.message !== "GENERATION_REJECTED") throw error;
+        return null;
+      });
+      return assetId && step.do(`sheet-${n}-file`, async () =>
+        (await e.DB.prepare("SELECT object_key FROM media_assets WHERE id=?").bind(assetId).first<{ object_key: string }>())?.object_key ?? null);
+    })();
+    if (!key) continue;
+    if (sheet.kind === "character") out.character = key;
+    else if (sheet.place) out.places[sheet.place] = key;
   }
-  if (!look) return [];
-  const url = (key: string) => inputUrl(e, run.id, key);
-  // A look picture set somewhere else gives its style and characters, not its background.
-  const lookRole = look.place && look.place !== here ? "elsewhere" : "look";
-  if (!place) return [{ url: await url(look.key), role: lookRole }];
-  if (place === look.key) return [{ url: await url(place), role: "both" }];
-  return [{ url: await url(place), role: "place" }, { url: await url(look.key), role: lookRole }];
+  return out;
+}
+/**
+ * The reference sheets a scene's picture is drawn from: the characters' and, when several scenes are set in its
+ * place, the place's; never another scene's picture, so no framing or mistake is carried from scene to scene.
+ */
+async function referencePictures(e: Env, run: RunInfo, sheets: Sheets, place = ""): Promise<Reference[]> {
+  const refs: Reference[] = [];
+  if (sheets.character) refs.push({ url: await inputUrl(e, run.id, sheets.character), role: "character" });
+  const here = sheets.places[placeKey(place)];
+  if (place.trim() && here) refs.push({ url: await inputUrl(e, run.id, here), role: "place" });
+  return refs;
 }
 
 /** Whether the run's owner is an administrator, who may choose a scene's clip model (FAL_CLIP_MODEL_ADMIN). */
