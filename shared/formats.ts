@@ -8,7 +8,7 @@ import { HIGHLIGHT_MAX_SECONDS, HIGHLIGHT_MIN_SECONDS, layoutSchema } from "./hi
 import { LONG_VIDEO_SECONDS } from "./speech";
 import { trackSchema } from "./track";
 import {
-  clipPrompt, narrationKey, narrationSchema, placeKey, placeOf, placeSchema, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_PLACES, STORY_MAX_SCENES, voicedScript, type StoryStyle,
+  characterSheetPrompt, clipPrompt, fingerprint, narrationKey, narrationSchema, placeKey, placeOf, placeSchema, placeSheetPrompt, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_PLACES, STORY_MAX_SCENES, voicedScript, type StoryStyle,
 } from "./story";
 
 // The editable description ("spec") of a video, one of two formats:
@@ -167,7 +167,25 @@ export type PendingMedia = {
   kind: "image" | "clip"; prompt: string; path: (string | number)[]; key: string; from?: string; seconds?: 5 | 10; quality?: ClipQuality;
   /** The clip model an administrator chose for the scene. */
   clipModel?: ClipModel;
+  /** A reference sheet (pictureSheets) instead of a scene's picture: its key, kept with the picture. */
+  sheet?: string;
 };
+/** A reference sheet a story's pictures are drawn from (shared/story.ts); `key` names what it is drawn from. */
+export type PictureSheet = { kind: "character" | "place"; prompt: string; key: string; place?: string };
+/**
+ * The reference sheets of a story: its recurring characters (when it has a subject) and each place (by placeKey) at
+ * least two of its AI pictures are set in; none with fewer than two AI pictures or a background clip.
+ */
+export function pictureSheets(spec: StorySpec): PictureSheet[] {
+  const drawn = spec.backdrop ? [] : spec.scenes.filter((s, i) => (s.source === "image" || s.source === "clip") && !showsPresenter(spec, i));
+  if (drawn.length < 2) return [];
+  const sheet = (kind: PictureSheet["kind"], prompt: string, place?: string): PictureSheet => ({ kind, prompt, key: `sheet:${fingerprint(prompt)}`, ...(place && { place }) });
+  const out = spec.subject?.trim() ? [sheet("character", characterSheetPrompt(spec.subject, spec.style))] : [];
+  for (const p of spec.places ?? []) {
+    if (drawn.filter((s) => placeOf([p], s.place)).length >= 2) out.push(sheet("place", placeSheetPrompt(p, spec.style, spec.look), placeKey(p.label)));
+  }
+  return out;
+}
 /** Every AI picture or clip the video still asks for, pictures first and then the clips made from them. */
 export function pendingMedia(spec: Spec): PendingMedia[] {
   const out: PendingMedia[] = [];

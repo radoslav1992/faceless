@@ -12,9 +12,10 @@ export const NANO_BANANA_MODEL = "fal-ai/nano-banana-2";
 export const NANO_BANANA_21_MODEL = "google/nano-banana-2.1";
 export const FAST_IMAGE_MODEL = "fal-ai/flux/schnell";
 /**
- * A video's later pictures, drawn from its earlier ones as references so the characters, palette, light, style and
- * places stay the same from scene to scene: Nano Banana 2's edit endpoint (up to 14 reference pictures).
- * FAL_REFERENCE_MODEL can name another Nano Banana edit endpoint, or "off" to draw every picture from its text alone.
+ * A video's scene pictures, drawn from its reference sheets (its characters, its places) so the characters, palette,
+ * light, style and places stay the same from scene to scene: Nano Banana 2's edit endpoint (up to 14 reference
+ * pictures). FAL_REFERENCE_MODEL can name another Nano Banana edit endpoint, or "off" to draw every picture from its
+ * text alone (and no sheets).
  */
 export const REFERENCE_MODEL = "fal-ai/nano-banana-2/edit";
 /** GPT Image 2.5's quality levels (price rises with each); FAL_IMAGE_QUALITY picks one, "high" by default. */
@@ -69,27 +70,27 @@ export type FalOptions = {
   fallback?: boolean;
 };
 /**
- * An earlier picture of the video a new one is drawn from, and what it is kept for: the video's look and characters
- * ("look"; "elsewhere" when it is set in another place), the place this scene is set in ("place"), or both.
+ * A reference sheet of the video a picture is drawn from (shared/formats.ts pictureSheets): what its recurring
+ * characters look like ("character"), or how the place the scene is set in is built ("place").
  */
-export type Reference = { url: string; role: "look" | "elsewhere" | "place" | "both" };
-const KEEP_LOOK = "keep its art style, colour palette and light, and draw any character or object from it exactly the same (face, hair, body, clothing, colours).";
-const KEEP_PLACE = "keep the place exactly the same (its layout, walls, floor, furniture, objects, light and colours), seen from the angle the description asks for";
+export type Reference = { url: string; role: "character" | "place" };
 const referenceUse: Record<Reference["role"], string> = {
-  look: `shows how this video looks: ${KEEP_LOOK}`,
-  elsewhere: "shows how this video looks, in another place: keep its art style and colours, and draw any character or object from it exactly the same (face, hair, body, clothing, colours), but not its background.",
-  place: `shows the place this scene is set in: ${KEEP_PLACE}.`,
-  both: `shows the place this scene is set in and how this video looks: ${KEEP_PLACE}; ${KEEP_LOOK}`,
+  character: "shows only what the recurring characters look like: draw them with exactly these faces, hair, bodies, clothing and colours, but in the pose, action and place this scene describes, never standing as in the reference.",
+  place: "shows only how the place is built: keep its layout, walls, floor, furniture, objects, light and colours, but put the camera where this scene says and frame the picture anew; never copy the reference's view.",
 };
-/** How the references are used: each for what it is kept for, never copied. */
+/** How the references are used, after the scene: each only for what it shows, never as the picture to draw. */
 export function referencePrompt(references: Reference[]) {
   const uses = references.length === 1 ? [`The reference picture ${referenceUse[references[0].role]}`]
     : references.map((r, i) => `Reference picture ${i + 1} ${referenceUse[r.role]}`);
-  return `${uses.join(" ")} Draw a new picture with its own composition, not a copy of ${references.length === 1 ? "the reference" : "either reference"}:`;
+  return `${uses.join(" ")} Match the art style and colours of the reference${references.length === 1 ? "" : "s"}.`;
 }
-/** Nano Banana's input (2 and 2.1 alike): one 9:16 picture at 1K (768 × 1376). */
-const nanoBanana = (prompt: string, imageUrls?: string[]) => ({
+/**
+ * Nano Banana's input (2 and 2.1 alike): one 9:16 picture at 1K (768 × 1376). Nano Banana 2.1's filter is one step
+ * less strict than fal's default (4 of 1–6): it refused ordinary scenes of the scripts' dark stories.
+ */
+const nanoBanana = (model: string, prompt: string, imageUrls?: string[]) => ({
   prompt, ...(imageUrls && { image_urls: imageUrls }), num_images: 1, aspect_ratio: "9:16", resolution: "1K", output_format: "jpeg", limit_generations: true,
+  ...(model.startsWith(NANO_BANANA_21_MODEL) && { safety_tolerance: "5" }),
 });
 /** The model and its input (pure, for tests). Pictures are portrait 9:16 for short-form; no text is drawn in them. */
 export function falRequest(kind: "image" | "clip", prompt: string, options: FalOptions = {}) {
@@ -97,10 +98,10 @@ export function falRequest(kind: "image" | "clip", prompt: string, options: FalO
   if (kind === "image") {
     if (options.references?.length) {
       const model = options.referenceModel || REFERENCE_MODEL;
-      return { model, body: nanoBanana(`${referencePrompt(options.references)} ${text}`, options.references.map((r) => r.url)) };
+      return { model, body: nanoBanana(model, `Draw a new picture of this scene: ${text} ${referencePrompt(options.references)}`, options.references.map((r) => r.url)) };
     }
     const model = options.model || IMAGE_MODEL;
-    if (model === NANO_BANANA_MODEL || model === NANO_BANANA_21_MODEL) return { model, body: nanoBanana(text) };
+    if (model === NANO_BANANA_MODEL || model === NANO_BANANA_21_MODEL) return { model, body: nanoBanana(model, text) };
     if (model === FAST_IMAGE_MODEL)
       return { model, body: { prompt: text, num_images: 1, image_size: { width: 1088, height: 1920 }, num_inference_steps: 4, output_format: "jpeg", enable_safety_checker: true } };
     // GPT Image 2.5 (Flare or Sunburst): exactly 9:16 in multiples of 16; the renderer scales it to the 1080 × 1920 frame.
@@ -118,8 +119,8 @@ export function falRequest(kind: "image" | "clip", prompt: string, options: FalO
   return { model: CLIP_MODEL, body: { ...common, aspect_ratio: "9:16" } };
 }
 /**
- * The model later pictures are drawn with from earlier ones: FAL_REFERENCE_MODEL, else Nano Banana 2.1's edit endpoint
- * when it draws the first pictures (one model for the whole video), else Nano Banana 2's; null when switched off.
+ * The model scene pictures are drawn with from the reference sheets: FAL_REFERENCE_MODEL, else Nano Banana 2.1's edit
+ * endpoint when it draws the sheets (one model for the whole video), else Nano Banana 2's; null when switched off.
  */
 export function referenceModel(e: Env) {
   const name = e.FAL_REFERENCE_MODEL?.trim();
@@ -135,7 +136,7 @@ function pictureModels(e: Env, fallback = false) {
  * references), the model videos were drawn with before: only when another model refused it.
  */
 export function canFallBack(e: Env, references: boolean) {
-  const drawn = (fallback: boolean) => falRequest("image", "", { ...pictureModels(e, fallback), references: references ? [{ url: "", role: "look" }] : undefined }).model;
+  const drawn = (fallback: boolean) => falRequest("image", "", { ...pictureModels(e, fallback), references: references ? [{ url: "", role: "character" }] : undefined }).model;
   return drawn(false) !== drawn(true);
 }
 /** The operator's picture quality (FAL_IMAGE_QUALITY), when it is one GPT Image knows. */
