@@ -606,8 +606,11 @@ function alignment() {
   });
   return { characters, character_start_times_seconds: starts, character_end_times_seconds: ends };
 }
-/** ElevenLabs (speech, forced alignment) and fal; `refuseClip` makes the clip model refuse; `timings` false drops them. */
-function providers({ refuseClip = false, timings = true } = {}) {
+/**
+ * ElevenLabs (speech, forced alignment) and fal; `refuseClip` makes the clip model refuse, `refuse` the models it
+ * names when their result is read (as Nano Banana does); `timings` false drops them.
+ */
+function providers({ refuseClip = false, timings = true, refuse = (() => false) as (model: string) => boolean } = {}) {
   const calls: { method: string; url: string; body?: any }[] = [];
   let n = 0;
   vi.stubGlobal("fetch", async (input: any, init: any = {}) => {
@@ -623,6 +626,7 @@ function providers({ refuseClip = false, timings = true } = {}) {
       return Response.json({ request_id: r, status_url: `https://queue.fal.run/${fal[1]}/requests/${r}/status`, response_url: `https://queue.fal.run/${fal[1]}/requests/${r}` });
     }
     if (fal && url.endsWith("/status")) return Response.json({ status: "COMPLETED" });
+    if (fal && refuse(fal[1])) return Response.json({ detail: [{ type: "content_policy_violation" }] }, { status: 422 });
     if (fal) return Response.json(/kling|minimax\/h3|flux-3-max/.test(fal[1]) ? { video: { url: "https://v3.fal.media/files/clip.mp4" } } : { images: [{ url: "https://v3.fal.media/files/shot.jpg" }] });
     if (url === "https://v3.fal.media/files/shot.jpg") return new Response(jpeg());
     if (url === "https://v3.fal.media/files/clip.mp4") return new Response(new Uint8Array(3000).fill(2));
@@ -721,6 +725,42 @@ describe("narrated videos in the content run", () => {
     const again = calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/")).at(-1)!;
     expect(again.body.image_urls).toHaveLength(1);
     expect(again.body.prompt).toMatch(/^The reference picture shows the place this scene is set in and how this video looks: /);
+  });
+
+  it("draws a picture the model refused once more with Nano Banana 2, and stops when that is refused too", async () => {
+    const { env, user, spec, used, run } = await setup();
+    env.FAL_IMAGE_MODEL = "google/nano-banana-2.1";
+    let refused = ["google/nano-banana-2.1", "google/nano-banana-2.1/edit"];
+    const calls = providers({ refuse: (model) => refused.includes(model) });
+    const pictures = () => calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/") && !c.url.includes("/kling-video/")).map((c) => c.url.split("/").slice(3).join("/"));
+    const price = videoCredits(estimatedSeconds(spec)) + CLIP_CREDITS.regular;
+    const created = await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    await run();
+    // Every picture 2.1 refused is drawn by Nano Banana 2 (its edit endpoint from the same references), for no more credits.
+    expect(pictures()).toEqual([
+      "google/nano-banana-2.1", "fal-ai/nano-banana-2",
+      ...Array(3).fill(["google/nano-banana-2.1/edit", "fal-ai/nano-banana-2/edit"]).flat(),
+    ]);
+    const edits = calls.filter((c) => c.method === "POST" && c.url.includes("/edit"));
+    expect(edits[1].body.image_urls).toEqual(edits[0].body.image_urls);
+    let video = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
+    expect(video.renderStatus).toBe("ready");
+    expect(used()).toBe(price);
+    // Refused by Nano Banana 2 as well, the video stops and its credits come back; so does a refusal by Nano Banana 2
+    // itself, with nothing to fall back on.
+    refused = [...refused, "fal-ai/nano-banana-2/edit"];
+    const redo = { ...video.spec, scenes: video.spec.scenes.map((s: any, i: number) => (i === 4 ? { ...s, imageId: undefined } : s)) };
+    await call(worker, env, "PUT", `/api/videos/${video.id}`, { spec: redo, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    await run();
+    video = (await call(worker, env, "GET", `/api/videos/${video.id}`, undefined, user.cookie)).data.video;
+    expect([video.renderStatus, video.renderError]).toEqual(["failed", expect.stringContaining("refused by the content filter")]);
+    expect(pictures().slice(-2)).toEqual(["google/nano-banana-2.1/edit", "fal-ai/nano-banana-2/edit"]);
+    expect(used()).toBe(price);
+    env.FAL_IMAGE_MODEL = "fal-ai/nano-banana-2";
+    const tries = calls.length;
+    await call(worker, env, "PUT", `/api/videos/${video.id}`, { spec: redo, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    await run();
+    expect(calls.slice(tries).filter((c) => c.method === "POST" && c.url.includes("queue.fal.run")).map((c) => c.url.split("/").slice(3).join("/"))).toEqual(["fal-ai/nano-banana-2/edit"]);
   });
 
   it("lets administrators choose the clip model per scene from FAL_CLIP_MODEL_ADMIN's list, and no one else", async () => {

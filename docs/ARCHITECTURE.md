@@ -305,7 +305,9 @@ D1 batch, so the credits are reserved by the triggers before any work starts. It
    is set in another place), and the first other one set in the same place for the place itself (its layout,
    furniture, objects, light and colours, seen from a new angle), one picture when they are the same. A picture made
    again later follows the others the same way. `FAL_REFERENCE_MODEL` names another Nano Banana edit endpoint, or
-   `off` draws every picture from its text alone.
+   `off` draws every picture from its text alone. A picture the operator's model refuses is drawn once more with
+   Nano Banana 2 (its edit endpoint, from the same references), unless that is the model that refused it; a second
+   refusal stops the run (`GENERATION_REJECTED`).
    Each is stored in R2 as an asset of the video (marked `{"ai":true}`) and written back into the spec.
 3. **Voice + alignment** (after the pictures, so a refused picture stops the run before the voice is paid): ElevenLabs
    `eleven_v4` with timestamps of the text as written, saved as a WAV. The text is the script with each scene's tone
