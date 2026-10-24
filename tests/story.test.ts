@@ -277,13 +277,13 @@ describe("the format", () => {
     expect(falRequest("image", "A wave.", { model: "openai/gpt-image-2.5/sunburst/text-to-image", quality: "medium" })).toMatchObject({ model: "openai/gpt-image-2.5/sunburst/text-to-image", body: { quality: "medium" } });
     // The others an operator can choose, each in its own request shape; anything unknown is the default.
     expect(falRequest("image", "A wave.", { model: "fal-ai/nano-banana-2" })).toMatchObject({ model: "fal-ai/nano-banana-2", body: { aspect_ratio: "9:16", resolution: "1K", limit_generations: true } });
-    // Nano Banana 2.1 lives in Google's namespace on fal, with the same input (less fal's own limit_generations).
+    // Nano Banana 2.1 lives in Google's namespace on fal, with the same input.
     expect(falRequest("image", "A wave.", { model: "google/nano-banana-2.1" })).toEqual({
-      model: "google/nano-banana-2.1", body: { prompt: "A wave. No text, captions, logos or watermarks in the picture.", num_images: 1, aspect_ratio: "9:16", resolution: "1K", output_format: "jpeg" },
+      model: "google/nano-banana-2.1",
+      body: { prompt: "A wave. No text, captions, logos or watermarks in the picture.", num_images: 1, aspect_ratio: "9:16", resolution: "1K", output_format: "jpeg", limit_generations: true },
     });
     const edited = falRequest("image", "A wave.", { references: [{ url: image, role: "look" }], referenceModel: "google/nano-banana-2.1/edit" });
-    expect(edited).toMatchObject({ model: "google/nano-banana-2.1/edit", body: { image_urls: [image], aspect_ratio: "9:16", resolution: "1K" } });
-    expect(edited.body).not.toHaveProperty("limit_generations");
+    expect(edited).toMatchObject({ model: "google/nano-banana-2.1/edit", body: { image_urls: [image], aspect_ratio: "9:16", resolution: "1K", limit_generations: true } });
     expect(falRequest("image", "A wave.", { model: "fal-ai/flux/schnell" })).toMatchObject({ model: "fal-ai/flux/schnell", body: { image_size: { width: 1088, height: 1920 } } });
     expect(falRequest("image", "A wave.", { model: "someone/else" }).model).toBe("openai/gpt-image-2.5/flare/text-to-image");
     // A later picture of a video, drawn from its first: Nano Banana 2's edit endpoint, the reference for the look only.

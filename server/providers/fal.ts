@@ -85,10 +85,9 @@ export function referencePrompt(references: Reference[]) {
     : references.map((r, i) => `Reference picture ${i + 1} ${referenceUse[r.role]}`);
   return `${uses.join(" ")} Draw a new picture with its own composition, not a copy of ${references.length === 1 ? "the reference" : "either reference"}:`;
 }
-/** Nano Banana's input: one 9:16 picture at 1K (768 × 1376); fal's own endpoints are also told to make just one. */
-const nanoBanana = (model: string, prompt: string, imageUrls?: string[]) => ({
-  prompt, ...(imageUrls && { image_urls: imageUrls }), num_images: 1, aspect_ratio: "9:16", resolution: "1K", output_format: "jpeg",
-  ...(!model.startsWith("google/") && { limit_generations: true }),
+/** Nano Banana's input (2 and 2.1 alike): one 9:16 picture at 1K (768 × 1376). */
+const nanoBanana = (prompt: string, imageUrls?: string[]) => ({
+  prompt, ...(imageUrls && { image_urls: imageUrls }), num_images: 1, aspect_ratio: "9:16", resolution: "1K", output_format: "jpeg", limit_generations: true,
 });
 /** The model and its input (pure, for tests). Pictures are portrait 9:16 for short-form; no text is drawn in them. */
 export function falRequest(kind: "image" | "clip", prompt: string, options: FalOptions = {}) {
@@ -96,10 +95,10 @@ export function falRequest(kind: "image" | "clip", prompt: string, options: FalO
   if (kind === "image") {
     if (options.references?.length) {
       const model = options.referenceModel || REFERENCE_MODEL;
-      return { model, body: nanoBanana(model, `${referencePrompt(options.references)} ${text}`, options.references.map((r) => r.url)) };
+      return { model, body: nanoBanana(`${referencePrompt(options.references)} ${text}`, options.references.map((r) => r.url)) };
     }
     const model = options.model || IMAGE_MODEL;
-    if (model === NANO_BANANA_MODEL || model === NANO_BANANA_21_MODEL) return { model, body: nanoBanana(model, text) };
+    if (model === NANO_BANANA_MODEL || model === NANO_BANANA_21_MODEL) return { model, body: nanoBanana(text) };
     if (model === FAST_IMAGE_MODEL)
       return { model, body: { prompt: text, num_images: 1, image_size: { width: 1088, height: 1920 }, num_inference_steps: 4, output_format: "jpeg", enable_safety_checker: true } };
     // GPT Image 2.5 (Flare or Sunburst): exactly 9:16 in multiples of 16; the renderer scales it to the 1080 × 1920 frame.
