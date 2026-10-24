@@ -8,7 +8,7 @@ import { json } from "./db";
 import { safeEqual, token } from "./security";
 import { extOf, head, imageInfo, mediaKey, serveObject, storedDuration, storeStream } from "./storage";
 import { fetchOutput } from "./providers/http";
-import { clipModelFor, falResult, falStatus, referenceModel, submitFal, type FalTicket } from "./providers/fal";
+import { clipModelFor, falResult, falStatus, referenceModel, submitFal, type FalTicket, type Reference } from "./providers/fal";
 import { isAdmin } from "./auth";
 import { forcedAlignment, speak } from "./providers/elevenlabs";
 import { avatarVideoStatus, submitAvatarVideo } from "./providers/heygen";
@@ -29,7 +29,7 @@ import {
 } from "../shared/formats";
 import { PRESENTER_ENGINES } from "../shared/presenter";
 import { trackSchema, type Track } from "../shared/track";
-import { narrationKey, storyScript, textWords, voicedScript } from "../shared/story";
+import { narrationKey, placeKey, storyScript, textWords, voicedScript } from "../shared/story";
 import { PRODUCT } from "../shared/brand";
 import type { RenderPayload, RenderStatus } from "../shared/render";
 
@@ -161,7 +161,7 @@ type RunInfo = { id: string; user_id: string; video_id: string; kind: string; pa
  * `references` (read then too) when there are any.
  */
 async function generateMedia(
-  e: Env, step: WorkflowStep, run: RunInfo, name: string, m: PendingMedia, phase: Phase, from?: () => Promise<string>, references?: () => Promise<string[]>,
+  e: Env, step: WorkflowStep, run: RunInfo, name: string, m: PendingMedia, phase: Phase, from?: () => Promise<string>, references?: () => Promise<Reference[]>,
 ) {
   const kind = m.kind;
   const ticket = await step.do(`${name}-submit`, once, async () => {
@@ -397,21 +397,36 @@ async function trackMoment(e: Env, step: WorkflowStep, run: RunInfo, spec: Highl
 }
 
 /**
- * The picture a new one is drawn from so the video's scenes look alike: the video's first other AI picture, by scene
- * order (scene 1's for every later scene of a new video; a redone picture follows the others). None for a video's
- * first picture, or when FAL_REFERENCE_MODEL is "off".
+ * The pictures a new one is drawn from so the video's scenes look alike, by scene order (a redone picture follows the
+ * others): the video's first other AI picture, for its look and characters (scene 1's for every later scene of a new
+ * video), and the first other one set in the same place, for the place (one picture when that is the same one). None
+ * for a video's first picture, or when FAL_REFERENCE_MODEL is "off".
  */
-async function referencePictures(e: Env, run: RunInfo, m: PendingMedia): Promise<string[]> {
+async function referencePictures(e: Env, run: RunInfo, m: PendingMedia): Promise<Reference[]> {
   if (!referenceModel(e)) return [];
   const row = await e.DB.prepare("SELECT spec FROM videos WHERE id=?").bind(run.video_id).first<{ spec: string }>();
   const scenes: any[] = json<any>(row?.spec, null)?.scenes || [];
+  const placeAt = (s: any) => placeKey(typeof s?.place === "string" ? s.place : "");
+  const here = placeAt(scenes[m.path[1] as number]);
+  let look: { key: string; place: string } | undefined, place: string | undefined;
   for (const [i, s] of scenes.entries()) {
+    if (look && (place || !here)) break;
     if (i === m.path[1] || (s?.source !== "image" && s?.source !== "clip") || typeof s.imageId !== "string") continue;
+    const there = placeAt(s);
+    if (look && there !== here) continue;
     const a = await e.DB.prepare("SELECT object_key FROM media_assets WHERE id=? AND user_id=? AND kind='ai_image' AND status='ready'")
       .bind(s.imageId, run.user_id).first<{ object_key: string }>();
-    if (a) return [await inputUrl(e, run.id, a.object_key)];
+    if (!a) continue;
+    look ||= { key: a.object_key, place: there };
+    if (here && there === here) place = a.object_key;
   }
-  return [];
+  if (!look) return [];
+  const url = (key: string) => inputUrl(e, run.id, key);
+  // A look picture set somewhere else gives its style and characters, not its background.
+  const lookRole = look.place && look.place !== here ? "elsewhere" : "look";
+  if (!place) return [{ url: await url(look.key), role: lookRole }];
+  if (place === look.key) return [{ url: await url(place), role: "both" }];
+  return [{ url: await url(place), role: "place" }, { url: await url(look.key), role: lookRole }];
 }
 
 /** Whether the run's owner is an administrator, who may choose a scene's clip model (FAL_CLIP_MODEL_ADMIN). */
