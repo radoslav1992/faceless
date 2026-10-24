@@ -14,7 +14,7 @@ import {
 import { narrationCurrent, pendingMedia, presenterCurrent, presenterNeeded, showsPresenter, specCredits, spokenSeconds, type StorySpec } from "../../shared/formats";
 import { presenterLayoutInfo, presenterQualityInfo } from "../../shared/presenter";
 import {
-  clipFor, normWord, storyLengths, storyScript, storyStyles, storyTransitions, textWords, transitionInfo, voiceToneNames, voiceTones, STORY_MAX_CHARS, STORY_MAX_SCENES,
+  clipFor, normWord, placeOf, storyLengths, storyScript, storyStyles, storyTransitions, textWords, transitionInfo, voiceToneNames, voiceTones, STORY_MAX_CHARS, STORY_MAX_SCENES,
   STORY_MAX_SECONDS, type SceneSource, type StoryScene, type StoryStyle, type StoryTransition,
 } from "../../shared/story";
 import { styledCaptions } from "../../shared/captions";
@@ -234,6 +234,8 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
   const quality: ClipQuality = scene.source === "clip" ? scene.clipQuality : "regular";
   const made = (scene.source === "image" && scene.imageId) || (scene.source === "clip" && scene.clipId);
   const own = scene.assetId ? known[scene.assetId] : undefined, lib = scene.libraryId ? known[scene.libraryId] : undefined;
+  // The places the writer named (videos saved before places have none); a scene set in one is drawn like its others.
+  const places = spec.places ?? [], place = placeOf(places, scene.place);
   return (
     <div className="inspector stack story-inspector" aria-label={`Scene ${index + 1}`}>
       <div className="row between">
@@ -298,6 +300,19 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
             <textarea className="textarea" rows={3} maxLength={300} value={scene.description} placeholder="A doodle of a curious octopus with three hearts"
               onChange={(e) => onChange({ description: e.target.value })} />
           </label>
+          {(places.length > 0 || !!scene.place) && (
+            <label className="field"><span className="small">Place</span>
+              <select className="select" value={place?.label ?? scene.place ?? ""} onChange={(e) => onChange({ place: e.target.value })}>
+                <option value="">No particular place</option>
+                {places.map((p) => <option key={p.label} value={p.label}>{p.label.charAt(0).toUpperCase() + p.label.slice(1)}</option>)}
+                {!!scene.place && !place && <option value={scene.place}>{scene.place}</option>}
+              </select>
+              <span className="hint">
+                {place?.description ? `${place.description.replace(/([^.!?])$/, "$1.")} ` : ""}
+                Scenes in the same place are drawn alike, from its first picture.{made ? " A change shows in a new picture." : ""}
+              </span>
+            </label>
+          )}
           {scene.source === "clip" && (<>
             <div className="field"><span className="small">Clip quality</span>
               <div className="seg small-seg" role="group" aria-label="Clip quality">

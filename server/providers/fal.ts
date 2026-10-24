@@ -62,11 +62,27 @@ export type FalOptions = {
   /** The family a clip from a picture is made with (Kling unless said). */
   clipModel?: ClipModel;
   /** A picture drawn from these (capability links to the video's earlier pictures) with `referenceModel`. */
-  references?: string[]; referenceModel?: string;
+  references?: Reference[]; referenceModel?: string;
 };
-/** How the reference is used: for the look only, never copied. */
-const REFERENCE_USE =
-  "The reference picture shows how this video looks. Keep its art style, colour palette and light, and draw any character or object from it exactly the same (face, hair, body, clothing, colours). Draw a new picture with its own composition, not a copy of the reference:";
+/**
+ * An earlier picture of the video a new one is drawn from, and what it is kept for: the video's look and characters
+ * ("look"; "elsewhere" when it is set in another place), the place this scene is set in ("place"), or both.
+ */
+export type Reference = { url: string; role: "look" | "elsewhere" | "place" | "both" };
+const KEEP_LOOK = "keep its art style, colour palette and light, and draw any character or object from it exactly the same (face, hair, body, clothing, colours).";
+const KEEP_PLACE = "keep the place exactly the same (its layout, walls, floor, furniture, objects, light and colours), seen from the angle the description asks for";
+const referenceUse: Record<Reference["role"], string> = {
+  look: `shows how this video looks: ${KEEP_LOOK}`,
+  elsewhere: "shows how this video looks, in another place: keep its art style and colours, and draw any character or object from it exactly the same (face, hair, body, clothing, colours), but not its background.",
+  place: `shows the place this scene is set in: ${KEEP_PLACE}.`,
+  both: `shows the place this scene is set in and how this video looks: ${KEEP_PLACE}; ${KEEP_LOOK}`,
+};
+/** How the references are used: each for what it is kept for, never copied. */
+export function referencePrompt(references: Reference[]) {
+  const uses = references.length === 1 ? [`The reference picture ${referenceUse[references[0].role]}`]
+    : references.map((r, i) => `Reference picture ${i + 1} ${referenceUse[r.role]}`);
+  return `${uses.join(" ")} Draw a new picture with its own composition, not a copy of ${references.length === 1 ? "the reference" : "either reference"}:`;
+}
 /** The model and its input (pure, for tests). Pictures are portrait 9:16 for short-form; no text is drawn in them. */
 export function falRequest(kind: "image" | "clip", prompt: string, options: FalOptions = {}) {
   const text = `${prompt.trim()} No text, captions, logos or watermarks in the picture.`;
@@ -74,7 +90,7 @@ export function falRequest(kind: "image" | "clip", prompt: string, options: FalO
     if (options.references?.length)
       return {
         model: options.referenceModel || REFERENCE_MODEL,
-        body: { prompt: `${REFERENCE_USE} ${text}`, image_urls: options.references, num_images: 1, aspect_ratio: "9:16", resolution: "1K", output_format: "jpeg", limit_generations: true },
+        body: { prompt: `${referencePrompt(options.references)} ${text}`, image_urls: options.references.map((r) => r.url), num_images: 1, aspect_ratio: "9:16", resolution: "1K", output_format: "jpeg", limit_generations: true },
       };
     const model = options.model || IMAGE_MODEL;
     if (model === NANO_BANANA_MODEL)

@@ -230,8 +230,10 @@ only, no existing characters, brands or real private people, no invented statist
 content, graphic violence or medical, legal or financial advice; spoken text in the narration language, picture
 descriptions in English. It writes about 15 characters per second of the target length as one scene per ~4.5 s
 (3–40 scenes), each with a picture description and one or two key words, plus the recurring characters (described
-once, at most two, each with a label every picture uses), the look of the whole video, a tone for the scenes where the
-narrator's feeling changes (about one in three), a headline, a
+once, at most two, each with a label every picture uses), the look of the whole video, the places the scenes are set
+in (`places`: at most four, each a label and a description of its layout, furniture, light and colours; each scene's
+`place` names one, or none), a tone for the scenes where the narrator's feeling changes (about one in three), a
+headline, a
 title, a caption, hashtags, a topic and a music code from the library list. Each video type adds rules (POV in the
 second person, the mashup's chanted name, storytime's title question read out first). `acceptStory` cleans and checks
 the answer; fewer than two usable scenes means failure.
@@ -296,11 +298,14 @@ D1 batch, so the credits are reserved by the triggers before any work starts. It
    `FAL_CLIP_MODEL` can choose MiniMax H3 or FLUX 3 Max instead for everyone; administrators can pick one per scene
    (`scene.clipModel`) from `FAL_CLIP_MODEL_ADMIN`'s list, which `clipModelFor` honours only for an administrator's
    video and only while the model is on the list; the render never plays a clip's own sound).
-   Every picture's prompt carries the subject and the look. So the scenes look like one film, only a video's first
-   AI picture is drawn from its text: each later one is drawn from it as a reference (`fal-ai/nano-banana-2/edit`,
-   through a capability link; the reference is for the style, palette, light and characters, never copied). A
-   picture made again later follows the video's first other AI picture. `FAL_REFERENCE_MODEL` names another Nano
-   Banana edit endpoint, or `off` draws every picture from its text alone.
+   Every picture's prompt carries the subject, the look and the description of the scene's place. So the scenes look
+   like one film, only a video's first AI picture is drawn from its text: each later one is drawn from earlier ones
+   as references (`fal-ai/nano-banana-2/edit`, through capability links, never copied), by scene order: the video's
+   first other AI picture for the style, palette, light and characters ("elsewhere", without its background, when it
+   is set in another place), and the first other one set in the same place for the place itself (its layout,
+   furniture, objects, light and colours, seen from a new angle), one picture when they are the same. A picture made
+   again later follows the others the same way. `FAL_REFERENCE_MODEL` names another Nano Banana edit endpoint, or
+   `off` draws every picture from its text alone.
    Each is stored in R2 as an asset of the video (marked `{"ai":true}`) and written back into the spec.
 3. **Voice + alignment** (after the pictures, so a refused picture stops the run before the voice is paid): ElevenLabs
    `eleven_v4` with timestamps of the text as written, saved as a WAV. The text is the script with each scene's tone

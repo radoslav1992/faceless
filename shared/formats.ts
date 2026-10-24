@@ -8,7 +8,7 @@ import { HIGHLIGHT_MAX_SECONDS, HIGHLIGHT_MIN_SECONDS, layoutSchema } from "./hi
 import { LONG_VIDEO_SECONDS } from "./speech";
 import { trackSchema } from "./track";
 import {
-  clipPrompt, narrationKey, narrationSchema, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_SCENES, voicedScript, type StoryStyle,
+  clipPrompt, narrationKey, narrationSchema, placeKey, placeOf, placeSchema, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_PLACES, STORY_MAX_SCENES, voicedScript, type StoryStyle,
 } from "./story";
 
 // The editable description ("spec") of a video, one of two formats:
@@ -67,6 +67,9 @@ export const storySpec = z.object({
   subject: z.string().trim().max(300).default(""),
   /** The world of the whole video (place and era, time of day, light, colours), repeated in every picture prompt. */
   look: z.string().trim().max(300).default(""),
+  /** The places scenes are set in (by `place`), each described once; labels differ. */
+  places: z.array(placeSchema).max(STORY_MAX_PLACES).default([])
+    .refine((places) => new Set(places.map((p) => placeKey(p.label))).size === places.length, "Give each place its own name."),
   captions: z.object({ enabled: z.boolean().default(true), style: z.enum(captionStyles).default("keyword" satisfies CaptionStyle) }).default({ enabled: true, style: "keyword" }),
   headline: headlineSchema.nullable().default(null),
   backdrop: backdropSchema.nullable().default(null),
@@ -173,7 +176,7 @@ export function pendingMedia(spec: Spec): PendingMedia[] {
   // A scene the presenter speaks on shows no picture.
   spec.scenes.forEach((s, i) => {
     if ((s.source === "image" || s.source === "clip") && !s.imageId && !showsPresenter(spec, i))
-      out.push({ kind: "image", prompt: scenePrompt(s.description, spec.subject, spec.style, spec.look), path: ["scenes", i], key: "imageId" });
+      out.push({ kind: "image", prompt: scenePrompt(s.description, spec.subject, spec.style, spec.look, placeOf(spec.places, s.place)), path: ["scenes", i], key: "imageId" });
   });
   spec.scenes.forEach((s, i) => {
     if (s.source === "clip" && !s.clipId && !showsPresenter(spec, i))

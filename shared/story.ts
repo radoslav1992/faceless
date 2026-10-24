@@ -63,6 +63,21 @@ export type SceneSource = (typeof sceneSources)[number];
 export const clipLengths = [5, 10] as const;
 
 const uuid = z.uuid();
+/** The places a video's pictures are set in: each written down once, so every scene there shows the same place. */
+export const STORY_MAX_PLACES = 6;
+const PLACE_LABEL_MAX = 40;
+export const placeSchema = z.object({
+  /** How scenes name it, e.g. "the corner shop". */
+  label: z.string().trim().min(1).max(PLACE_LABEL_MAX),
+  /** Its layout, walls and floor, furniture and main objects, light and colours, repeated in each of its pictures. */
+  description: z.string().trim().max(300).default(""),
+});
+export type StoryPlace = z.infer<typeof placeSchema>;
+/** How place labels are compared (case and spacing aside). */
+export const placeKey = (label: string) => label.trim().toLowerCase().replace(/\s+/g, " ");
+/** The place a scene is set in, among the video's places (none when it names none of them; videos saved before places have none). */
+export const placeOf = (places: StoryPlace[] | undefined, label: string | undefined) =>
+  label?.trim() ? places?.find((p) => placeKey(p.label) === placeKey(label)) : undefined;
 /**
  * How the AI narrator says a scene: Eleven v4 audio tags, sent in square brackets before the scene's words (never
  * spoken or shown in the subtitles). A tone carries on until the next one; "pause" waits a moment first. A short list
@@ -106,6 +121,8 @@ export const storySceneSchema = z
     transition: z.enum(storyTransitions).default("auto"),
     /** How the AI voice says this scene (voiceTones), or empty to keep the tone it had. */
     tone: z.union([z.literal(""), z.enum(voiceTones)]).default(""),
+    /** The label of the video's place (`places`) the scene is set in, or empty: scenes in one place are drawn alike. */
+    place: z.string().trim().max(PLACE_LABEL_MAX).default(""),
   })
   .refine((s) => s.source !== "own" || !!s.assetId, "Choose a picture or video for each scene with your own media.")
   .refine((s) => s.source !== "library" || !!s.libraryId, "Choose a library clip or picture for each scene that uses one.")
@@ -380,13 +397,15 @@ export function toggleKey(scene: StoryScene, word: string): StoryScene {
   return { ...scene, keys: on ? scene.keys.filter((k) => normWord(k) !== normWord(w)) : [...scene.keys, w].slice(0, 8) };
 }
 /**
- * The description sent to the image model: the scene, the recurring subject, the video's look (the same world in every
- * picture), the style; calm space low for subtitles.
+ * The description sent to the image model: the scene, the recurring subject, the place it is set in (the same in every
+ * scene there), the video's look (the same world in every picture), the style; calm space low for subtitles.
  */
-export function scenePrompt(description: string, subject: string, style: StoryStyle, look = "") {
-  const who = subject.trim() ? ` Recurring main character, the same in every scene: ${subject.trim().replace(/[.!?]$/, "")}.` : "";
-  const world = look.trim() ? ` The same world in every scene: ${look.trim().replace(/[.!?]$/, "")}.` : "";
-  return `${description.trim().replace(/([^.!?])$/, "$1.")}${who}${world} Style: ${storyStyles[style].prompt}. Vertical 9:16 frame, main subject in the upper two thirds, the bottom third calm and simple.`.slice(0, 1200);
+export function scenePrompt(description: string, subject: string, style: StoryStyle, look = "", place?: StoryPlace) {
+  const bare = (text: string) => text.trim().replace(/[.!?]$/, "");
+  const who = subject.trim() ? ` Recurring main character, the same in every scene: ${bare(subject)}.` : "";
+  const where = place?.description.trim() ? ` The place, ${bare(place.label)}, the same in every scene set there: ${bare(place.description)}.` : "";
+  const world = look.trim() ? ` The same world in every scene: ${bare(look)}.` : "";
+  return `${description.trim().replace(/([^.!?])$/, "$1.")}${who}${where}${world} Style: ${storyStyles[style].prompt}. Vertical 9:16 frame, main subject in the upper two thirds, the bottom third calm and simple.`.slice(0, 1600);
 }
 /** The description sent to the clip model with the scene's picture: gentle motion, the picture kept as it is. */
 export const clipPrompt = (description: string) =>
