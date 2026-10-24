@@ -401,7 +401,8 @@ export function toggleKey(scene: StoryScene, word: string): StoryScene {
  * scene there), the video's look (the same world in every picture), the style; calm space low for subtitles.
  */
 export function scenePrompt(description: string, subject: string, style: StoryStyle, look = "", place?: StoryPlace) {
-  const who = subject.trim() ? ` Recurring main character, the same in every scene: ${bare(subject)}.` : "";
+  // Only the characters a scene shows are drawn in it (a model house described with the hero is not in every room).
+  const who = subject.trim() ? ` Recurring characters, drawn the same whenever they appear, only in the scenes that show them: ${bare(subject)}.` : "";
   const where = place?.description.trim() ? ` The place, ${bare(place.label)}, the same in every scene set there: ${bare(place.description)}.` : "";
   const world = look.trim() ? ` The same world in every scene: ${bare(look)}.` : "";
   return `${description.trim().replace(/([^.!?])$/, "$1.")}${who}${where}${world} Style: ${storyStyles[style].prompt}. Vertical 9:16 frame, main subject in the upper two thirds, the bottom third calm and simple.`.slice(0, 1600);
