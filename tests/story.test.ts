@@ -209,7 +209,7 @@ describe("the format", () => {
     ]);
     // One subject and one style in every picture prompt.
     expect(pendingMedia(spec)[0].prompt).toBe(scenePrompt("Doodle of sentence 1", spec.subject, "doodle"));
-    expect(pendingMedia(spec)[0].prompt).toContain("Recurring main character, the same in every scene: a small orange octopus with big eyes.");
+    expect(pendingMedia(spec)[0].prompt).toContain("Recurring characters, drawn the same whenever they appear, only in the scenes that show them: a small orange octopus with big eyes.");
     expect(pendingMedia(spec)[0].prompt).toContain(storyStyles.doodle.prompt);
     // Recorded for these words and this voice: no voice charge; another voice or new words cost it again.
     const recorded = { ...spec, generated: { key: narrationKey("george", storyScript(spec.scenes)), voiceAssetId: id(8), words } };
@@ -295,7 +295,7 @@ describe("the format", () => {
     expect(drawn).toEqual({
       model: "fal-ai/nano-banana-2/edit",
       body: {
-        prompt: expect.stringMatching(/^Draw a new picture of this scene: A wave\. No text, captions, logos or watermarks in the picture\. The reference picture shows only what the recurring characters look like: .*never standing as in the reference\. Match the art style and colours of the reference\.$/),
+        prompt: expect.stringMatching(/^Draw a new picture of this scene: A wave\. No text, captions, logos or watermarks in the picture\. The reference picture shows only what the recurring characters look like: draw the ones this scene shows .*never standing as in the reference; leave out any it does not mention\. Match the art style and colours of the reference\.$/),
         image_urls: [image], num_images: 1, aspect_ratio: "9:16", resolution: "1K", output_format: "jpeg", limit_generations: true,
       },
     });
@@ -509,7 +509,7 @@ describe("the writer", () => {
     // The video's look, kept for every picture's prompt.
     expect(acceptStory({ ...answer, look: "  A sunlit coral reef, turquoise water, orange and coral pink " })!.look).toBe("A sunlit coral reef, turquoise water, orange and coral pink");
     expect(scenePrompt("An octopus waves", "a small orange octopus", "doodle", "A sunlit coral reef, turquoise and coral pink."))
-      .toMatch(/^An octopus waves\. Recurring main character, the same in every scene: a small orange octopus\. The same world in every scene: A sunlit coral reef, turquoise and coral pink\. Style: /);
+      .toMatch(/^An octopus waves\. Recurring characters, drawn the same whenever they appear, only in the scenes that show them: a small orange octopus\. The same world in every scene: A sunlit coral reef, turquoise and coral pink\. Style: /);
     // Over the length, the script ends at the last whole scene that fits; fewer than two is no script.
     expect(acceptStory(answer, 82)!.scenes.map((x) => x.text)).toEqual(["Octopuses have three hearts and blue blood.", "Two hearts pump blood to the gills."]);
     expect(acceptStory(answer, 60)).toBeNull();

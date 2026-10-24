@@ -75,7 +75,7 @@ export type FalOptions = {
  */
 export type Reference = { url: string; role: "character" | "place" };
 const referenceUse: Record<Reference["role"], string> = {
-  character: "shows only what the recurring characters look like: draw them with exactly these faces, hair, bodies, clothing and colours, but in the pose, action and place this scene describes, never standing as in the reference.",
+  character: "shows only what the recurring characters look like: draw the ones this scene shows with exactly these faces, hair, bodies, clothing and colours, but in the pose, action and place this scene describes, never standing as in the reference; leave out any it does not mention.",
   place: "shows only how the place is built: keep its layout, walls, floor, furniture, objects, light and colours, but put the camera where this scene says and frame the picture anew; never copy the reference's view.",
 };
 /** How the references are used, after the scene: each only for what it shows, never as the picture to draw. */
