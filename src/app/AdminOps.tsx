@@ -2,13 +2,13 @@ import { useState, type FormEvent } from "react";
 import { Activity, Gift, RefreshCw, Undo2 } from "lucide-react";
 import { Spinner, useToast } from "../ui";
 import { api, del, errorText, number, post, useApi } from "../lib";
-import { paidPlans, planById } from "../../shared/plans";
+import { GRANT_MONTHS, paidPlans, planById } from "../../shared/plans";
 import { WITHDRAWAL_DAYS } from "../../shared/withdrawal";
-import { ConfirmDialog, Empty, ago, formatDate } from "./pickers";
+import { ConfirmDialog, Empty, ago, formatDate, useSettled } from "./pickers";
 import "./admin.css";
 
 // Administrators: the operations view (ported from rech-bg's OperationsAdmin) and the billing tools — withdrawals
-// within 14 days (WithdrawalAdmin) and free months of a plan (PlanGrants).
+// within 14 days (WithdrawalCard) and a paid plan for free for 1 to 12 months (GrantsCard).
 
 /* ------------------------------------------------------------------------------------------------ operations */
 
@@ -109,7 +109,7 @@ export function OperationsTab() {
             </li>
             <li><span>Renewals overdue by over 4 days</span><strong className={data.stripe.renewalsOverdue ? "ops-bad" : undefined}>{number(data.stripe.renewalsOverdue)}</strong></li>
             <li><span>Last webhook event</span><span>{data.stripe.lastWebhook ? ago(data.stripe.lastWebhook) : <span className="muted">None in 90 days</span>}</span></li>
-            <li><span>Free months running</span><strong>{number(data.stripe.grants)}</strong></li>
+            <li><span>Free plans running</span><strong>{number(data.stripe.grants)}</strong></li>
           </ul>
         </section>
       </div>
@@ -279,24 +279,39 @@ function WithdrawalCard() {
 }
 
 type Grant = { id: string; plan: string; start: number; end: number; email: string; name: string; used: number };
-/** A paid plan for one month without payment (testers, partners), with the running grants. */
+type Account = { id: string; email: string; name: string; createdAt: number; paidPlan: string | null; grantId: string | null; grantPlan: string | null; grantEnd: number | null };
+const monthsText = (n: number) => `${n} month${n === 1 ? "" : "s"}`;
+/** A grant's length in calendar months (28 to 31 days each). */
+const grantMonths = (g: Grant) => Math.max(1, Math.round((g.end - g.start) / (30.44 * 86400)));
+/** "pays for Creator · free Pro until Jan 26, 2027", or "no paid plan". */
+const accountPlan = (a: Account) => [
+  a.paidPlan && `pays for ${planById(a.paidPlan).name}`,
+  a.grantPlan && a.grantEnd && `free ${planById(a.grantPlan).name} until ${formatDate(a.grantEnd)}`,
+].filter(Boolean).join(" · ") || "no paid plan";
+
+/** A paid plan for 1 to 12 months without payment (testers, partners): find the account by email, with the running grants. */
 function GrantsCard() {
   const toast = useToast();
   const { data, error, reload } = useApi<{ grants: Grant[]; now: number }>("/admin/grants");
-  const [email, setEmail] = useState("");
+  const [query, setQuery] = useState("");
+  const search = useSettled(query.trim().toLowerCase(), 250);
+  const searching = search.length >= 2;
+  const found = useApi<{ accounts: Account[] }>(searching ? `/admin/grants/accounts?q=${encodeURIComponent(search)}` : null);
+  const [chosen, setChosen] = useState<Account | null>(null);
   const [plan, setPlan] = useState<string>("daily");
+  const [months, setMonths] = useState<number>(1);
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [renewing, setRenewing] = useState<Grant | null>(null);
   const [ending, setEnding] = useState<Grant | null>(null);
-  const grant = async (to: string, chosen: string, key: string) => {
+  const grant = async (to: string, chosenPlan: string, length: number, key: string) => {
     setBusy(key); setProblem(null); setNotice(null);
     try {
-      const r = await post<{ end: number; paidPlan: string | null }>("/admin/grants", { email: to, plan: chosen });
-      toast(`${to} has ${planById(chosen).name} until ${formatDate(r.end)}.`, "good");
-      if (r.paidPlan) setNotice(`${to} also pays for ${planById(r.paidPlan).name} in Stripe. That subscription keeps billing while the free month runs.`);
-      if (key === "grant") setEmail("");
+      const r = await post<{ end: number; paidPlan: string | null }>("/admin/grants", { email: to, plan: chosenPlan, months: length });
+      toast(`${to} has ${planById(chosenPlan).name} for free until ${formatDate(r.end)}.`, "good");
+      if (r.paidPlan) setNotice(`${to} also pays for ${planById(r.paidPlan).name} in Stripe. That subscription keeps billing while the free plan runs.`);
+      if (key === "grant") { setChosen(null); setQuery(""); }
       await reload();
     } catch (err) {
       setProblem(errorText(err));
@@ -304,64 +319,111 @@ function GrantsCard() {
       setBusy(null);
     }
   };
+  const accounts = searching ? found.data?.accounts : undefined;
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    // Enter in the search box picks the only account found.
+    if (!chosen) return void (accounts?.length === 1 && setChosen(accounts[0]));
+    void grant(chosen.email, plan, months, "grant");
+  };
   const running = data?.grants.filter((g) => g.end > data.now) || [], ended = data?.grants.filter((g) => g.end <= data.now) || [];
   return (
     <section className="card" aria-labelledby="grants-title">
       <div className="card-head">
         <div>
-          <h2 id="grants-title"><Gift size={18} aria-hidden="true" style={{ verticalAlign: -2, marginRight: 6 }} />Free month of a plan</h2>
+          <h2 id="grants-title"><Gift size={18} aria-hidden="true" style={{ verticalAlign: -2, marginRight: 6 }} />Give a plan for free</h2>
           <p>
-            For testers and partners: the plan with all its credits for 30 days, without payment. Afterwards the person goes back to their paid plan
-            or the free plan. Giving it again starts a new month with a full plan. Stripe never sees it.
+            For testers, partners and support cases: find the account by email, then choose the plan and for how long. Each month comes with the plan's
+            full credits; unused credits don't roll over. Afterwards the person goes back to their paid plan or the free plan. Giving a plan again replaces
+            the running one. Stripe never sees it.
           </p>
         </div>
       </div>
-      <form className="field-row wrap" onSubmit={(e) => { e.preventDefault(); void grant(email.trim(), plan, "grant"); }}>
-        <label className="grow ops-email">
-          <span className="sr-only">Person's email</span>
-          <input className="input" type="email" required maxLength={254} value={email} placeholder="Person's email (they need an account)" autoComplete="off" onChange={(e) => setEmail(e.target.value)} />
-        </label>
-        <label className="ops-plan">
-          <span className="sr-only">Plan</span>
-          <select className="select" value={plan} onChange={(e) => setPlan(e.target.value)}>
-            {paidPlans.map((id) => { const p = planById(id); return <option key={id} value={id}>{p.name} · {number(p.credits)} credits</option>; })}
-          </select>
-        </label>
-        <button type="submit" className="btn primary" disabled={!email.trim() || !!busy}>{busy === "grant" && <Spinner label="Giving" />}Give for 1 month</button>
+      <form className="stack" style={{ gap: 12 }} onSubmit={submit}>
+        {chosen ? (
+          <div className="ops-chosen">
+            <span className="ops-what col">
+              <span className="ops-area">{chosen.email}{chosen.name && <span className="muted" style={{ fontWeight: 400 }}> · {chosen.name}</span>}</span>
+              <span className="small muted">Joined {formatDate(chosen.createdAt)} · {accountPlan(chosen)}</span>
+            </span>
+            <button type="button" className="btn sm ghost" onClick={() => setChosen(null)} disabled={!!busy}>Change</button>
+          </div>
+        ) : (
+          <label className="field">
+            <span className="sr-only">Search accounts by email</span>
+            <input className="input" type="search" maxLength={254} value={query} placeholder="Search accounts by email" autoComplete="off" onChange={(e) => setQuery(e.target.value)} />
+          </label>
+        )}
+        {!chosen && searching && (
+          <div aria-live="polite">
+            {found.error ? <div className="notice bad" role="alert">{found.error}</div>
+              : !accounts ? <div className="skeleton" style={{ height: 56 }} aria-busy="true" />
+              : accounts.length ? (
+                <ul className="list-plain ops-rows wrap" aria-label="Accounts found">
+                  {accounts.map((a) => (
+                    <li key={a.id}>
+                      <span className="ops-what col">
+                        <span className="ops-area">{a.email}{a.name && <span className="muted" style={{ fontWeight: 400 }}> · {a.name}</span>}</span>
+                        <span className="small muted">Joined {formatDate(a.createdAt)} · {accountPlan(a)}</span>
+                      </span>
+                      <button type="button" className="btn sm" style={{ flex: "none" }} onClick={() => setChosen(a)}>Choose</button>
+                    </li>
+                  ))}
+                </ul>
+              ) : <p className="hint">No account's email contains "{search}". The person needs to sign up first.</p>}
+          </div>
+        )}
+        <div className="field-row wrap">
+          <label className="ops-plan">
+            <span className="sr-only">Plan</span>
+            <select className="select" value={plan} onChange={(e) => setPlan(e.target.value)}>
+              {paidPlans.map((id) => { const p = planById(id); return <option key={id} value={id}>{p.name} · {number(p.credits)} credits a month</option>; })}
+            </select>
+          </label>
+          <label className="ops-plan">
+            <span className="sr-only">For how long</span>
+            <select className="select" value={months} onChange={(e) => setMonths(Number(e.target.value))}>
+              {GRANT_MONTHS.map((n) => <option key={n} value={n}>For {monthsText(n)}</option>)}
+            </select>
+          </label>
+          <button type="submit" className="btn primary" disabled={!chosen || !!busy}>
+            {busy === "grant" && <Spinner label="Giving" />}Give {planById(plan).name} for {monthsText(months)}
+          </button>
+        </div>
       </form>
       {problem && <div className="notice bad" role="alert" style={{ marginTop: 12 }}>{problem}</div>}
       {notice && <div className="notice warn" role="status" style={{ marginTop: 12 }}>{notice}</div>}
       {error && <div className="notice bad" role="alert" style={{ marginTop: 12 }}>{error}</div>}
       {data && (running.length ? (
-        <ul className="list-plain ops-rows wrap" style={{ marginTop: 12 }} aria-label="Running free months">
+        <ul className="list-plain ops-rows wrap" style={{ marginTop: 12 }} aria-label="Free plans running">
           {running.map((g) => (
             <li key={g.id}>
               <span className="ops-what col">
                 <span className="ops-area">{g.email}{g.name && <span className="muted" style={{ fontWeight: 400 }}> · {g.name}</span>}</span>
-                <span className="small muted">{planById(g.plan).name} until {formatDate(g.end)} · used {number(g.used)} credits</span>
+                <span className="small muted">{planById(g.plan).name} for {monthsText(grantMonths(g))}, until {formatDate(g.end)} · used {number(g.used)} credits</span>
               </span>
               <span className="row" style={{ gap: 6, flex: "none" }}>
-                <button type="button" className="btn sm" disabled={!!busy} onClick={() => setRenewing(g)}>{busy === `renew:${g.id}` && <Spinner label="Renewing" />}New month</button>
+                <button type="button" className="btn sm" disabled={!!busy} onClick={() => setRenewing(g)}>{busy === `renew:${g.id}` && <Spinner label="Starting again" />}Start again</button>
                 <button type="button" className="btn sm ghost danger" disabled={!!busy} onClick={() => setEnding(g)}>End now</button>
               </span>
             </li>
           ))}
         </ul>
-      ) : <Empty icon={<Gift size={24} />} title="No free months running">Give one above.</Empty>)}
+      ) : <Empty icon={<Gift size={24} />} title="No free plans running">Give one above.</Empty>)}
       {ended.length > 0 && <p className="hint" style={{ marginTop: 12 }}>Ended in the last 90 days: {ended.map((g) => `${g.email} (${planById(g.plan).name}, until ${formatDate(g.end)})`).join(", ")}.</p>}
       {renewing && (
-        <ConfirmDialog title="Start a new month?" confirmLabel="Start a new month" danger={false} onClose={() => setRenewing(null)} onConfirm={async () => {
+        <ConfirmDialog title="Start it again?" confirmLabel="Start again" danger={false} onClose={() => setRenewing(null)} onConfirm={async () => {
           const g = renewing;
           setRenewing(null);
-          await grant(g.email, g.plan, `renew:${g.id}`);
+          await grant(g.email, g.plan, grantMonths(g), `renew:${g.id}`);
         }}>
-          <p>{renewing.email} gets a new month of {planById(renewing.plan).name} from today, with all its credits.</p>
+          <p>{renewing.email} gets {planById(renewing.plan).name} for {monthsText(grantMonths(renewing))} from today, with all its credits.</p>
         </ConfirmDialog>
       )}
       {ending && (
-        <ConfirmDialog title="End this free month now?" confirmLabel="End now" onClose={() => setEnding(null)} onConfirm={async () => {
+        <ConfirmDialog title="End this free plan now?" confirmLabel="End now" onClose={() => setEnding(null)} onConfirm={async () => {
           await del(`/admin/grants/${ending.id}`);
-          toast("The free month ended.", "good");
+          toast("The free plan ended.", "good");
           await reload();
         }}>
           <p>{ending.email} goes back to their paid plan or the free plan straight away.</p>

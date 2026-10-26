@@ -102,6 +102,8 @@ export type Interval = (typeof intervals)[number];
 export const TRIAL_DAYS = 7;
 /** Unused credits roll over while a plan runs, up to this many months' worth. */
 export const ROLLOVER_MONTHS = 3;
+/** How long an administrator can give a paid plan for free (Admin → Billing), in months. */
+export const GRANT_MONTHS = [1, 3, 6, 12] as const;
 export const planById = (id: string | undefined): Plan => plans.find((p) => p.id === id) || plans[0];
 /** "Up to N videos a month": 30-second videos. */
 export const videosPerMonth = (p: Plan) => Math.floor(p.credits / videoCredits(30));

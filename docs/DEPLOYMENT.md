@@ -204,7 +204,7 @@ everything you upload, including permission for every person shown.
     4. Connect one account per network and post a test video (privately on TikTok and YouTube).
     5. Buy a monthly and a yearly plan in Stripe test mode; check the confirmation e-mail and the credits.
     6. Buy a credit pack, refund it in Stripe, and check the credits are taken back.
-    7. Withdraw a plan from Admin → Billing (the refund shows in Stripe) and give yourself a free month.
+    7. Withdraw a plan from Admin → Billing (the refund shows in Stripe) and give yourself a free plan for a month.
     8. Create an API key, call `GET /api/v1/me`, make a video through `/api/v1/videos` or the MCP server, and download
        it from the signed link.
     9. On a paid plan, upload a podcast over 10 minutes on the Clips page, find clips in it (check the credits charged

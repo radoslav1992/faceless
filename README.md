@@ -87,7 +87,8 @@ and the maintenance cron.
   pause or resume series, with the same credits and limits as the app.
 - **Administration.** Administrators (`ADMIN_EMAILS`) fill the shared library people search (music tagged by mood,
   clips and pictures, each with a description; uploaded or copied from their own AI pictures and clips), choose the
-  narration voices, see operations and failures, handle withdrawals within 14 days and give free months of a plan.
+  narration voices, see operations and failures, handle withdrawals within 14 days and give a paid plan for free (1 to 12 months, found by
+  email).
 
 The public pages show drawn samples of the styles (`src/art.tsx`), never invented results, user numbers, reviews or
 trend data.
@@ -180,7 +181,7 @@ server/                Worker
   providers/           fal, ElevenLabs and HeyGen
   avatars.ts           presenters' avatars (Admin → Presenters) and HeyGen's copies
   billing.ts           plans, usage windows, Stripe checkout, credit packs, webhook, reconciliation
-  plan-grants.ts, withdrawals.ts   free months and 14-day withdrawals (admin)
+  plan-grants.ts, withdrawals.ts   free plans and 14-day withdrawals (admin)
   api.ts               API keys, REST API (/api/v1), MCP server (/mcp)
   maintenance.ts, operations.ts, retention.ts   cron, operator summary, retention
   routes/              admin, public (config, contact), settings (account)
