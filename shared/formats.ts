@@ -174,8 +174,7 @@ export type PendingMedia = {
 export type PictureSheet = { kind: "character" | "place"; prompt: string; key: string; place?: string };
 /**
  * The reference sheets of a story: its recurring characters (when it has a subject) and each place (by placeKey) at
- * least three of its AI pictures are set in (for two, a sheet would cost as much as it saves); none with fewer than
- * two AI pictures or a background clip.
+ * least two of its AI pictures are set in; none with fewer than two AI pictures or a background clip.
  */
 export function pictureSheets(spec: StorySpec): PictureSheet[] {
   const drawn = spec.backdrop ? [] : spec.scenes.filter((s, i) => (s.source === "image" || s.source === "clip") && !showsPresenter(spec, i));
@@ -183,7 +182,7 @@ export function pictureSheets(spec: StorySpec): PictureSheet[] {
   const sheet = (kind: PictureSheet["kind"], prompt: string, place?: string): PictureSheet => ({ kind, prompt, key: `sheet:${fingerprint(prompt)}`, ...(place && { place }) });
   const out = spec.subject?.trim() ? [sheet("character", characterSheetPrompt(spec.subject, spec.style))] : [];
   for (const p of spec.places ?? []) {
-    if (drawn.filter((s) => placeOf([p], s.place)).length >= 3) out.push(sheet("place", placeSheetPrompt(p, spec.style, spec.look), placeKey(p.label)));
+    if (drawn.filter((s) => placeOf([p], s.place)).length >= 2) out.push(sheet("place", placeSheetPrompt(p, spec.style, spec.look), placeKey(p.label)));
   }
   return out;
 }

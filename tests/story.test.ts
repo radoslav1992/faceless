@@ -45,7 +45,7 @@ describe("scenes on the voice's clock", () => {
     const texts = scenesFromCounts(words, counts);
     // Every scene ends a sentence and starts on a word: the edges are word boundaries.
     expect(texts.join(" ")).toBe(said.map((s) => s[0]).join(" "));
-    expect(texts).toEqual([`${said[0][0]} ${said[1][0]}`, `${said[2][0]} ${said[3][0]}`, said[4][0]]);
+    expect(texts).toEqual([said[0][0], said[1][0], `${said[2][0]} ${said[3][0]}`, said[4][0]]);
     let at = 0;
     for (const n of counts) {
       const span = words[at + n - 1].end - words[at].start;
@@ -548,13 +548,10 @@ describe("the writer", () => {
     expect(storySpec.safeParse({ ...spec, places: [...spec.places, { label: "the REEF cave", description: "" }] }).success).toBe(false);
     expect(placeOf(undefined, "the cave")).toBeUndefined();
     expect(placeOf(spec.places, undefined)).toBeUndefined();
-    // Reference sheets: the main character, and a place only from three pictures there (for two, a sheet would cost as
-    // much as it saves); none without two AI pictures or with a background clip; no character sheet without a main
-    // character.
-    expect(pictureSheets(spec).map((x) => [x.kind, x.place ?? null])).toEqual([["character", null]]);
-    const allInCave = { ...spec, scenes: spec.scenes.map((s) => ({ ...s, place: "The Reef Cave" })) };
-    expect(pictureSheets(allInCave).map((x) => [x.kind, x.place ?? null])).toEqual([["character", null], ["place", "the reef cave"]]);
-    expect(pictureSheets({ ...allInCave, subject: "" }).map((x) => x.kind)).toEqual(["place"]);
+    // Reference sheets: the main character, and the reef (two pictures there); none without two AI pictures or with a
+    // background clip; no character sheet without a main character.
+    expect(pictureSheets(spec).map((x) => [x.kind, x.place ?? null])).toEqual([["character", null], ["place", "the reef cave"]]);
+    expect(pictureSheets({ ...spec, subject: "" }).map((x) => x.kind)).toEqual(["place"]);
     expect(pictureSheets({ ...spec, scenes: spec.scenes.map((s, i) => (i ? { ...s, source: "own" as const, assetId: id(1) } : s)) })).toEqual([]);
     expect(pictureSheets({ ...spec, backdrop: { libraryId: id(4) } })).toEqual([]);
     expect(pictureSheets(spec)[0].key).toBe(pictureSheets({ ...spec, places: [] })[0].key);
@@ -579,8 +576,8 @@ describe("the writer", () => {
     const told = conceptToSpec(k, { kind: "backdrop", voiceId: "aria", style: "clay", language: "en", animate: 2, backdropId: id(4) })!;
     expect(told).toMatchObject({ backdrop: { libraryId: id(4) }, captions: { style: "bold" } });
     expect(told.scenes.every((s) => s.source === "image")).toBe(true);
-    expect(storyShape(30)).toEqual({ chars: 450, count: 5 });
-    expect(storyShape(160).count).toBe(27);
+    expect(storyShape(30)).toEqual({ chars: 450, count: 7 });
+    expect(storyShape(160).count).toBe(36);
   });
 
   it("plans pictures by scene ID", () => {
@@ -711,15 +708,15 @@ describe("narrated videos in the content run", () => {
     expect(pictures.every((c) => !c.body.image_urls)).toBe(true);
   });
 
-  it("draws reference sheets of the characters and of each place shown three times, and every scene from them", async () => {
+  it("draws reference sheets of the characters and of each place shown twice, and every scene from them", async () => {
     const { env, sqlite, user, spec, run } = await setup();
     const calls = providers();
     const placed = {
       ...spec,
       places: [{ label: "the reef", description: "A bright coral reef, pink corals on the left, a sandy slope" }, { label: "the cave", description: "A low rock cave, purple sponges, blue light" }],
-      scenes: spec.scenes.map((s, i) => ({ ...s, place: ["the reef", "the cave", "the cave", "", "The Cave"][i] })),
+      scenes: spec.scenes.map((s, i) => ({ ...s, place: ["the reef", "the cave", "", "", "The Cave"][i] })),
     };
-    // Sheets: the octopus, and the cave (three AI pictures there); the reef has one, so its words are enough.
+    // Sheets: the octopus, and the cave (two AI pictures there); the reef has one, so its words are enough.
     expect(pictureSheets(storySpec.parse(placed)).map((x) => [x.kind, x.place ?? null])).toEqual([["character", null], ["place", "the cave"]]);
     const created = await call(worker, env, "POST", "/api/videos", { spec: placed, idempotencyKey: crypto.randomUUID() }, user.cookie);
     expect(created).toMatchObject({ status: 201, data: { credits: videoCredits(estimatedSeconds(spec)) + CLIP_CREDITS.regular } });
@@ -732,7 +729,7 @@ describe("narrated videos in the content run", () => {
     const octopus = link(sheet("Character reference sheet")), cave = link(sheet("Establishing shot of the cave"));
     const pictures = calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/") && !c.url.includes("/kling-video/"));
     // The two sheets from their text, then scenes 1, 2, 3 and 5, each from the octopus and, in the cave, the cave.
-    expect(pictures.map((c) => c.body.image_urls ?? null)).toEqual([null, null, [octopus], [octopus, cave], [octopus, cave], [octopus, cave]]);
+    expect(pictures.map((c) => c.body.image_urls ?? null)).toEqual([null, null, [octopus], [octopus, cave], [octopus], [octopus, cave]]);
     expect(pictures[0].body.prompt).toMatch(/^Character reference sheet: a small orange octopus\. .*plain light grey background/);
     expect(pictures[1].body.prompt).toMatch(/^Establishing shot of the cave: A low rock cave, purple sponges, blue light\. A wide view of the whole place, empty/);
     expect(pictures[5].body.prompt).toMatch(/^Draw a new picture of this scene: Doodle of sentence 5\. .*The place, the cave, the same in every scene set there: A low rock cave, purple sponges, blue light\. .*Reference picture 2 shows only how the place is built/);
@@ -1043,7 +1040,7 @@ describe("planning and writing through the API", () => {
     const spec = draft.data.spec;
     expect(spec).toMatchObject({ format: "story", kind: "story", narration: { kind: "voice", voiceId: "aria" }, style: "doodle", subject: "an octopus", headline: { text: "Octopuses are strange" } });
     expect(spec.scenes).toHaveLength(5);
-    expect(seen[1].instructions).toMatch(/about 20 seconds of speech, about 300 characters in all, split into exactly 3 scenes/);
+    expect(seen[1].instructions).toMatch(/about 20 seconds of speech, about 300 characters in all, split into exactly 4 scenes/);
     expect(JSON.parse(seen[1].input).ownerRequest).toBe("octopus facts");
     expect(new Set(models)).toEqual(new Set(["openai/gpt-6-luna"]));
     // Drafting is free: nothing was charged or made.

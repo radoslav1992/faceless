@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Check } from "lucide-react";
 import { useAuth } from "../lib";
 import { Faq } from "./Landing";
-import { BEST_SAVING, creditPacks, paidPlans, planById, plans, PRICE_NOTE, tariffs, TRIAL_DAYS, type Interval } from "../../shared/plans";
+import { creditPacks, FREE_MONTHS_A_YEAR, paidPlans, planById, plans, PRICE_NOTE, tariffs, TRIAL_DAYS, type Interval } from "../../shared/plans";
 import { CLIP_CREDITS, CLIP_SECONDS, NARRATION_SECONDS_PER_CREDIT, PICTURES_PER_CREDIT, SECONDS_PER_CREDIT, videoCredits } from "../../shared/credits";
 
 // Pricing: the plans (monthly or yearly), credit packs, what credits buy and the questions people ask about them.
@@ -19,7 +19,7 @@ export function PlanCards({ current, currentInterval, onChoose, busy }: {
     <div className="stack" style={{ gap: 28, alignItems: "center" }}>
       <div className="billing-toggle" role="group" aria-label="Billing period">
         <button type="button" aria-pressed={interval === "month"} onClick={() => setInterval("month")}>Monthly</button>
-        <button type="button" aria-pressed={interval === "year"} onClick={() => setInterval("year")}>Annual <span className="save">Save {BEST_SAVING}%</span></button>
+        <button type="button" aria-pressed={interval === "year"} onClick={() => setInterval("year")}>Annual <span className="save">{FREE_MONTHS_A_YEAR} months free</span></button>
       </div>
       <div className="plans" style={{ width: "100%" }}>
         {paidPlans.map((id) => {

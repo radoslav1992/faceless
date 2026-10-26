@@ -90,7 +90,7 @@ the Worker reads (`Env` in `server/types.ts`); `.dev.vars.example` lists them fo
 | `FAL_IMAGE_MODEL` | text | Optional picture model: `openai/gpt-image-2.5/sunburst/text-to-image`, `fal-ai/nano-banana-2`, `google/nano-banana-2.1` (it then draws the scene pictures too, with `google/nano-banana-2.1/edit`, unless `FAL_REFERENCE_MODEL` says otherwise) or `fal-ai/flux/schnell` (cheapest); anything else uses the default |
 | `FAL_CLIP_MODEL` | text | Optional: the model scenes are brought to life with, for everyone. `kling` (default: Kling 2.5 Turbo, Standard 720p at regular quality and Pro 1080p at high), `minimax-h3` (MiniMax H3 at 768P, about $0.06/s on fal) or `flux-3-max` (FLUX 3 Max, 720p or 1080p, $0.0425/s on fal's launch offer until Nov 7, 2026, then about $0.17/s at 720p). Credits stay 1 (regular) and 2 (high) per 5 s whatever the model, so check its price against them. Their own sound is never played |
 | `FAL_CLIP_MODEL_ADMIN` | text | Optional: more clip models administrators (`ADMIN_EMAILS`) can choose per scene in the editor to compare them, comma-separated (e.g. `minimax-h3,flux-3-max`). Kling and everyone's model are always offered; customers never see the choice, and a model taken off the list stops being used |
-| `FAL_REFERENCE_MODEL` | text | Optional: the model a video's scene pictures are drawn with from its reference sheets (its characters, and each place shown three times or more), so the scenes keep the same characters, colours, style and places. Default `fal-ai/nano-banana-2/edit`, or `google/nano-banana-2.1/edit` when `FAL_IMAGE_MODEL` is `google/nano-banana-2.1` (another Nano Banana edit endpoint works, e.g. `fal-ai/nano-banana-pro/edit`); `off` draws every picture from its text alone |
+| `FAL_REFERENCE_MODEL` | text | Optional: the model a video's scene pictures are drawn with from its reference sheets (its characters, and each place shown twice), so the scenes keep the same characters, colours, style and places. Default `fal-ai/nano-banana-2/edit`, or `google/nano-banana-2.1/edit` when `FAL_IMAGE_MODEL` is `google/nano-banana-2.1` (another Nano Banana edit endpoint works, e.g. `fal-ai/nano-banana-pro/edit`); `off` draws every picture from its text alone |
 | `FAL_IMAGE_QUALITY` | text | Optional GPT Image 2.5 quality: `low`, `medium`, `high` (default), `xhigh` or `max`. Each step up costs more per picture |
 | `ELEVENLABS_API_KEY` | secret | Narration (`eleven_v4` with timestamps), forced alignment, and Scribe v2 transcription of uploads (the files are uploaded to ElevenLabs from storage, so nothing there depends on ElevenLabs reaching `SITE_URL`). Admin → Voices lists the account's voices to import, so the key needs the Voices read permission (and Text to Speech, Speech to Text, Forced Alignment). A key without Speech to Text shows as `SPEECH_PERMISSION` under Admin → Operations |
 | `CALL_BOOKING_URL` | text | Optional. The https scheduling page (Cal.com, Calendly…) where customers book a 15-minute call for 30 credits; the app fills in their name and email. Without it the offer isn't shown |
@@ -113,10 +113,10 @@ Overview shows which of these are configured.
 
    | Plan | Monthly price | Variable | Yearly price | Variable | Credits a month |
    | --- | --- | --- | --- | --- | --- |
-   | Starter | $19 / month | `STRIPE_PRICE_STARTER` | $168 / year | `STRIPE_PRICE_STARTER_YEARLY` | 30 |
-   | Creator | $35 / month | `STRIPE_PRICE_DAILY` | $288 / year | `STRIPE_PRICE_DAILY_YEARLY` | 60 |
-   | Pro | $59 / month | `STRIPE_PRICE_DOUBLE` | $492 / year | `STRIPE_PRICE_DOUBLE_YEARLY` | 120 |
-   | Studio | $149 / month | `STRIPE_PRICE_STUDIO` | $1,248 / year | `STRIPE_PRICE_STUDIO_YEARLY` | 350 |
+   | Starter | $19 / month | `STRIPE_PRICE_STARTER` | $190 / year | `STRIPE_PRICE_STARTER_YEARLY` | 30 |
+   | Creator | $35 / month | `STRIPE_PRICE_DAILY` | $350 / year | `STRIPE_PRICE_DAILY_YEARLY` | 60 |
+   | Pro | $59 / month | `STRIPE_PRICE_DOUBLE` | $590 / year | `STRIPE_PRICE_DOUBLE_YEARLY` | 120 |
+   | Studio | $149 / month | `STRIPE_PRICE_STUDIO` | $1,490 / year | `STRIPE_PRICE_STUDIO_YEARLY` | 350 |
 
    A subscription's plan is recognised by these IDs, or by a price's lookup key or `metadata.plan` set to `starter`,
    `daily` (Creator), `double` (Pro) or `studio`. Checkout allows promotion codes. Name the products like the plans

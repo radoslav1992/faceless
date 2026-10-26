@@ -17,7 +17,7 @@ export const STORY_MAX_SCENES = 40;
 /** The AI voice's script: about 160 s of speech. */
 export const STORY_MAX_CHARS = 2400;
 /** Scenes are one or two sentences, about 2–8 seconds; the splitter aims for TARGET. */
-export const SCENE_MIN_SECONDS = 2, SCENE_MAX_SECONDS = 8, SCENE_TARGET_SECONDS = 6;
+export const SCENE_MIN_SECONDS = 2, SCENE_MAX_SECONDS = 8, SCENE_TARGET_SECONDS = 4.5;
 /** A scene is never shorter than the renderer's shortest segment (0.5 s). */
 const MIN_SCENE_FRAMES = 15;
 export const FPS = 30;
@@ -422,5 +422,5 @@ export const placeSheetPrompt = (place: StoryPlace, style: StoryStyle, look = ""
 export const clipPrompt = (description: string) =>
   `${description.trim().replace(/([^.!?])$/, "$1.")} Gentle natural motion of the subject and one slow camera move; keep the drawing style, characters and colours exactly as in the image.`.slice(0, 900);
 
-/** The clip length for a scene of `seconds`: 5 s (holding its last frame up to 1.5 s, as scenes run about 6 s), else 10 s. */
-export const clipFor = (seconds: number): 5 | 10 => (seconds <= 6.5 ? 5 : 10);
+/** The clip length that covers a scene of `seconds` (5 s, else 10 s). */
+export const clipFor = (seconds: number): 5 | 10 => (seconds <= 5.2 ? 5 : 10);

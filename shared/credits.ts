@@ -3,7 +3,7 @@
 
 /**
  * A new video: one credit per started 20 seconds, its narration and every AI picture included (a 30-second video is
- * 2 credits). The pictures, their reference sheets, the voice and the script cost about $0.50 for 30 seconds.
+ * 2 credits). Its 7 pictures, 2–4 reference sheets, the voice and the script cost about $0.52 for 30 seconds.
  */
 export const SECONDS_PER_CREDIT = 20;
 /** New narration for a made video's changed words: one credit per started 30 seconds (the voice alone costs little). */

@@ -70,10 +70,10 @@ and the maintenance cron.
   | Plan | Monthly | Yearly | Credits a month | Series | Social accounts | Storage |
   | --- | --- | --- | --- | --- | --- | --- |
   | Free trial (7 days) | $0 | – | 4 in all | 1 | 1 | 1 GB |
-  | Starter | $19 | $168 | 30 | 2 | 1 | 10 GB |
-  | Creator | $35 | $288 | 60 | 5 | 100 | 30 GB |
-  | Pro | $59 | $492 | 120 | 10 | 100 | 60 GB |
-  | Studio | $149 | $1,248 | 350 | 30 | 100 | 200 GB |
+  | Starter | $19 | $190 | 30 | 2 | 1 | 10 GB |
+  | Creator | $35 | $350 | 60 | 5 | 100 | 30 GB |
+  | Pro | $59 | $590 | 120 | 10 | 100 | 60 GB |
+  | Studio | $149 | $1,490 | 350 | 30 | 100 | 200 GB |
 
   The free trial is once per mailbox and its videos carry a small watermark. A yearly plan gives its credits month by
   month. Unused credits roll over while a plan runs, up to three months of the plan's credits plus credit packs.

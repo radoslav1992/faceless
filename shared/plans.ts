@@ -9,6 +9,12 @@ import {
 // `videoMb`: long videos for clips on paid plans) in code. Unused credits roll over from month to month while a plan
 // runs (up to ROLLOVER_MONTHS of them), and subscribers can buy credit packs. Ids never change (subscriptions, Stripe
 // lookup keys and the API use them); names are what people see: "daily" is Creator and "double" is Pro.
+/**
+ * Yearly billing is ten months' price for twelve ("2 months free"): with a 30-second video at 2 credits, every plan
+ * keeps a margin billed yearly too, and bigger plans always have cheaper credits.
+ */
+export const PAID_MONTHS_A_YEAR = 10;
+export const FREE_MONTHS_A_YEAR = 12 - PAID_MONTHS_A_YEAR;
 export const plans = [
   {
     id: "free",
@@ -29,7 +35,7 @@ export const plans = [
     id: "starter",
     name: "Starter",
     monthly: 19,
-    yearly: 168,
+    yearly: 19 * PAID_MONTHS_A_YEAR,
     credits: 30,
     series: 2,
     accounts: 1,
@@ -44,7 +50,7 @@ export const plans = [
     id: "daily",
     name: "Creator",
     monthly: 35,
-    yearly: 288,
+    yearly: 35 * PAID_MONTHS_A_YEAR,
     credits: 60,
     series: 5,
     accounts: 100,
@@ -59,7 +65,7 @@ export const plans = [
     id: "double",
     name: "Pro",
     monthly: 59,
-    yearly: 492,
+    yearly: 59 * PAID_MONTHS_A_YEAR,
     credits: 120,
     series: 10,
     accounts: 100,
@@ -74,7 +80,7 @@ export const plans = [
     id: "studio",
     name: "Studio",
     monthly: 149,
-    yearly: 1248,
+    yearly: 149 * PAID_MONTHS_A_YEAR,
     credits: 350,
     series: 30,
     accounts: 100,
@@ -99,10 +105,6 @@ export const ROLLOVER_MONTHS = 3;
 export const planById = (id: string | undefined): Plan => plans.find((p) => p.id === id) || plans[0];
 /** "Up to N videos a month": 30-second videos. */
 export const videosPerMonth = (p: Plan) => Math.floor(p.credits / videoCredits(30));
-/** What a year costs against twelve months, as a whole percentage. */
-export const yearlySaving = (p: Plan) => (p.monthly ? Math.round((1 - p.yearly / (p.monthly * 12)) * 100) : 0);
-/** The most any paid plan saves billed yearly (the toggle's "Save N%"). */
-export const BEST_SAVING = Math.max(...plans.map(yearlySaving));
 
 /** Credit packs active subscribers can add at any time (they roll over like the plan's own credits). */
 export const creditPacks = [

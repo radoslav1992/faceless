@@ -114,8 +114,9 @@ times come from the voice's word timings, so an edit only moves words between sc
 
 **Credits** (`specCredits`, `shared/credits.ts`): a new video costs 1 credit per started 20 seconds of its estimated
 length (the owner's recording by its own length), everything included: a 30-second video is 2 credits and costs about
-$0.40 to make (5 pictures and 1–3 reference sheets with Nano Banana 2.1 at ~$0.04 each, the voice, the script), which
-leaves a margin on every plan, yearly ones included. Plus per 5 seconds of AI clip 1 credit at
+$0.52 to make (7 pictures and 2–4 reference sheets with Nano Banana 2.1 at ~$0.04 each, the voice, the script), which
+leaves a margin of about 27–59% on every plan, as yearly billing is ten months' price for twelve
+(`PAID_MONTHS_A_YEAR`). Plus per 5 seconds of AI clip 1 credit at
 regular quality (Kling 2.5 Turbo Standard, 720p, ~$0.21 per 5 s on fal) or 2 at high quality (Pro, 1080p, ~$0.35), so
 a clip credit costs at most ~$0.21 to make, below a credit's value on every plan. The quality is the scene's
 `clipQuality` (regular unless chosen), which picks the fal model (`IMAGE_CLIP_MODELS`). An
@@ -231,7 +232,7 @@ The script writer (`writeVideo` in `server/story.ts`, rech-bg's studio writer on
 template's brief, the owner's prompt and recent titles as **data**, never as instructions. Its rules: original content
 only, no existing characters, brands or real private people, no invented statistics or quotes, no hate, sexual
 content, graphic violence or medical, legal or financial advice; spoken text in the narration language, picture
-descriptions in English. It writes about 15 characters per second of the target length as one scene per ~6 s
+descriptions in English. It writes about 15 characters per second of the target length as one scene per ~4.5 s
 (3–40 scenes), each with a picture description and one or two key words, plus the recurring characters (described
 once, at most two, each with a label every picture uses), the look of the whole video, the places the scenes are set
 in (`places`: at most four, each a label and a description of its layout, furniture, light and colours; each scene's
@@ -303,8 +304,8 @@ D1 batch, so the credits are reserved by the triggers before any work starts. It
    video and only while the model is on the list; the render never plays a clip's own sound).
    Every picture's prompt carries the subject, the look and the description of the scene's place. So the scenes look
    like one film, the video's reference sheets are drawn first from their text (`pictureSheets`): its recurring
-   characters alone on a plain background (when it has a subject), and each place at least three AI pictures are set
-   in, empty (for two, a sheet would cost as much as it saves). Every scene's picture is then drawn from the sheets it needs (`fal-ai/nano-banana-2/edit`, through
+   characters alone on a plain background (when it has a subject), and each place at least two AI pictures are set
+   in, empty. Every scene's picture is then drawn from the sheets it needs (`fal-ai/nano-banana-2/edit`, through
    capability links): the characters' sheet, and its place's. The prompt gives the scene first (the writer starts
    each picture with its camera position) and says what each sheet is for, never the picture to draw, so no scene's
    framing or mistake is carried into another. Sheets are kept with the video (`meta.sheet`, the fingerprint of their
