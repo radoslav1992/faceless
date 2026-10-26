@@ -40,7 +40,7 @@ function AdminConsole() {
       <div className="page-head">
         <div>
           <h1>Admin</h1>
-          <p>Service health and operations, withdrawals and free months, affiliates and calls, narration voices, presenters, the shared library, style examples and contact messages.</p>
+          <p>Service health and operations, withdrawals and free plans, affiliates and calls, narration voices, presenters, the shared library, style examples and contact messages.</p>
         </div>
       </div>
       <div style={{ marginBottom: 20 }}>
@@ -80,7 +80,7 @@ function OverviewTab() {
   if (error || !data) return <LoadError error={error || "Not available."} retry={() => void reload()} />;
   const stats: { label: string; value: number; sub?: string; bad?: boolean }[] = [
     { label: "Users", value: data.users, sub: `+${number(data.newUsers)} in the last 24 h` },
-    { label: "Paying", value: data.paying, sub: `Active subscriptions${data.granted ? ` · ${number(data.granted)} free month${data.granted === 1 ? "" : "s"}` : ""}` },
+    { label: "Paying", value: data.paying, sub: `Active subscriptions${data.granted ? ` · ${number(data.granted)} on a free plan` : ""}` },
     { label: "Videos made", value: data.videos, sub: "Last 24 h" },
     { label: "Active series", value: data.series, sub: "On autopilot" },
     { label: "Runs in progress", value: data.activeRuns, sub: "Queued or running" },

@@ -740,7 +740,7 @@ const libraryTitles: Record<LibraryPickerKind, string> = { clip: "Choose a clip"
 const libraryWords: Record<LibraryPickerKind, string> = { clip: "clips", music: "tracks", image: "pictures", scene: "clips and pictures" };
 const PAGE = 12;
 /** A value that follows `value` once it has stopped changing for `ms`. */
-function useSettled<T>(value: T, ms: number) {
+export function useSettled<T>(value: T, ms: number) {
   const [settled, setSettled] = useState(value);
   useEffect(() => {
     const t = setTimeout(() => setSettled(value), ms);

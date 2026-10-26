@@ -47,20 +47,20 @@ function priceIds(e: Env, interval: Interval = "month"): Record<PaidPlanId, stri
     : { starter: e.STRIPE_PRICE_STARTER, daily: e.STRIPE_PRICE_DAILY, double: e.STRIPE_PRICE_DOUBLE, studio: e.STRIPE_PRICE_STUDIO };
 }
 const DAY_MS = 86400000;
+/** `n` calendar months after `start`; a start on the 31st falls back to the month's last day, as Stripe does. */
+export function addMonths(start: number, n: number) {
+  const from = new Date(start * 1000), d = new Date(start * 1000);
+  d.setUTCMonth(from.getUTCMonth() + n);
+  if (d.getUTCDate() !== from.getUTCDate()) d.setTime(d.getTime() - d.getUTCDate() * DAY_MS);
+  return Math.floor(d.getTime() / 1000);
+}
 /**
- * The month of a paid period `t` falls in: monthly periods are one month (0); a yearly period is cut into calendar
- * months from its start, so its credits come month by month like a monthly plan's.
+ * The month of a paid period `t` falls in: monthly periods are one month (0); a longer one (yearly, or a grant of
+ * several months) is cut into calendar months from its start, so its credits come month by month like a monthly plan's.
  */
 export function periodMonth(start: number, end: number, t: number) {
   if (end - start <= 40 * DAY) return { index: 0, start, end };
-  const from = new Date(start * 1000);
-  const at = (n: number) => {
-    const d = new Date(from.getTime());
-    d.setUTCMonth(from.getUTCMonth() + n);
-    // A start on the 31st falls back to the month's last day, as Stripe does.
-    if (d.getUTCDate() !== from.getUTCDate()) d.setTime(d.getTime() - d.getUTCDate() * DAY_MS);
-    return Math.floor(d.getTime() / 1000);
-  };
+  const at = (n: number) => addMonths(start, n);
   let index = 0;
   while (index < 12 && at(index + 1) <= t) index++;
   return { index, start: at(index), end: Math.min(end, at(index + 1)) };

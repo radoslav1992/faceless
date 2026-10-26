@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Stripe from "stripe";
 import worker from "../server/index";
 import { maintenance, drainCleanup } from "../server/maintenance";
-import { confirmPendingContracts, reconcileStripe, webhook } from "../server/billing";
+import { addMonths, confirmPendingContracts, reconcileStripe, webhook } from "../server/billing";
 import { applyRetention } from "../server/retention";
 import { attention, operationsSnapshot, reviewRuns } from "../server/operations";
 import { IMMEDIATE_START_TEXT, IMMEDIATE_START_VERSION, withdrawalRefund } from "../shared/withdrawal";
@@ -41,7 +41,7 @@ describe("administrator-only routes", () => {
       ["GET", "/api/admin/operations"], ["GET", "/api/admin/overview"], ["GET", "/api/admin/messages"],
       ["GET", "/api/admin/withdrawals"], ["GET", "/api/admin/withdrawals/quote?email=a@example.com"],
       ["POST", "/api/admin/withdrawals", { email: "a@example.com", refund: 0 }], ["GET", "/api/admin/grants"],
-      ["POST", "/api/admin/grants", { email: user.email, plan: "studio" }], ["DELETE", "/api/admin/grants/grant_x"],
+      ["GET", "/api/admin/grants/accounts?q=example"], ["POST", "/api/admin/grants", { email: user.email, plan: "studio" }], ["DELETE", "/api/admin/grants/grant_x"],
       ["GET", "/api/admin/library"], ["PUT", "/api/admin/library/file?kind=music&name=x&duration=10", {}],
       ["PUT", "/api/admin/library/item1/thumb", {}], ["PATCH", "/api/admin/library/item1", { active: false }], ["DELETE", "/api/admin/library/item1"],
     ];
@@ -290,14 +290,15 @@ describe("withdrawal within 14 days", () => {
 /* ------------------------------------------------------------------------------------------------ grants */
 
 describe("plan grants", () => {
-  it("give a plan with all its credits for 30 days without Stripe, and end it", async () => {
+  it("give a plan with all its credits for a calendar month without Stripe, and end it", async () => {
     const { env, sqlite, admin, user } = admins();
     expect((await call(worker, env, "POST", "/api/admin/grants", { email: "nobody@example.com", plan: "studio" }, admin.cookie)).status).toBe(404);
     expect((await call(worker, env, "POST", "/api/admin/grants", { email: user.email, plan: "free" }, admin.cookie)).status).toBe(400);
     const r = await call(worker, env, "POST", "/api/admin/grants", { email: ` ${user.email.toUpperCase()} `, plan: "studio" }, admin.cookie);
     expect(r.status).toBe(201);
     expect(r.data.id).toMatch(/^grant_/);
-    expect(r.data.end - now()).toBeGreaterThan(29 * DAY);
+    const start = (sqlite.prepare("SELECT period_start FROM subscriptions WHERE id=?").get(r.data.id) as any).period_start;
+    expect(r.data.end).toBe(addMonths(start, 1));
     expect(r.data.paidPlan).toBeNull();
     expect(await me(env, user.cookie)).toMatchObject({ plan: "studio", limit: 350, used: 0, granted: true, hasSubscription: false, periodEnd: r.data.end, trialEndsAt: null });
     expect(sqlite.prepare("SELECT max_bytes FROM media_limits WHERE user_id=?").get(user.id)).toEqual({ max_bytes: 200 * 1024 ** 3 });
@@ -307,6 +308,49 @@ describe("plan grants", () => {
     expect(await me(env, user.cookie)).toMatchObject({ plan: "free", granted: false });
     expect((await call(worker, env, "DELETE", `/api/admin/grants/${r.data.id}`, undefined, admin.cookie)).status).toBe(404);
     expect((await call(worker, env, "DELETE", "/api/admin/grants/sub_1", undefined, admin.cookie)).status).toBe(404);
+  });
+
+  it("last 1, 3, 6 or 12 months, each month with the plan's full credits and nothing carried over", async () => {
+    const { env, sqlite, admin, user } = admins();
+    expect((await call(worker, env, "POST", "/api/admin/grants", { email: user.email, plan: "studio", months: 2 }, admin.cookie)).status).toBe(400);
+    const g = (await call(worker, env, "POST", "/api/admin/grants", { email: user.email, plan: "studio", months: 3 }, admin.cookie)).data;
+    const start = (sqlite.prepare("SELECT period_start FROM subscriptions WHERE id=?").get(g.id) as any).period_start;
+    expect(g.end).toBe(addMonths(start, 3));
+    expect(await me(env, user.cookie)).toMatchObject({ plan: "studio", used: 0, limit: 350, granted: true, renewsAt: addMonths(start, 1), periodEnd: g.end });
+    // Into its second month: the first month's credits were nearly all used; the second starts full.
+    const s0 = now() - 40 * DAY;
+    sqlite.prepare("UPDATE subscriptions SET period_start=?,period_end=? WHERE id=?").run(s0, addMonths(s0, 3), g.id);
+    sqlite.prepare("INSERT INTO usage_windows(id,user_id,plan,quota,used,created_at) VALUES (?,?,'studio',350,300,?)").run(`${user.id}:${g.id}:${s0}`, user.id, s0);
+    expect(await me(env, user.cookie)).toMatchObject({ plan: "studio", used: 0, limit: 350, carried: 0, granted: true, renewsAt: addMonths(s0, 2), periodEnd: addMonths(s0, 3) });
+    expect(windowOf(sqlite, `${user.id}:${g.id}:${s0}:1`)).toEqual({ used: 0, quota: 350 });
+    sqlite.prepare("UPDATE usage_windows SET used=20 WHERE id=?").run(`${user.id}:${g.id}:${s0}:1`);
+    // The list counts what all its months used.
+    const list = (await call(worker, env, "GET", "/api/admin/grants", undefined, admin.cookie)).data;
+    expect(list.grants).toMatchObject([{ id: g.id, plan: "studio", start: s0, end: addMonths(s0, 3), used: 320 }]);
+    const year = (await call(worker, env, "POST", "/api/admin/grants", { email: user.email, plan: "starter", months: 12 }, admin.cookie)).data;
+    const from = (sqlite.prepare("SELECT period_start FROM subscriptions WHERE id=?").get(year.id) as any).period_start;
+    expect(year.end).toBe(addMonths(from, 12));
+    expect(await me(env, user.cookie)).toMatchObject({ plan: "starter", used: 0, granted: true, periodEnd: year.end });
+  });
+
+  it("find accounts by part of their email, with the plan each pays for and a running free plan", async () => {
+    const { env, sqlite, admin, user } = admins();
+    const other = signedIn(sqlite, "maria_ivanova@studio.test");
+    sqlite.prepare("INSERT INTO subscriptions(id,user_id,plan,status,period_start,period_end) VALUES ('sub_m',?,'double','active',?,?)").run(other.id, now() - 60, now() + 20 * DAY);
+    const g = (await call(worker, env, "POST", "/api/admin/grants", { email: user.email, plan: "daily", months: 6 }, admin.cookie)).data;
+    const find = async (q: string) => call(worker, env, "GET", `/api/admin/grants/accounts?q=${encodeURIComponent(q)}`, undefined, admin.cookie);
+    expect((await find("a")).status).toBe(400);
+    expect((await find(user.email.slice(0, 9).toUpperCase())).data.accounts).toEqual([
+      { id: user.id, email: user.email, name: "Test User", createdAt: expect.any(Number), paidPlan: null, grantId: g.id, grantPlan: "daily", grantEnd: g.end },
+    ]);
+    expect((await find("IVANOVA@")).data.accounts).toMatchObject([{ id: other.id, paidPlan: "double", grantId: null, grantPlan: null }]);
+    // Emails starting with the search come first; % and _ are matched as they are.
+    expect((await find("example.com")).data.accounts.map((a: any) => a.email)).toEqual([admin.email, user.email].sort());
+    expect((await find("ad")).data.accounts.map((a: any) => a.email)).toEqual([admin.email]);
+    expect((await find("a_i")).data.accounts.map((a: any) => a.email)).toEqual([other.email]);
+    expect((await find("%%")).data.accounts).toEqual([]);
+    expect((await find("a_m")).data.accounts).toEqual([]);
+    expect((await find("nobody")).data.accounts).toEqual([]);
   });
 
   it("start a new month with a fresh usage window when given again, and end by themselves", async () => {

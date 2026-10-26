@@ -1,7 +1,7 @@
 # Operations runbook
 
 How to keep Hookstreak Shorts running after launch: what alerts you, where to look, what the failure codes mean, what to do
-when a provider fails, and how to handle withdrawals and free months. Setting up from scratch is in
+when a provider fails, and how to handle withdrawals and free plans. Setting up from scratch is in
 [DEPLOYMENT.md](DEPLOYMENT.md); what is kept for how long is in [PRIVACY.md](PRIVACY.md).
 
 ## 1. Signals at a glance
@@ -10,7 +10,7 @@ when a provider fails, and how to handle withdrawals and free months. Setting up
 | --- | --- | --- |
 | E-mail "Hookstreak Shorts: maintenance needs a look" | inboxes in `ADMIN_EMAILS` | The hourly maintenance found something overdue or failing (section 3) |
 | Admin → **Operations** | the app (`/app/admin?tab=operations`) | Failures of the last 24 hours by area and code, work still open, accounts to reconnect, cleanup, Stripe, manual checks, the last maintenance run. Same data: `GET /api/admin/operations` |
-| Admin → **Overview** | the app | Users, paying customers (free months counted apart), videos, active series, runs and publications of the last 24 hours, and which features are configured |
+| Admin → **Overview** | the app | Users, paying customers (free plans counted apart), videos, active series, runs and publications of the last 24 hours, and which features are configured |
 | `GET /api/health` | an external uptime monitor | `200 {"ok":true}` when the Worker runs and D1 answers, `503 {"ok":false}` otherwise. Uncached |
 | Workers Logs | Cloudflare → Workers & Pages → `faceless` → Logs | Every log line quoted in this file |
 | Workflows | Cloudflare → Workflows → `faceless-content`, `faceless-publish` | One instance per run (its run ID), episode (`episode-<series>-<slot>…`), upload check (`inspect-<file>`), "Find speech" (`speech-<file>-<time>`) or publication attempt (`pub-<publication>-<attempt>`) |
@@ -25,15 +25,15 @@ Workers Logs, alert on `Maintenance attention`, `Maintenance stage failed`, `Sto
 Sign in with a confirmed address listed in `ADMIN_EMAILS`; **Admin** appears in the sidebar (`/app/admin`). Everything
 under `/api/admin` answers 404 to anyone else.
 
-- **Overview**: counts (users and new users, paying customers, free months, videos made and published in 24 hours,
+- **Overview**: counts (users and new users, paying customers, free plans, videos made and published in 24 hours,
   active series, active and failed runs, failed publications) and the configuration: rendering (`MEDIA_ENABLED`), fal,
   ElevenLabs, HeyGen, Stripe, billing, token encryption, TikTok, Instagram, YouTube.
 - **Operations**: the last hourly maintenance and its failed stages (a warning when none finished in 2 hours); tiles
   for runs open over an hour, publications publishing over an hour, scheduled posts overdue by 15 minutes and cleanup
   waiting over a day; failures of the last 24 hours (runs by service and code, publishing by network and message, stats
   reads by network, transcriptions); accounts to reconnect by network; Stripe (the nightly reconciliation, renewals
-  overdue, the last webhook event, free months running); work set aside for a manual check (section 5).
-- **Billing**: *Withdrawal within 14 days* (section 6) and *Free month of a plan* (section 7).
+  overdue, the last webhook event, free plans running); work set aside for a manual check (section 5).
+- **Billing**: *Withdrawal within 14 days* (section 6) and *Give a plan for free* (section 7).
 - **Growth**: the **affiliates** (visits, sign-ups and paying customers, balances on hold, available and paid, and
   whether each still earns) and the **calls for credits**. Once a month, send each available balance of $50 or more
   by PayPal to the affiliate's payout address, then **Record payout** (optionally with the PayPal transaction ID): it
@@ -220,15 +220,17 @@ the withdrawal shows "Refund by hand" and `Withdrawal refund failed` is logged: 
 refund or a dispute made directly in Stripe also ends the plan by itself (webhook `charge.refunded` /
 `charge.dispute.created`).
 
-## 7. Free months (plan grants)
+## 7. Free plans (plan grants)
 
-Admin → **Billing** → Free month of a plan gives a person (they need an account) a paid plan for 30 days without
-Stripe: testers, partners, support cases. A grant is a `subscriptions` row with an ID starting `grant_`, so it gets
-its own usage window with the plan's full credits and ends by itself. **New month** replaces a running grant with a
-fresh one; **End now** ends it.
+Admin → **Billing** → Give a plan for free gives a person a paid plan for 1, 3, 6 or 12 calendar months without
+Stripe: testers, partners, support cases. Type part of their email to find the account (they need one; the results
+show what each pays for and any free plan running), choose it, then the plan and how long. A grant is a
+`subscriptions` row with an ID starting `grant_`, so each of its months gets its own usage window with the plan's full
+credits (unused credits don't carry over), and it ends by itself. Giving a plan again, or **Start again**, replaces a
+running grant with a fresh one; **End now** ends it.
 
 - A running grant wins over a paid plan unless the person pays for a higher one; afterwards they return to their paid
-  plan or the free plan (`allowance` in `server/billing.ts`). Billing shows "Free month" and the end date.
+  plan or the free plan (`allowance` in `server/billing.ts`). Billing shows "Free until" and the end date.
 - Grants never reach Stripe: the nightly reconciliation skips them, refunds, disputes and withdrawals never touch their
   window, and the Customer Portal is offered only for a real Stripe subscription.
 - If the person also pays in Stripe, the subscription keeps billing while the grant runs; the admin page says so.

@@ -16,7 +16,7 @@ export type User = {
   id: string; name: string; email: string; verified: boolean; admin: boolean;
   plan: PlanId; interval: Interval; used: number; limit: number; carried: number; topped: number;
   trialEndsAt: number | null; trialEnded: boolean; renewsAt: number | null; periodEnd: number | null; hasSubscription: boolean; paymentIssue: boolean;
-  /** The plan is an administrator's free month (until periodEnd), not a paid subscription. */
+  /** The plan is an administrator's gift (until periodEnd), not a paid subscription. */
   granted?: boolean;
   /** Administrators: the clip models they can choose per scene to compare them. */
   clipModels?: ClipModel[];

@@ -129,7 +129,7 @@ export function BillingPage() {
             <span className="small muted">Current plan</span>
             <h2 id="current-plan" style={{ fontSize: 26, marginTop: 2 }}>
               {plan.name}
-              {!free && <span className="muted" style={{ fontSize: 16, fontWeight: 500, fontFamily: "var(--font)" }}> · {granted ? "free month" : user.interval === "year" ? `$${plan.yearly}/year` : `$${plan.monthly}/month`}</span>}
+              {!free && <span className="muted" style={{ fontSize: 16, fontWeight: 500, fontFamily: "var(--font)" }}> · {granted ? "free" : user.interval === "year" ? `$${plan.yearly}/year` : `$${plan.monthly}/month`}</span>}
             </h2>
             <p>
               {free
@@ -137,12 +137,15 @@ export function BillingPage() {
                   ? "Your free trial has ended. Your videos are still here; choose a plan to keep making new ones."
                   : <><Clock size={14} aria-hidden="true" style={{ verticalAlign: -2 }} /> Free trial · {timeLeft(user.trialEndsAt)} (until {formatDate(user.trialEndsAt)})</>
                 : user.renewsAt
-                  ? `New credits on ${formatDate(user.renewsAt)}. What you don't use rolls over.`
+                  ? granted
+                    // A free plan's months start full and leave nothing behind (see allowance in server/billing.ts).
+                    ? user.renewsAt < user.periodEnd! ? `New credits on ${formatDate(user.renewsAt)}. Unused credits don't carry over.` : `Your credits last until ${formatDate(user.renewsAt)}.`
+                    : `New credits on ${formatDate(user.renewsAt)}. What you don't use rolls over.`
                   : plan.description}
             </p>
           </div>
           {free && user.trialEnded && <span className="chip red">Trial ended</span>}
-          {granted && <span className="chip green">Free month</span>}
+          {granted && <span className="chip green">Free until {formatDate(user.periodEnd!)}</span>}
         </div>
         <div className="usage">
           <div className="stack" style={{ gap: 8 }}>
