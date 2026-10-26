@@ -112,13 +112,17 @@ and a scene still to make is labelled with what it will be. Scenes hold words, n
 times come from the voice's word timings, so an edit only moves words between scenes and keeps the paid recording
 (`narrationKey`: voice, length and a fingerprint of the script).
 
-**Credits** (`specCredits`, `shared/credits.ts`): a new video costs 1 credit per started 30 seconds of its estimated
-length (the owner's recording by its own length), everything included, plus per 5 seconds of AI clip 1 credit at
+**Credits** (`specCredits`, `shared/credits.ts`): a new video costs 1 credit per started 20 seconds of its estimated
+length (the owner's recording by its own length), everything included: a 30-second video is 2 credits and costs about
+$0.52 to make (7 pictures and 2–4 reference sheets with Nano Banana 2.1 at ~$0.04 each, the voice, the script), which
+leaves a margin of about 27–59% on every plan, as yearly billing is ten months' price for twelve
+(`PAID_MONTHS_A_YEAR`). Plus per 5 seconds of AI clip 1 credit at
 regular quality (Kling 2.5 Turbo Standard, 720p, ~$0.21 per 5 s on fal) or 2 at high quality (Pro, 1080p, ~$0.35), so
 a clip credit costs at most ~$0.21 to make, below a credit's value on every plan. The quality is the scene's
 `clipQuality` (regular unless chosen), which picks the fal model (`IMAGE_CLIP_MODELS`). An
-edit of a made video costs only what it asks for again: new narration when the words or voice changed, 1 credit per
-5 new pictures, and new clips. Changes to the caption, hashtags or title need no new render; other free changes
+edit of a made video costs only what it asks for again: new narration when the words or voice changed (1 credit per
+started 30 seconds), 1 credit per 5 new pictures, and new clips. A video never made (its first run failed and was
+refunded) costs what a new one does when it is made again, whatever its failed run made. Changes to the caption, hashtags or title need no new render; other free changes
 (subtitles, music, transitions, timing) re-render for 0 credits.
 
 **Voices** (`server/voices.ts`, `voices` table, Admin → Voices in `src/app/AdminVoices.tsx`). Administrators import a

@@ -94,7 +94,7 @@ function stripeApi(o: { started?: number; refundFails?: boolean; subscriptions?:
   });
   const prices: Record<string, any> = {
     price_daily: { id: "price_daily", active: true, currency: "usd", unit_amount: 3500, recurring: { interval: "month", interval_count: 1 } },
-    price_daily_yearly: { id: "price_daily_yearly", active: true, currency: "usd", unit_amount: 28800, recurring: { interval: "year", interval_count: 1 } },
+    price_daily_yearly: { id: "price_daily_yearly", active: true, currency: "usd", unit_amount: 35000, recurring: { interval: "year", interval_count: 1 } },
   };
   vi.stubGlobal("fetch", async (input: string, init: any = {}) => {
     const url = String(input), method = init.method || "GET";
@@ -205,7 +205,7 @@ describe("checkout with the request for immediate start", () => {
     stripeApi({ interval: "year" });
     await webhook(await event("checkout.session.completed", { id: "cs_test_1", object: "checkout.session", mode: "subscription", subscription: "sub_1" }), env);
     expect(env.EMAIL.sent).toHaveLength(1);
-    expect(env.EMAIL.sent[0].text).toContain("$288 a year");
+    expect(env.EMAIL.sent[0].text).toContain("$350 a year");
     expect(env.EMAIL.sent[0].text).toContain("renews every year");
   });
 

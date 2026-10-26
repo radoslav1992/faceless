@@ -133,9 +133,11 @@ export function VideoPage() {
   useEffect(() => { if (video?.spec) setSpec(video.spec); }, [video?.revision, video?.renderStatus]); // eslint-disable-line react-hooks/exhaustive-deps
   const changed = !!spec && !!video?.spec && JSON.stringify(spec) !== JSON.stringify(video.spec);
   const rerender = !!spec && !!video?.spec && visualPart(spec) !== visualPart(video.spec);
+  // A video never made (its first run failed and was refunded) costs what a new one does, as the server charges.
   const cost = useMemo(() => (spec && video?.spec && rerender
-    ? spec.format === "highlight" && !video.videoAssetId ? specCredits(spec, true) : specCredits(spec, false, undefined, video.spec)
+    ? !video.videoAssetId ? specCredits(spec, true) : specCredits(spec, false, undefined, video.spec)
     : 0), [spec, rerender, video?.spec, video?.videoAssetId]);
+  const retryCost = video?.spec ? (!video.videoAssetId ? specCredits(video.spec, true) : specCredits(video.spec, false, undefined, video.spec)) : 0;
   const clip = spec?.format === "highlight";
   if (error) return <div className="page"><p className="notice bad">{error}</p></div>;
   if (!video || !spec) return <div className="loading-page" role="status">Loading…</div>;
@@ -195,7 +197,7 @@ export function VideoPage() {
             ? <video src={fileUrl(video.videoAssetId)} poster={fileUrl(video.coverAssetId)} controls playsInline />
             : <div className="making-big">
               {making(video) ? <><span className="spinner big" aria-hidden="true" /><strong>{phaseText(video)}…</strong><span className="small muted">Usually a few minutes. You can leave this page.</span></>
-                : <><strong>This video couldn't be made</strong><span className="small muted">{video.renderError}</span><button type="button" className="btn primary" onClick={retry}><RotateCcw size={16} aria-hidden="true" /> Try again</button></>}
+                : <><strong>This video couldn't be made</strong><span className="small muted">{video.renderError}</span><button type="button" className="btn primary" onClick={retry}><RotateCcw size={16} aria-hidden="true" /> Try again{retryCost ? ` · ${creditsLabel(retryCost)}` : " · free"}</button></>}
             </div>}
         </div>
         <PostPanel video={video} onDone={() => void reload()} />

@@ -186,20 +186,23 @@ describe("the format", () => {
     expect(voice).toBe(1);
     // New: its length (voice and every picture included) and the clips; 17 s of speech is one credit.
     expect(specCredits(spec, true)).toBe(videoCredits(estimatedSeconds(spec)) + CLIP_CREDITS.regular + CLIP_CREDITS.regular * 2);
-    expect(specCredits(spec, true, 61)).toBe(3 + CLIP_CREDITS.regular * 3);
+    expect([videoCredits(20), videoCredits(21), videoCredits(30), videoCredits(60), videoCredits(61)]).toEqual([1, 2, 2, 3, 4]);
+    expect(specCredits(spec, true, 61)).toBe(videoCredits(61) + CLIP_CREDITS.regular * 3);
     // An edit: the voice again, the two missing pictures (1 credit per 5), the clips.
     expect(specCredits(spec, false)).toBe(voice + pictureCredits(2) + CLIP_CREDITS.regular * 3);
     // High quality: 2 credits per 5 s instead of 1, clip by clip.
     expect([CLIP_CREDITS.regular, CLIP_CREDITS.high]).toEqual([1, 2]);
     const high = story({ ...spec, scenes: spec.scenes.map((s, i) => (i === 2 ? { ...s, clipQuality: "high" } : s)) });
-    expect(specCredits(high, true, 61)).toBe(3 + CLIP_CREDITS.regular + CLIP_CREDITS.high * 2);
+    expect(specCredits(high, true, 61)).toBe(videoCredits(61) + CLIP_CREDITS.regular + CLIP_CREDITS.high * 2);
     expect(pendingMedia(high).filter((m) => m.kind === "clip").map((m) => [m.seconds, m.quality])).toEqual([[5, "regular"], [10, "high"]]);
-    // The advertised price: a minute of speech is two credits (the finished video's padding is never charged).
+    // The advertised price: 30 seconds of speech is two credits and a minute three (the finished video's padding is
+    // never charged).
     const minute = (n: number) => ({ text: `${"word ".repeat(Math.floor(n / 5))}`.trim().padEnd(n, "x") + ".", description: "A doodle" });
     const sixty = story({ scenes: [minute(447), minute(450)] });
     expect(storyScript(sixty.scenes)).toHaveLength(900);
-    expect(specCredits(sixty, true)).toBe(2);
-    expect(specCredits(story({ scenes: [minute(448), minute(450)] }), true)).toBe(3);
+    expect(specCredits(sixty, true)).toBe(3);
+    expect(specCredits(story({ scenes: [minute(448), minute(450)] }), true)).toBe(4);
+    expect(specCredits(story({ scenes: [minute(222), minute(225)] }), true)).toBe(2);
     expect(pictureCredits(5)).toBe(1);
     expect(pictureCredits(6)).toBe(2);
     // Pictures first, then the clips made from them.
@@ -912,6 +915,27 @@ describe("narrated videos in the content run", () => {
     env.CONTENT.created.push({ params: { runId: (sqlite.prepare("SELECT id FROM runs WHERE video_id=?").get(post.id) as any).id } });
     await run();
     expect(used()).toBe(0);
+  });
+
+  it("charges a retry of a video that was never made what a new one costs, whatever its failed run made", async () => {
+    const { env, user, spec, used, run } = await setup();
+    let refusing = true;
+    providers({ refuse: (model) => refusing && model === "fal-ai/nano-banana-2/edit" });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const created = await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    await run();
+    const get = async () => (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
+    const failed = await get();
+    expect([failed.renderStatus, used()]).toEqual(["failed", 0]);
+    // Priced as an edit it would cost more (the voice, the four pictures and the clip still to make); a retry costs
+    // what the new video did.
+    expect(specCredits(failed.spec, false, undefined, failed.spec)).toBeGreaterThan(created.data.credits);
+    refusing = false;
+    const retried = await call(worker, env, "POST", `/api/videos/${failed.id}/render`, { idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(retried.data.credits).toBe(created.data.credits);
+    await run();
+    expect([(await get()).renderStatus, used()]).toEqual(["ready", created.data.credits]);
   });
 
   it("times a voice without timings by forced alignment of the recording, never paying for the voice twice", async () => {

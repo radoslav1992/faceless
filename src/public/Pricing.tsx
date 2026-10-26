@@ -3,7 +3,8 @@ import { Link } from "react-router-dom";
 import { Check } from "lucide-react";
 import { useAuth } from "../lib";
 import { Faq } from "./Landing";
-import { BEST_SAVING, creditPacks, paidPlans, planById, plans, PRICE_NOTE, tariffs, TRIAL_DAYS, type Interval } from "../../shared/plans";
+import { creditPacks, FREE_MONTHS_A_YEAR, paidPlans, planById, plans, PRICE_NOTE, tariffs, TRIAL_DAYS, type Interval } from "../../shared/plans";
+import { CLIP_CREDITS, CLIP_SECONDS, NARRATION_SECONDS_PER_CREDIT, PICTURES_PER_CREDIT, SECONDS_PER_CREDIT, videoCredits } from "../../shared/credits";
 
 // Pricing: the plans (monthly or yearly), credit packs, what credits buy and the questions people ask about them.
 
@@ -18,7 +19,7 @@ export function PlanCards({ current, currentInterval, onChoose, busy }: {
     <div className="stack" style={{ gap: 28, alignItems: "center" }}>
       <div className="billing-toggle" role="group" aria-label="Billing period">
         <button type="button" aria-pressed={interval === "month"} onClick={() => setInterval("month")}>Monthly</button>
-        <button type="button" aria-pressed={interval === "year"} onClick={() => setInterval("year")}>Annual <span className="save">Save {BEST_SAVING}%</span></button>
+        <button type="button" aria-pressed={interval === "year"} onClick={() => setInterval("year")}>Annual <span className="save">{FREE_MONTHS_A_YEAR} months free</span></button>
       </div>
       <div className="plans" style={{ width: "100%" }}>
         {paidPlans.map((id) => {
@@ -70,11 +71,11 @@ export function CreditPacks({ onBuy, busy, allowed }: { onBuy?: (pack: string) =
 }
 
 const pricingFaq: [string, string][] = [
-  ["What is a credit?", "Credits pay for making videos. A new video costs 1 credit per started 30 seconds of narration — so a one-minute video is 2 credits — with the script, the voice and every picture included."],
+  ["What is a credit?", `Credits pay for making videos. A new video costs 1 credit per started ${SECONDS_PER_CREDIT} seconds of narration — so a 30-second video is ${videoCredits(30)} credits and a one-minute video ${videoCredits(60)} — with the script, the voice and every picture included.`],
   ["Do unused credits roll over?", "Yes. Whatever you don't use carries into the next month while your plan runs, up to three months' worth of your plan's credits plus any packs you bought."],
   ["Can I mix video types on one plan?", "Yes. Every plan includes every video type, art style, voice and language. Credits work the same for all of them."],
   ["What happens if I run out of credits?", "Nothing breaks. Series skip their next episodes until credits are back (we e-mail you), and you can add a credit pack or upgrade at any time."],
-  ["What do edits cost?", "Changing words on screen, subtitles, music, transitions or timing is free. Only new AI work costs credits: new narration for changed words (1 credit per 30 seconds), new pictures (1 credit per 5) and animated scenes (1 credit per 5 seconds, 2 in high quality)."],
+  ["What do edits cost?", `Changing words on screen, subtitles, music, transitions or timing is free. Only new AI work costs credits: new narration for changed words (1 credit per ${NARRATION_SECONDS_PER_CREDIT} seconds), new pictures (1 credit per ${PICTURES_PER_CREDIT}) and animated scenes (${CLIP_CREDITS.regular} credit per ${CLIP_SECONDS} seconds, ${CLIP_CREDITS.high} in high quality).`],
   [`What does the free trial include?`, `${planById("free").credits} credits to try every video type and one series, for ${TRIAL_DAYS} days (one social account once posting opens). No card needed. Trial videos carry a small watermark.`],
 ];
 

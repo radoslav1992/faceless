@@ -90,7 +90,7 @@ heading receives focus and the title updates; icons beside text are `aria-hidden
 - **Tools** (`/tools`, `/tools/:slug`): one page per template with a `tool` entry (text to video, scary story, story,
   POV, brainrot mashup, storytime), each a hero with a short form that opens Create with that style.
 - **Styles** (`/styles`): the faceless styles by category and the 15 art styles as drawn samples.
-- **Pricing** (`/pricing`): a Monthly / Annual toggle with "Save N%" (the best yearly saving, from `shared/plans.ts`),
+- **Pricing** (`/pricing`): a Monthly / Annual toggle with "2 months free" (yearly is ten months' price, `shared/plans.ts`),
   the four paid plans (yearly shows the monthly equivalent and the yearly amount), credit packs, *What credits buy*
   (the tariffs the server charges by), FAQ and the note on USD and taxes.
 - **MCP** (`/mcp`): three steps (create an API key, add the server, ask), the tools the assistant gets, and *API

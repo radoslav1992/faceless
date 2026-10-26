@@ -11,6 +11,7 @@ import { categories, templates, tools, toolBySlug, type TemplateId } from "../..
 import { storyStyleIds, storyStyles } from "../../shared/story";
 import { languages } from "../../shared/series";
 import { PRODUCT } from "../../shared/brand";
+import { SECONDS_PER_CREDIT } from "../../shared/credits";
 
 // The public pages beside the home page: video tools (one generator page each), art styles, FAQ, about, business and
 // the MCP / API page. All copy is our own.
@@ -121,7 +122,7 @@ export function ToolPage() {
               </label>
             )}
             <div className="row wrap" style={{ justifyContent: "space-between" }}>
-              <span className="muted small">Free to draft · 1 credit per 30 seconds when you make it</span>
+              <span className="muted small">Free to draft · 1 credit per {SECONDS_PER_CREDIT} seconds when you make it</span>
               <button className="btn primary" type="submit">Create video <ArrowRight size={16} aria-hidden="true" /></button>
             </div>
           </form>

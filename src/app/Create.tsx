@@ -12,7 +12,7 @@ import { categories, isTemplate, templateIds, templates, type CategoryId, type T
 import { languages, type MusicMood } from "../../shared/series";
 import { specCredits, type StorySpec } from "../../shared/formats";
 import { storyStyles, type StoryStyle } from "../../shared/story";
-import { creditsLabel, videoCredits } from "../../shared/credits";
+import { creditsLabel, SECONDS_PER_CREDIT, videoCredits } from "../../shared/credits";
 import "./create.css";
 
 // Create: pick a faceless style, say what the video is about, get a free draft (the script and what every picture
@@ -203,7 +203,7 @@ export function Create() {
               <div className="seg" role="group" aria-label="Length">
                 {lengths.map((n) => <button key={n} type="button" aria-pressed={form.seconds === n} onClick={() => set({ seconds: n })}>{n < 60 ? `${n} s` : n === 60 ? "1 min" : "1½ min"}</button>)}
               </div>
-              <span className="hint">{creditsLabel(videoCredits(form.seconds))} to make (1 per 30 seconds).</span>
+              <span className="hint">{creditsLabel(videoCredits(form.seconds))} to make (1 per {SECONDS_PER_CREDIT} seconds).</span>
             </label>
           )}
           <div className="form-row">

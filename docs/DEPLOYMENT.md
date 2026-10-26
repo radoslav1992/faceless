@@ -113,10 +113,10 @@ Overview shows which of these are configured.
 
    | Plan | Monthly price | Variable | Yearly price | Variable | Credits a month |
    | --- | --- | --- | --- | --- | --- |
-   | Starter | $19 / month | `STRIPE_PRICE_STARTER` | $168 / year | `STRIPE_PRICE_STARTER_YEARLY` | 30 |
-   | Creator | $35 / month | `STRIPE_PRICE_DAILY` | $288 / year | `STRIPE_PRICE_DAILY_YEARLY` | 60 |
-   | Pro | $59 / month | `STRIPE_PRICE_DOUBLE` | $492 / year | `STRIPE_PRICE_DOUBLE_YEARLY` | 120 |
-   | Studio | $149 / month | `STRIPE_PRICE_STUDIO` | $1,248 / year | `STRIPE_PRICE_STUDIO_YEARLY` | 350 |
+   | Starter | $19 / month | `STRIPE_PRICE_STARTER` | $190 / year | `STRIPE_PRICE_STARTER_YEARLY` | 30 |
+   | Creator | $35 / month | `STRIPE_PRICE_DAILY` | $350 / year | `STRIPE_PRICE_DAILY_YEARLY` | 60 |
+   | Pro | $59 / month | `STRIPE_PRICE_DOUBLE` | $590 / year | `STRIPE_PRICE_DOUBLE_YEARLY` | 120 |
+   | Studio | $149 / month | `STRIPE_PRICE_STUDIO` | $1,490 / year | `STRIPE_PRICE_STUDIO_YEARLY` | 350 |
 
    A subscription's plan is recognised by these IDs, or by a price's lookup key or `metadata.plan` set to `starter`,
    `daily` (Creator), `double` (Pro) or `studio`. Checkout allows promotion codes. Name the products like the plans
