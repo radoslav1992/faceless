@@ -1,8 +1,13 @@
 // What videos cost in credits. The server charges by these rules and the pricing page shows them, so the two cannot
 // drift. Rendering (subtitles, music, transitions, timing) never costs credits.
 
-/** A new video: one credit per started 30 seconds, its narration and every AI picture included. */
-export const SECONDS_PER_CREDIT = 30;
+/**
+ * A new video: one credit per started 20 seconds, its narration and every AI picture included (a 30-second video is
+ * 2 credits). The pictures, their reference sheets, the voice and the script cost about $0.50 for 30 seconds.
+ */
+export const SECONDS_PER_CREDIT = 20;
+/** New narration for a made video's changed words: one credit per started 30 seconds (the voice alone costs little). */
+export const NARRATION_SECONDS_PER_CREDIT = 30;
 /** Redoing pictures of a made video: one credit per started 5 new pictures. */
 export const PICTURES_PER_CREDIT = 5;
 /**
@@ -45,7 +50,7 @@ export const speechSeconds = (text: string) => Math.max(2, Math.ceil(text.trim()
 /** A new video of `seconds` (narration included). */
 export const videoCredits = (seconds: number) => Math.max(1, Math.ceil(seconds / SECONDS_PER_CREDIT - 1e-9));
 /** New narration for a made video's changed words. */
-export const voiceCredits = (text: string) => videoCredits(speechSeconds(text));
+export const voiceCredits = (text: string) => Math.max(1, Math.ceil(speechSeconds(text) / NARRATION_SECONDS_PER_CREDIT - 1e-9));
 /** New pictures for a made video. */
 export const pictureCredits = (count: number) => (count > 0 ? Math.ceil(count / PICTURES_PER_CREDIT) : 0);
 /** AI clips of these lengths and qualities (regular unless said). */

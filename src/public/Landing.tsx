@@ -9,6 +9,7 @@ import { SamplePhone, reel } from "./Phone";
 import { PlanCards } from "./Pricing";
 import { categories, templateIds, templates, type CategoryId } from "../../shared/templates";
 import { PRODUCT } from "../../shared/brand";
+import { SECONDS_PER_CREDIT } from "../../shared/credits";
 import { storyStyles, type StoryStyle } from "../../shared/styles";
 import { StyleArt } from "../art";
 import { useExamples, type Example } from "../examples";
@@ -385,7 +386,7 @@ export function Landing() {
           <div className="pub-section-head center">
             <span className="kicker">Pricing</span>
             <h2 className="title">Pick your pace</h2>
-            <p className="sub">Credits pay for videos: one credit per 30 seconds. Unused credits roll over.</p>
+            <p className="sub">Credits pay for videos: one credit per {SECONDS_PER_CREDIT} seconds. Unused credits roll over.</p>
           </div>
           <PlanCards />
           <p className="price-note"><Link className="text-link" to="/pricing">Full pricing and credit packs <ArrowRight size={15} aria-hidden="true" /></Link></p>

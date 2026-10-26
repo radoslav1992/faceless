@@ -136,14 +136,15 @@ export async function createVideo(
 }
 /**
  * A new run for an existing video (after an edit, or to retry a failed render), priced against `before` (the stored
- * spec). A clip that was never made (its first run failed and was refunded) costs what a new one does.
+ * spec). A video that was never made (its first run failed and was refunded) costs what a new one does: no more for
+ * the pictures and voice it still needs, and no less for those its failed run made.
  */
 async function rerun(env: Env, user: DbUser, video: any, spec: Spec, key: string, before: Spec) {
   requireMedia(env);
   const previous = await env.DB.prepare("SELECT video_id FROM runs WHERE user_id=? AND idempotency_key=?").bind(user.id, key).first<{ video_id: string }>();
   if (previous) return { credits: 0 };
   const a = await allowance(env, user);
-  const credits = isHighlight(spec) && !video.video_asset ? specCredits(spec, true) : specCredits(spec, false, undefined, before);
+  const credits = video.video_asset ? specCredits(spec, false, undefined, before) : await newVideoCredits(env, user.id, spec);
   if (credits > 0) canCreate(a, credits);
   const runId = uid(), t = now();
   try {

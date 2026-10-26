@@ -15,6 +15,7 @@ import { cancelScheduled } from "./publishing";
 import { serveObject } from "./storage";
 import { templateIds, templates, type TemplateId } from "../shared/templates";
 import { storyStyleIds, storyStyles } from "../shared/story";
+import { SECONDS_PER_CREDIT } from "../shared/credits";
 import { voiceIdSchema } from "../shared/voices";
 import { activeVoices } from "./voices";
 import { languageCodes, languages } from "../shared/series";
@@ -254,7 +255,7 @@ const tools = [
   },
   {
     name: "create_video",
-    description: "Writes and makes a short faceless video (vertical 9:16, narrated, subtitled). Costs credits: 1 per started 30 seconds. Returns the video; poll get_video until status is 'ready' to get the download link.",
+    description: `Writes and makes a short faceless video (vertical 9:16, narrated, subtitled). Costs credits: 1 per started ${SECONDS_PER_CREDIT} seconds. Returns the video; poll get_video until status is 'ready' to get the download link.`,
     inputSchema: {
       type: "object", additionalProperties: false,
       properties: {

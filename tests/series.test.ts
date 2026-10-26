@@ -110,13 +110,13 @@ describe("episodes", () => {
     const long = "Octopuses have three hearts, blue blood and a brain in every arm, and they can taste with their skin. ";
     env.AI.run = async () => ({ status: "completed", output_text: JSON.stringify({
       title: "Long", topic: "Octopuses", caption: "", hashtags: [], headline: "", subject: "", music: "",
-      scenes: [0, 1, 2, 3, 4, 5].map((n) => ({ text: long, picture: `Octopus picture ${n}`, keys: [] })),
+      scenes: [0, 1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ text: long, picture: `Octopus picture ${n}`, keys: [] })),
     }) });
     await runEpisode(env, id, row(id).next_slot);
     const [v] = videos(id);
-    expect(videoCredits(estimatedSeconds(JSON.parse(v.spec)))).toBeGreaterThan(1);
-    expect((sqlite.prepare("SELECT credits FROM runs WHERE video_id=?").get(v.id) as any).credits).toBe(1);
-    expect((sqlite.prepare("SELECT SUM(used) AS n FROM usage_windows WHERE user_id=?").get(user.id) as any).n).toBe(1);
+    expect(videoCredits(estimatedSeconds(JSON.parse(v.spec)))).toBeGreaterThan(videoCredits(30));
+    expect((sqlite.prepare("SELECT credits FROM runs WHERE video_id=?").get(v.id) as any).credits).toBe(videoCredits(30));
+    expect((sqlite.prepare("SELECT SUM(used) AS n FROM usage_windows WHERE user_id=?").get(user.id) as any).n).toBe(videoCredits(30));
   });
 
   it("holds episodes for review when asked, and tells the owner once that one is waiting", async () => {
@@ -242,7 +242,7 @@ describe("changing a series", () => {
     expect(row(id).next_slot).toBeGreaterThan(now());
     // Settings are merged and checked as a whole.
     const changed = await call(worker, env, "PATCH", `/api/series/${id}`, { settings: { seconds: 90, animate: 1 } }, user.cookie);
-    expect(changed.data.series).toMatchObject({ settings: { seconds: 90, animate: 1, schedule: { times: ["09:00", "18:00"] } }, credits: 4 });
+    expect(changed.data.series).toMatchObject({ settings: { seconds: 90, animate: 1, schedule: { times: ["09:00", "18:00"] } }, credits: videoCredits(90) + 1 });
     expect((await call(worker, env, "PATCH", `/api/series/${id}`, { settings: { seconds: 50 } }, user.cookie)).status).toBe(400);
     // Someone else's series is not found.
     const other = signedIn(sqlite);

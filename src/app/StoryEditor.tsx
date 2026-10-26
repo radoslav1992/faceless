@@ -21,7 +21,7 @@ import { styledCaptions } from "../../shared/captions";
 import { overlayItems } from "../../shared/overlay";
 import { FRAME } from "../../shared/render";
 import {
-  CLIP_CREDITS, CLIP_SECONDS, PICTURES_PER_CREDIT, clipCredits, clipModelNames, clipQualities, creditsLabel, pictureCredits, presenterCredits, speechSeconds, videoCredits,
+  CLIP_CREDITS, CLIP_SECONDS, PICTURES_PER_CREDIT, SECONDS_PER_CREDIT, clipCredits, clipModelNames, clipQualities, creditsLabel, pictureCredits, presenterCredits, speechSeconds, videoCredits,
   voiceCredits, type ClipModel, type ClipQuality,
 } from "../../shared/credits";
 import { headlineFor } from "../../shared/headline";
@@ -415,7 +415,7 @@ function StoryPlan({ spec, creditsLeft, music, initial, recordingSeconds }: { sp
       ["Subtitles, transitions, timing" + (music ? ", music" : ""), "rendering", 0],
     ];
   return (
-    <EditorSection title="Plan and price" hint={initial ? "A new video costs 1 credit per started 30 seconds, everything included. If it fails, the credits come back." : "Only new AI work costs credits; text, subtitles, timing and music changes are free."}>
+    <EditorSection title="Plan and price" hint={initial ? `A new video costs 1 credit per started ${SECONDS_PER_CREDIT} seconds, everything included. If it fails, the credits come back.` : "Only new AI work costs credits; text, subtitles, timing and music changes are free."}>
       <table className="story-plan">
         <tbody>
           {rows.map(([what, detail, credits]) => (
