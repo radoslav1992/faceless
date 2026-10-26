@@ -59,7 +59,8 @@ and the maintenance cron.
   connected channels.
 - **Posting.** TikTok, YouTube (Shorts) and Instagram (Reels) are connected with OAuth; tokens are stored encrypted.
   Videos post at a series slot, at a chosen time or at once, publicly or (TikTok, YouTube) privately. Published
-  videos' views, likes, comments and shares (and saves on Instagram) are read back for 30 days.
+  videos' views, likes, comments and shares (and saves on Instagram) are read back for 30 days (YouTube's weekly
+  afterwards, while the channel is connected; YouTube data that can't be refreshed is deleted, see docs/SOCIAL.md).
 - **Credits and plans** (`shared/plans.ts`, `shared/credits.ts`). Credits are the one currency: a new video costs
   1 credit per started 20 seconds (a 30-second video is 2), script, narration and every picture included. Bringing a scene to life with an AI
   clip costs 1 credit per 5 seconds (2 in high quality, 1080p); redoing pictures of a made video 1 credit per 5 pictures; new narration for

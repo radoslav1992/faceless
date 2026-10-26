@@ -16,6 +16,7 @@ import { seriesTemplates, templateOf, type TemplateId } from "../shared/template
 import { slots, validZone } from "../shared/schedule";
 import { planById } from "../shared/plans";
 import { PRODUCT } from "../shared/brand";
+import { KIDS_QUESTION } from "../shared/social";
 
 // Series: a faceless channel on autopilot. For every slot of its schedule an episode is written, made ahead of time
 // (MAKE_AHEAD) and, unless the series asks for review first, posted to its channels at that slot. The cron hands each
@@ -64,6 +65,8 @@ async function checkSettings(env: Env, user: DbUser, template: TemplateId, setti
     const rows = (await env.DB.prepare(`SELECT id,platform FROM social_accounts WHERE user_id=? AND id IN (${settings.accounts.map(() => "?").join(",")})`)
       .bind(user.id, ...settings.accounts).all<{ id: string; platform: string }>()).results;
     if (rows.length !== new Set(settings.accounts).size) throw new HTTPException(400, { message: "Choose accounts you have connected." });
+    if (settings.madeForKids === null && rows.some((r) => r.platform === "youtube"))
+      throw new HTTPException(400, { message: `Say whether the episodes are made for kids. ${KIDS_QUESTION}` });
   }
   if (settings.music.trackId && !(await env.DB.prepare("SELECT 1 FROM library_items WHERE id=? AND kind='music' AND active=1").bind(settings.music.trackId).first()))
     throw new HTTPException(400, { message: "This track is no longer in the library. Choose another one." });

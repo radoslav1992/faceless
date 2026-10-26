@@ -57,6 +57,8 @@ export const seriesSettingsSchema = z.object({
   accounts: z.array(z.uuid()).max(10).default([]),
   /** Post privately (only the account can see it) where the network allows it, to check before going public. */
   private: z.boolean().default(false),
+  /** YouTube's audience question, answered by the creator for the episodes (null: not yet; required to post to YouTube). */
+  madeForKids: z.boolean().nullable().default(null),
   schedule: scheduleSchema.default(scheduleSchema.parse({})),
   /** Review first: episodes wait for approval instead of posting by themselves. */
   review: z.boolean().default(false),

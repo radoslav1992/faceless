@@ -5,10 +5,10 @@ import type { App, Env } from "./types";
 import { DAY, HOUR, MINUTE, now, uid } from "./types";
 import { json, ownedVideo } from "./db";
 import { safeEqual, token } from "./security";
-import { isPlatform, platforms, type PlatformId } from "../shared/social";
+import { isPlatform, KIDS_QUESTION, platforms, type PlatformId } from "../shared/social";
 import { LATE_GRACE, seriesSettingsSchema } from "../shared/series";
 import { failureMessage } from "./social";
-import { freshTokens, markExpired, type AccountRow } from "./social/credentials";
+import { accountLabel, freshTokens, markExpired, type AccountRow } from "./social/credentials";
 import { unfit, type VideoRow } from "./social/post";
 
 // Posting made videos on connected accounts: now, at a chosen time, or — for a series' episodes — at their slot. The
@@ -42,13 +42,16 @@ async function accountsById(env: Env, userId: string, ids: string[]) {
     .bind(userId, ...ids).all<AccountRow>();
   return rows.results;
 }
+/** How the posts go out: privately, and the creator's answer to YouTube's "made for kids" (null: not given). */
+type PostOptions = { private: boolean; madeForKids: boolean | null };
 /** One 'scheduled' publication per account; with `ignoreDuplicates`, one already scheduled or published is skipped. */
-async function insertPublications(env: Env, video: VideoRow, accounts: AccountRow[], at: number, ignoreDuplicates: boolean, privately = false) {
+async function insertPublications(env: Env, video: VideoRow, accounts: AccountRow[], at: number, ignoreDuplicates: boolean, o: PostOptions) {
   const t = now();
   const created = accounts.map((a) => ({ id: uid(), account: a }));
+  const kids = o.madeForKids === null ? null : o.madeForKids ? 1 : 0;
   const statements = created.map(({ id, account }) =>
-    env.DB.prepare(`INSERT ${ignoreDuplicates ? "OR IGNORE " : ""}INTO publications(id,user_id,video_id,account_id,account_name,platform,scheduled_at,private,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,'scheduled',?,?)`)
-      .bind(id, video.user_id, video.id, account.id, account.handle ? `${account.name} (@${account.handle})`.slice(0, 120) : account.name, account.platform, at, privately ? 1 : 0, t, t));
+    env.DB.prepare(`INSERT ${ignoreDuplicates ? "OR IGNORE " : ""}INTO publications(id,user_id,video_id,account_id,account_name,platform,scheduled_at,private,made_for_kids,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,'scheduled',?,?)`)
+      .bind(id, video.user_id, video.id, account.id, accountLabel(account), account.platform, at, o.private ? 1 : 0, account.platform === "youtube" ? kids : null, t, t));
   try {
     const results = await env.DB.batch(statements);
     return created.filter((_, i) => (results[i] as any)?.meta?.changes !== 0).map((c) => c.id);
@@ -71,7 +74,11 @@ function refusal(a: AccountRow, video: VideoRow, privately: boolean) {
 /** Posts a ready video to accounts: now (in a minute) or at `at`. Approves an episode still waiting for review. */
 publishing.post("/videos/:id/publish", async (c) => {
   const user = c.get("user");
-  const body = z.object({ accountIds: z.array(z.uuid()).min(1).max(30), at: atSchema.optional(), private: z.boolean().default(false) }).parse(await c.req.json());
+  const body = z.object({
+    accountIds: z.array(z.uuid()).min(1).max(30), at: atSchema.optional(), private: z.boolean().default(false),
+    /** YouTube's audience question, required when posting to YouTube. */
+    madeForKids: z.boolean().optional(),
+  }).parse(await c.req.json());
   const video: VideoRow = await ownedVideo(c.env, user.id, c.req.param("id"));
   if (video.render_status !== "ready") throw new HTTPException(409, { message: "This video is still being made. Post it when it's ready." });
   const ids = [...new Set(body.accountIds)];
@@ -81,9 +88,11 @@ publishing.post("/videos/:id/publish", async (c) => {
     const problem = refusal(a, video, body.private);
     if (problem) throw new HTTPException(409, { message: problem });
   }
+  if (body.madeForKids === undefined && accounts.some((a) => a.platform === "youtube"))
+    throw new HTTPException(400, { message: `Say whether this video is made for kids. ${KIDS_QUESTION}` });
   const at = body.at ?? now() + LEAD;
   checkTime(at);
-  const created = await insertPublications(c.env, video, accounts, at, false, body.private);
+  const created = await insertPublications(c.env, video, accounts, at, false, { private: body.private, madeForKids: body.madeForKids ?? null });
   // Posting it is approving it (once its posts are saved).
   if (video.status !== "approved") await c.env.DB.prepare("UPDATE videos SET status='approved',reviewed_at=?,updated_at=? WHERE id=?").bind(now(), now(), video.id).run();
   const rows = await c.env.DB.prepare(`${SELECT_PUBLICATION} WHERE p.video_id=? AND p.user_id=? AND p.id IN (${created.map(() => "?").join(",")}) ORDER BY p.scheduled_at`)
@@ -226,7 +235,8 @@ export async function scheduleEpisode(env: Env, videoId: string): Promise<number
   if (slot < t - LATE_GRACE) return 0;
   const accounts = (await accountsById(env, video.user_id, parsed.data.accounts)).filter((a) => !refusal(a, video, parsed.data.private));
   if (!accounts.length) return 0;
-  return (await insertPublications(env, video, accounts, Math.max(slot, t + LEAD), true, parsed.data.private)).length;
+  // A series saved before it asked "made for kids" has no answer: YouTube then applies the channel's own setting.
+  return (await insertPublications(env, video, accounts, Math.max(slot, t + LEAD), true, { private: parsed.data.private, madeForKids: parsed.data.madeForKids })).length;
 }
 /** Cancels what a series still had scheduled (paused or deleted). */
 export async function cancelScheduled(env: Env, userId: string, seriesId: string) {

@@ -154,20 +154,21 @@ export const youtube: Platform = {
     // Granular consent lets people untick a scope: without upload there is nothing to connect.
     if (!(tokens.scope || "").split(" ").includes(UPLOAD_SCOPE)) throw new SocialError("PERMISSION");
     if (!tokens.refreshToken) throw failure("youtube", 200, ["PROVIDER_ERROR", false], "no_refresh_token");
-    // https://developers.google.com/youtube/v3/docs/channels/list
-    const r = await send("youtube", `${API}/channels?part=snippet&mine=true`, { headers: bearer(tokens.accessToken) });
+    return { tokens, profile: await youtube.profile!(env, tokens) };
+  },
+
+  async profile(_env, tokens) {
+    // https://developers.google.com/youtube/v3/docs/channels/list (1 quota unit)
+    const r = await send("youtube", `${API}/channels?part=snippet&mine=true`, { headers: bearer(tokens.accessToken), timeout: 15_000 });
     if (!r.ok) throw await googleFailure(r);
     const channel = (await json(r))?.items?.[0];
     if (typeof channel?.id !== "string") throw new SocialError("NO_CHANNEL");
     const s = channel.snippet || {};
     return {
-      tokens,
-      profile: {
-        externalId: channel.id,
-        name: String(s.title || "YouTube channel").slice(0, 100),
-        handle: typeof s.customUrl === "string" ? s.customUrl.replace(/^@/, "").slice(0, 100) : undefined,
-        avatarUrl: typeof s.thumbnails?.default?.url === "string" ? s.thumbnails.default.url : undefined,
-      },
+      externalId: channel.id,
+      name: String(s.title || "YouTube channel").slice(0, 100),
+      handle: typeof s.customUrl === "string" ? s.customUrl.replace(/^@/, "").slice(0, 100) : undefined,
+      avatarUrl: typeof s.thumbnails?.default?.url === "string" ? s.thumbnails.default.url : undefined,
     };
   },
 
@@ -195,7 +196,12 @@ export const youtube: Platform = {
       },
       body: JSON.stringify({
         snippet: { title, description: description.trim(), categoryId: "22" },
-        status: { privacyStatus: ctx.private ? "private" : "public", selfDeclaredMadeForKids: false, containsSyntheticMedia: ctx.synthetic },
+        // "Made for kids" is the creator's answer; without one YouTube applies the channel's audience setting.
+        status: {
+          privacyStatus: ctx.private ? "private" : "public",
+          ...(ctx.madeForKids !== null && { selfDeclaredMadeForKids: ctx.madeForKids }),
+          containsSyntheticMedia: ctx.synthetic,
+        },
       }),
     });
     if (!r.ok) throw await googleFailure(r);

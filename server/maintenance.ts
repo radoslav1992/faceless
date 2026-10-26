@@ -9,6 +9,7 @@ import { dispatchSeries } from "./series";
 import { makePreviews } from "./examples";
 import { deleteHeyGenCopies } from "./avatars";
 import { refreshMetrics } from "./metrics";
+import { keepYouTubeData } from "./youtube-data";
 import { applyRetention } from "./retention";
 import { describeError } from "./error-report";
 import { flagForReview, recordMaintenanceRun, recordStageFailures, reportAttention, reviewRuns } from "./operations";
@@ -17,7 +18,7 @@ import { flagForReview, recordMaintenanceRun, recordStageFailures, reportAttenti
 // style examples get their previews; every five minutes stuck work is recovered and a batch of video stats is read
 // from the networks; once an hour (minute 17) the operator summary goes out first, then files are cleaned up, failed
 // provider work is set aside for a check, retention runs, contracts are confirmed and (at 03:17 UTC) Stripe is
-// reconciled.
+// reconciled, social tokens renewed and YouTube data checked.
 export async function maintenance(e: Env, at = Date.now()) {
   const d = new Date(at), minute = d.getUTCMinutes(), hourly = minute === 17, startedAt = now();
   // Per pass (passes can overlap): a stage that throws never skips the others, and is reported by the next summary.
@@ -48,6 +49,8 @@ export async function maintenance(e: Env, at = Date.now()) {
       await stage("stripe", () => reconcileStripe(e));
       // Renews long-lived social tokens (Instagram's last 60 days) and marks ended connections expired.
       await stage("social-tokens", () => refreshAccounts(e));
+      // YouTube data is kept only while it can be refreshed (youtube-data.ts).
+      await stage("youtube-data", () => keepYouTubeData(e));
     }
   }
   // After the rest: it may wait up to a minute for the renderer.

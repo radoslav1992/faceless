@@ -51,8 +51,17 @@ describe("starting a series", () => {
     sqlite.prepare("UPDATE users SET verified=0 WHERE id=?").run(user.id);
     expect((await create()).status).toBe(403);
     sqlite.prepare("UPDATE users SET verified=1 WHERE id=?").run(user.id);
+    // A series that posts to YouTube needs the creator's "made for kids" answer.
+    sqlite.prepare("INSERT INTO social_accounts(id,user_id,platform,external_id,name,credentials,status,created_at,updated_at) VALUES (?,?,'youtube','UC1','Mine','x','active',1,1)")
+      .run("00000000-0000-4000-8000-000000000002", user.id);
+    const posting = (madeForKids?: boolean) => ({
+      settings: { schedule: { timezone: "UTC", times: ["09:00"], days: [1] }, accounts: ["00000000-0000-4000-8000-000000000002"], ...(madeForKids !== undefined && { madeForKids }) },
+    });
+    const unanswered = await create(posting());
+    expect(unanswered.status).toBe(400);
+    expect(unanswered.data.error).toBe("Say whether the episodes are made for kids. YouTube asks every creator whether their videos are made for kids.");
     // The free trial runs one series.
-    const first = await create();
+    const first = await create(posting(false));
     expect(first.status).toBe(201);
     const second = await create({ name: "Another" });
     expect(second.status).toBe(402);

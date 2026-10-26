@@ -92,6 +92,9 @@ export async function revokeAccess(env: Env, account: Pick<AccountRow, "id" | "p
   }
 }
 
+/** How a post names its account, kept for when the account is gone: "Name (@handle)". */
+export const accountLabel = (a: Pick<AccountRow, "name" | "handle">) => (a.handle ? `${a.name} (@${a.handle})`.slice(0, 120) : a.name);
+
 /** The person has to connect the account again (tokens expired, revoked or unreadable). */
 export async function markExpired(env: Env, accountId: string) {
   await env.DB.prepare("UPDATE social_accounts SET status='expired',updated_at=? WHERE id=? AND status='active'").bind(now(), accountId).run();

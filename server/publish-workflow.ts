@@ -99,6 +99,7 @@ async function context(env: Env, { pub, post, account, platform }: Loaded): Prom
     ...postText(post, platform),
     synthetic: synthetic(post) || !!json<{ ai?: boolean }>(asset.meta, {}).ai,
     private: !!pub.private,
+    madeForKids: pub.made_for_kids == null ? null : !!pub.made_for_kids,
     media: {
       kind: "video", key: asset.object_key, bytes: head.size, mime: asset.mime, duration: Number(post.duration) || 0,
       url: `${base}/api/publish-media/${pub.id}/0.${extension(asset.mime)}?token=${pub.token}`,

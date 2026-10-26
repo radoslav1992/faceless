@@ -8,15 +8,20 @@ import { freshTokens, markExpired, type AccountRow } from "./social/credentials"
 const statsPlatforms = ["tiktok", "instagram", "youtube"] as const;
 
 // Video stats from the networks (views, likes, comments, shares; saves on Instagram), read by the cron for posts published in the last
-// 30 days: new posts every few hours in their first two days, then daily. Each run takes a bounded batch, grouped by
-// account (one token refresh and a few calls each), so it stays well inside the Workers subrequest limit.
+// 30 days: new posts every few hours in their first two days, then daily. YouTube posts go on being read weekly after
+// that, as long as their channel is connected: the YouTube API Services policies let us keep the counts (and video
+// IDs) only while we refresh them (youtube-data.ts deletes those not refreshed for 30 days). Each run takes a bounded
+// batch, grouped by account (one token refresh and a few calls each), so it stays well inside the Workers subrequest
+// limit.
 
-/** How old a post's stats may get before they are read again. */
+/** Posts are read this long after they were published (YouTube's afterwards weekly, see above). */
 export const STATS_WINDOW = 30 * DAY;
 /** A post is first read this long after it went out (the first minutes say little). */
 export const FIRST_READ = 30 * MINUTE;
 /** Read every 3 hours in the first two days, then every day (an hour early, so a daily run never slips a day). */
 export const FRESH_FOR = 2 * DAY, FRESH_EVERY = 3 * HOUR, DAILY_EVERY = 23 * HOUR;
+/** YouTube posts older than STATS_WINDOW: weekly, so a few failed reads still refresh them well within 30 days. */
+export const WEEKLY_EVERY = 7 * DAY - HOUR;
 
 type Due = { id: string; account_id: string; platform: string; external_id: string };
 /** Why nothing was read for a post: shown with the video's stats as a short note. */
@@ -27,10 +32,10 @@ export async function dueForStats(env: Env, limit: number, t = now()): Promise<D
   const platforms = statsPlatforms.map(() => "?").join(",");
   const rows = await env.DB.prepare(
     `SELECT id,account_id,platform,external_id FROM publications
-     WHERE status='published' AND draft=0 AND published_at>=? AND published_at<=? AND platform IN (${platforms}) AND external_id IS NOT NULL AND account_id IS NOT NULL
-       AND (metrics_checked_at IS NULL OR metrics_checked_at<CASE WHEN published_at>=? THEN ? ELSE ? END)
+     WHERE status='published' AND draft=0 AND (published_at>=? OR platform='youtube') AND published_at<=? AND platform IN (${platforms}) AND external_id IS NOT NULL AND account_id IS NOT NULL
+       AND (metrics_checked_at IS NULL OR metrics_checked_at<CASE WHEN published_at>=? THEN ? WHEN published_at>=? THEN ? ELSE ? END)
      ORDER BY COALESCE(metrics_checked_at,0),published_at DESC LIMIT ?`,
-  ).bind(t - STATS_WINDOW, t - FIRST_READ, ...statsPlatforms, t - FRESH_FOR, t - FRESH_EVERY, t - DAILY_EVERY, limit).all<Due>();
+  ).bind(t - STATS_WINDOW, t - FIRST_READ, ...statsPlatforms, t - FRESH_FOR, t - FRESH_EVERY, t - STATS_WINDOW, t - DAILY_EVERY, t - WEEKLY_EVERY, limit).all<Due>();
   return rows.results;
 }
 
