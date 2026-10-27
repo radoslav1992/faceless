@@ -1,7 +1,8 @@
+import { useId } from "react";
 import { Link } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, Clock, Eye, Film } from "lucide-react";
 import { fileUrl, number, seconds, when, type Publication, type Video } from "../lib";
-import { platforms, type PlatformId } from "../../shared/social";
+import { KIDS_QUESTION, platforms, type PlatformId } from "../../shared/social";
 
 // Small pieces every list of videos shares: where a video is in its making, its card, its posts.
 
@@ -23,6 +24,21 @@ export function StatusChip({ video }: { video: Video }) {
   if (pubs.some((p) => p.status === "scheduled" || p.status === "publishing")) return <span className="chip violet"><Clock size={12} aria-hidden="true" /> Scheduled</span>;
   if (pubs.some((p) => p.status === "failed")) return <span className="chip red">Post failed</span>;
   return <span className="chip green">Ready</span>;
+}
+/** YouTube's audience question, answered by the creator (never for them) whenever a video or a series posts to YouTube. */
+export function MadeForKids({ value, onChange, episodes = false }: { value: boolean | null; onChange: (v: boolean) => void; episodes?: boolean }) {
+  const id = useId();
+  return (
+    <div className="stack" style={{ gap: 6 }} role="radiogroup" aria-labelledby={`${id}-q`} aria-describedby={`${id}-hint`}>
+      <span id={`${id}-q`} className="small"><strong>YouTube: {episodes ? "are the episodes" : "is it"} made for kids?</strong></span>
+      <label className="check"><input type="radio" name={id} checked={value === false} onChange={() => onChange(false)} /> No, {episodes ? "they're" : "it's"} not made for kids</label>
+      <label className="check"><input type="radio" name={id} checked={value === true} onChange={() => onChange(true)} /> Yes, {episodes ? "they're" : "it's"} made for kids</label>
+      <p id={`${id}-hint`} className="hint">
+        {KIDS_QUESTION} Made for kids means mainly for children; YouTube then turns off comments and personalized ads.{" "}
+        <a className="text-link" href="https://support.google.com/youtube/answer/9528076" target="_blank" rel="noreferrer">What counts as made for kids</a>
+      </p>
+    </div>
+  );
 }
 export function PlatformBadge({ platform }: { platform: PlatformId }) {
   return <span className="platform-dot" style={{ background: platforms[platform].color }} title={platforms[platform].name} aria-label={platforms[platform].name}>{platforms[platform].name[0]}</span>;

@@ -123,6 +123,7 @@ export function ChannelsPage() {
                       <div className="grow" style={{ minWidth: 0 }}>
                         <strong className="truncate" style={{ display: "block", maxWidth: "none" }}>{a.name}</strong>
                         <span className="small muted">{a.handle ? `@${a.handle}` : platforms[id].name}</span>
+                        {!active && id === "youtube" && <span className="small muted" style={{ display: "block" }}>Reconnect it within 14 days, or it's removed with its posts' YouTube links and stats.</span>}
                       </div>
                       {active ? <span className="chip green">Connected</span> : (
                         <button type="button" className="btn sm primary" onClick={() => void connect(id)} disabled={!configured || soon || !!connecting}>
@@ -142,7 +143,10 @@ export function ChannelsPage() {
       {confirm && (
         <ConfirmDialog title={`Disconnect ${confirm.name}?`} confirmLabel="Disconnect" onClose={() => setConfirm(null)}
           onConfirm={async () => { await del(`/accounts/${confirm.id}`); toast(`${confirm.name} was disconnected.`, "good"); await reload(); }}>
-          <p>Videos scheduled to it are canceled and series stop posting to it. Videos already posted stay on {platforms[confirm.platform].name}.</p>
+          <p>
+            Videos scheduled to it are canceled and series stop posting to it. Videos already posted stay on {platforms[confirm.platform].name}
+            {confirm.platform === "youtube" ? ", but their YouTube links and stats are removed from your posting history." : "."}
+          </p>
         </ConfirmDialog>
       )}
     </main>

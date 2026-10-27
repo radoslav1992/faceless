@@ -3,7 +3,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { App, DbUser, Env } from "./types";
 import { now, uid, MINUTE } from "./types";
-import { dbFailure, json } from "./db";
+import { dbFailure } from "./db";
 import { allowance } from "./billing";
 import { defer, rate, sha, token } from "./security";
 import { siteUrl } from "./config";
@@ -14,6 +14,7 @@ import { socialPlatforms, SocialError } from "./social";
 import { codeVerifier } from "./social/http";
 import { tiktokDrafts } from "./social/tiktok";
 import { connectionExpiry, revokeAccess } from "./social/credentials";
+import { removeAccount } from "./social/disconnect";
 import { STATS_WINDOW } from "./metrics";
 import { isAdmin } from "./auth";
 
@@ -138,13 +139,13 @@ accounts.get("/callback/:platform", async (c) => {
     const text = (s: string | undefined, max: number) => (s ? s.replace(/[\p{Cc}]/gu, "").trim().slice(0, max) || null : null);
     const avatar = profile.avatarUrl && /^https:\/\//.test(profile.avatarUrl) && profile.avatarUrl.length <= 2000 ? profile.avatarUrl : null;
     await c.env.DB.prepare(
-      `INSERT INTO social_accounts(id,user_id,platform,external_id,name,handle,avatar_url,credentials,expires_at,status,created_at,updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,'active',?,?)
+      `INSERT INTO social_accounts(id,user_id,platform,external_id,name,handle,avatar_url,credentials,expires_at,status,created_at,updated_at,profile_at)
+       VALUES (?,?,?,?,?,?,?,?,?,'active',?,?,?)
        ON CONFLICT(user_id,platform,external_id) DO UPDATE SET name=excluded.name,handle=excluded.handle,avatar_url=excluded.avatar_url,
-         credentials=excluded.credentials,expires_at=excluded.expires_at,status='active',updated_at=excluded.updated_at`,
+         credentials=excluded.credentials,expires_at=excluded.expires_at,status='active',updated_at=excluded.updated_at,profile_at=excluded.profile_at`,
     ).bind(
       uid(), user.id, platform, profile.externalId.slice(0, 200), text(profile.name, 100) || platforms[platform].name,
-      text(profile.handle, 100), avatar, await seal(c.env, tokens), connectionExpiry(platform, tokens), t, t,
+      text(profile.handle, 100), avatar, await seal(c.env, tokens), connectionExpiry(platform, tokens), t, t, t,
     ).run();
     // A reconnection may grant the stats scopes: its recent posts are read again on the next stats pass (and stop
     // asking to reconnect at once).
@@ -164,20 +165,8 @@ accounts.delete("/:id", async (c) => {
   const account = await c.env.DB.prepare("SELECT id,platform,credentials FROM social_accounts WHERE id=? AND user_id=?").bind(id, user.id)
     .first<{ id: string; platform: PlatformId; credentials: string }>();
   if (!account) throw new HTTPException(404, { message: "Social account not found." });
-  // Posts still scheduled to it are cancelled and series stop posting to it; published history stays (its account
-  // becomes "disconnected"). The account_busy trigger refuses while a video is being published to it.
-  const using = (await c.env.DB.prepare("SELECT id,settings FROM series WHERE user_id=? AND settings LIKE ?").bind(user.id, `%${id}%`).all<{ id: string; settings: string }>()).results;
-  const t = now();
   try {
-    await c.env.DB.batch([
-      c.env.DB.prepare("UPDATE publications SET status='canceled',updated_at=? WHERE account_id=? AND status='scheduled'").bind(t, id),
-      c.env.DB.prepare("DELETE FROM social_accounts WHERE id=? AND user_id=?").bind(id, user.id),
-      ...using.map((s) => {
-        const settings = json<any>(s.settings, {});
-        if (Array.isArray(settings.accounts)) settings.accounts = settings.accounts.filter((x: unknown) => x !== id);
-        return c.env.DB.prepare("UPDATE series SET settings=?,updated_at=? WHERE id=?").bind(JSON.stringify(settings), t, s.id);
-      }),
-    ]);
+    await removeAccount(c.env, user.id, account);
   } catch (e) {
     dbFailure(e);
   }

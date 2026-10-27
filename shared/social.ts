@@ -10,6 +10,8 @@ export const platforms: Record<PlatformId, {
 };
 export const isPlatform = (p: string): p is PlatformId => (platformIds as readonly string[]).includes(p);
 /** What people read while a network is not open to them yet (SOCIAL_OPEN, server/accounts.ts). */
+/** YouTube's audience question: the creator answers it for their videos, we never answer for them. */
+export const KIDS_QUESTION = "YouTube asks every creator whether their videos are made for kids.";
 export const comingSoon = (name: string) => `Posting straight to ${name} is coming soon. Until then, download your videos and upload them yourself.`;
 
 /** At most `max` UTF-16 units (what the networks count), never splitting a surrogate pair. */

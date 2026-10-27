@@ -156,20 +156,45 @@ Limits until then:
 What the audit checks on our side, already in place: the Terms say that connecting YouTube means agreeing to the
 YouTube Terms of Service (`/terms#social-accounts`); the privacy policy's "YouTube API Services" section
 (`/privacy#youtube`) says the app uses YouTube API Services, links the Google Privacy Policy, explains what YouTube data
-is accessed, stored and shared, and how to revoke access (disconnect, account deletion, or Google's security settings
-page); disconnecting revokes the token. Keep `YOUTUBE_IMPORT` off: downloading YouTube videos is outside what the
+is accessed, stored and shared, how long it is kept, and how to revoke access (disconnect, account deletion, or Google's
+security settings page); disconnecting revokes the token and deletes the channel's YouTube data (see "YouTube data"
+below). Keep `YOUTUBE_IMPORT` off: downloading YouTube videos is outside what the
 YouTube API Services policies allow (see DEPLOYMENT.md). The Channels page warns that videos may post as private
 until Google finishes its review: take that sentence out of `src/app/Channels.tsx` once the audit passes.
+
+### YouTube data (what the YouTube API Services policies ask)
+
+The Developer Policies let an app keep what YouTube tells it only while it refreshes it, and ask it to delete it once
+the person's authorization ends. `server/youtube-data.ts` (daily, in the 03:17 UTC maintenance) and
+`server/social/disconnect.ts` do that:
+
+- **Disconnecting** a channel (or deleting the account) forgets its posts' YouTube data at once: video IDs, links,
+  counts and the channel's name (`forgetYouTubePosts`). The publications stay, showing "Disconnected account" without a
+  link. Other networks' history is unchanged.
+- **Connected channels** are checked every week (`social_accounts.profile_at`): a token refresh confirms the access
+  still stands, and the channel's name, handle and picture are read again (also into its posts' `account_name`). A
+  refused refresh or a channel that is gone marks the connection `expired`.
+- **A connection that stopped working** (revoked in Google's security settings, refresh refused, channel deleted) is
+  removed after 14 days like a disconnection, unless the person reconnects it first.
+- **Stats** of YouTube posts are read weekly after their first 30 days while the channel is connected (`metrics.ts`).
+  A post whose video ID and counts weren't refreshed for 30 days (deleted on YouTube, no read scope, the channel gone)
+  loses them.
+- **Made for kids**: YouTube asks every creator whether each video is made for kids. The post panel asks it whenever a
+  YouTube channel is chosen, and a series that posts to YouTube asks it once for its episodes (both refused by the API
+  without an answer). It is stored per post (`publications.made_for_kids`) and sent as
+  `status.selfDeclaredMadeForKids`; a series saved before it was asked sends nothing, so YouTube applies the channel's
+  own audience setting.
 
 Uploads use the resumable protocol in 16 MiB chunks; an interrupted upload is resumed through the same session, so it
 never creates a second video. Videos are posted as Shorts (vertical, at most 3 minutes; longer ones are refused before
 scheduling): the description ends with `#Shorts` and the link is `https://youtube.com/shorts/<id>`. "Post privately"
-sends `privacyStatus: private`. A Google account without a YouTube channel gets "Create a YouTube channel…".
+sends `privacyStatus: private`, and the creator's "made for kids" answer goes in `selfDeclaredMadeForKids`. A Google account without a YouTube channel gets "Create a YouTube channel…".
 
 ## Post stats
 
 The cron reads the stats of videos published in the last 30 days: first about 30 minutes after publishing, every 3
-hours for the first two days, then daily. Each pass (every 5 minutes) takes at most 40 posts on at most 10 accounts,
+hours for the first two days, then daily. YouTube posts are then read weekly for as long as their channel is connected
+(see "YouTube data" above). Each pass (every 5 minutes) takes at most 40 posts on at most 10 accounts,
 one token refresh and a few calls per account, so it stays far inside the Workers subrequest limit; a failing account
 never stops the others. An expired or revoked token marks the account `expired`, as publishing does.
 

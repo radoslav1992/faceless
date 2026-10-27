@@ -6,7 +6,7 @@ import { Switch, useToast } from "../ui";
 import { StyleArt } from "../art";
 import { StoryStylePicker } from "./StoryStyles";
 import { CaptionStylePicker } from "./CaptionPickers";
-import { PlatformBadge } from "./video-ui";
+import { MadeForKids, PlatformBadge } from "./video-ui";
 import { connectPlatform, useConnectOutcome } from "./Channels";
 import { MusicChoice, useOfferedVoice, VoiceSelect } from "./pickers";
 import { isTemplate, seriesTemplates, templates, type TemplateId } from "../../shared/templates";
@@ -23,6 +23,9 @@ import "./create.css";
 
 const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const zones = (() => { try { return (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.("timeZone") ?? []; } catch { return []; } })();
+
+/** The series posts to a connected YouTube channel, so it needs the creator's "made for kids" answer. */
+const postsToYouTube = (accounts: Account[], s: SeriesSettings) => accounts.some((a) => a.platform === "youtube" && s.accounts.includes(a.id));
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return <div className="card stack"><div><h3>{title}</h3>{hint && <p className="muted small" style={{ marginTop: 4 }}>{hint}</p>}</div>{children}</div>;
@@ -116,6 +119,7 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
           </div>
         )}
         {usable.length > 0 && <div className="row between"><span className="small">Post privately (only you see them; TikTok and YouTube)</span><Switch checked={settings.private} onChange={(v) => set({ private: v })} label="Post privately" /></div>}
+        {postsToYouTube(usable, settings) && <MadeForKids episodes value={settings.madeForKids} onChange={(madeForKids) => set({ madeForKids })} />}
         <div className="row between"><span className="small">Review each episode before it posts</span><Switch checked={settings.review} onChange={(v) => set({ review: v })} label="Review first" /></div>
         <div className="row between"><span className="small">E-mail me when an episode is ready</span><Switch checked={settings.notify} onChange={(v) => set({ notify: v })} label="E-mail notices" /></div>
       </Section>
@@ -191,6 +195,8 @@ export function SeriesWizard() {
     } catch { /* storage unavailable: the wizard starts over after connecting */ }
   }, [template, step, settings, name]);
   const [busy, setBusy] = useState(false);
+  const accounts = useApi<{ accounts: Account[] }>(step >= 2 ? "/accounts" : null);
+  const kidsMissing = settings.madeForKids === null && postsToYouTube(accounts.data?.accounts || [], settings);
   const pick = (id: TemplateId) => {
     const s = defaultSeriesSettings(id);
     setSettings({ ...s, schedule: settings.schedule, accounts: settings.accounts });
@@ -246,7 +252,7 @@ export function SeriesWizard() {
               <li>{templates[template].name}{settings.prompt ? `: ${settings.prompt}` : ""}</li>
               <li>{lengthName(settings.seconds)} videos in {languages.find((l) => l[0] === settings.language)?.[1]}, narrated by {voiceName(settings.voiceId)}{templates[template].kind !== "backdrop" ? `, ${storyStyles[settings.style].name.toLowerCase()} pictures` : ""}</li>
               <li>{videosPerMonth(settings.schedule)} videos a month at {settings.schedule.times.join(", ")} ({settings.schedule.timezone})</li>
-              <li>{settings.accounts.length ? `Posts to ${settings.accounts.length} channel${settings.accounts.length > 1 ? "s" : ""}${settings.private ? ", privately" : ""}${settings.review ? " after your review" : ""}` : "Not posted: videos are only made"}</li>
+              <li>{settings.accounts.length ? `Posts to ${settings.accounts.length} channel${settings.accounts.length > 1 ? "s" : ""}${settings.private ? ", privately" : ""}${settings.review ? " after your review" : ""}` : "Not posted: videos are only made"}{settings.madeForKids !== null && postsToYouTube(accounts.data?.accounts || [], settings) ? `; on YouTube ${settings.madeForKids ? "made" : "not made"} for kids` : ""}</li>
               <li>{creditsLabel(episodeCredits(settings))} per video · about {creditsLabel(perMonth)} a month</li>
             </ul>
             {user && perMonth > plan.credits && <p className="notice warn">This schedule needs about {creditsLabel(perMonth)} a month; your plan has {creditsLabel(plan.credits)}. Episodes are skipped when credits run out. <Link className="link" to="/app/billing">See plans</Link></p>}
@@ -256,8 +262,8 @@ export function SeriesWizard() {
       )}
       <div className="row between" style={{ marginTop: 24 }}>
         {step > 0 ? <button type="button" className="btn" onClick={() => setStep(step - 1)}><ArrowLeft size={16} aria-hidden="true" /> Back</button> : <span />}
-        {step > 0 && step < 3 && <button type="button" className="btn primary" disabled={template === "custom" && step === 1 && settings.prompt.trim().length < 3} onClick={() => setStep(step + 1)}>Continue <ArrowRight size={16} aria-hidden="true" /></button>}
-        {step === 3 && <button type="button" className="btn primary big" disabled={busy} onClick={create}>{busy ? <span className="spinner" aria-hidden="true" /> : <Check size={18} aria-hidden="true" />} Create series</button>}
+        {step > 0 && step < 3 && <button type="button" className="btn primary" disabled={(template === "custom" && step === 1 && settings.prompt.trim().length < 3) || (step === 2 && kidsMissing)} onClick={() => setStep(step + 1)}>Continue <ArrowRight size={16} aria-hidden="true" /></button>}
+        {step === 3 && <button type="button" className="btn primary big" disabled={busy || kidsMissing} onClick={create}>{busy ? <span className="spinner" aria-hidden="true" /> : <Check size={18} aria-hidden="true" />} Create series</button>}
       </div>
     </div>
   );

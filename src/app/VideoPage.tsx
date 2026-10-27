@@ -6,7 +6,7 @@ import { useToast } from "../ui";
 import { ConfirmDialog } from "./pickers";
 import { VideoEditor } from "./EditVideo";
 import { HighlightEditor } from "./clip-editor";
-import { PlatformBadge, PublicationLine, StatusChip, making, phaseText } from "./video-ui";
+import { MadeForKids, PlatformBadge, PublicationLine, StatusChip, making, phaseText } from "./video-ui";
 import { specCredits, visualPart, type HighlightSpec, type Spec, type StorySpec } from "../../shared/formats";
 import { creditsLabel } from "../../shared/credits";
 import { comingSoon, platforms, postCaption } from "../../shared/social";
@@ -47,16 +47,20 @@ function PostPanel({ video, onDone }: { video: Video; onDone: () => void }) {
   const [later, setLater] = useState(false);
   const [at, setAt] = useState(() => local(Math.floor(Date.now() / 1000) + 3600));
   const [privately, setPrivately] = useState(false);
+  const [kids, setKids] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const usable = (accounts.data?.accounts || []).filter((a) => a.status === "active");
   const tiktokDrafts = !!accounts.data?.platforms?.find((p) => p.id === "tiktok")?.drafts;
   const allSoon = !!accounts.data?.platforms?.length && accounts.data.platforms.every((p) => p.soon);
   const toDrafts = tiktokDrafts && usable.some((a) => a.platform === "tiktok" && chosen.includes(a.id));
+  const toYouTube = usable.some((a) => a.platform === "youtube" && chosen.includes(a.id));
   const pubs = (video.publications || []).filter((p) => p.status !== "canceled");
   const send = async () => {
     setBusy(true);
     try {
-      await post(`/videos/${video.id}/publish`, { accountIds: chosen, private: privately, ...(later && { at: Math.floor(new Date(at).getTime() / 1000) }) });
+      await post(`/videos/${video.id}/publish`, {
+        accountIds: chosen, private: privately, ...(toYouTube && { madeForKids: kids }), ...(later && { at: Math.floor(new Date(at).getTime() / 1000) }),
+      });
       toast(later ? "Scheduled." : "Posting in a minute.", "good");
       setChosen([]);
       onDone();
@@ -110,7 +114,8 @@ function PostPanel({ video, onDone }: { video: Video; onDone: () => void }) {
           {later && <input type="datetime-local" className="input" value={at} onChange={(e) => setAt(e.target.value)} aria-label="Post at" />}
           {toDrafts && <p className="small muted">TikTok: it goes to your TikTok inbox as a draft, and you post it in the TikTok app.</p>}
           <label className="check"><input type="checkbox" checked={privately} onChange={(e) => setPrivately(e.target.checked)} /> Post privately (only you can see it; not on Instagram{tiktokDrafts ? " or TikTok drafts" : ""})</label>
-          <button type="button" className="btn primary" disabled={busy || !chosen.length} onClick={send}>{busy ? <span className="spinner" aria-hidden="true" /> : <Send size={16} aria-hidden="true" />} {later ? "Schedule" : "Post"}</button>
+          {toYouTube && <MadeForKids value={kids} onChange={setKids} />}
+          <button type="button" className="btn primary" disabled={busy || !chosen.length || (toYouTube && kids === null)} onClick={send}>{busy ? <span className="spinner" aria-hidden="true" /> : <Send size={16} aria-hidden="true" />} {later ? "Schedule" : "Post"}</button>
         </>
       )}
     </div>

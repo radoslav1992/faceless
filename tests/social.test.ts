@@ -479,6 +479,27 @@ describe("connecting accounts", () => {
     expect((await call(worker, s.env, "DELETE", `/api/accounts/${accountId}`, undefined, s.user.cookie)).status).toBe(404);
   });
 
+  it("forgets what YouTube told us about a channel's posts when it is disconnected; other networks' history stays", async () => {
+    const s = setup();
+    const t = now();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const youtube = addAccount(s, "youtube", "UC1"), tiktok = addAccount(s, "tiktok", "open-1");
+    s.sqlite.prepare("INSERT INTO videos(id,user_id,spec,render_status,created_at,updated_at) VALUES ('v1',?,'{}','ready',?,?)").run(s.user.id, t, t);
+    const pub = (id: string, account: string, platform: string) =>
+      s.sqlite.prepare(
+        "INSERT INTO publications(id,user_id,video_id,account_id,account_name,platform,scheduled_at,status,external_id,url,published_at,views,likes,comments,metrics_at,created_at,updated_at) VALUES (?,?,'v1',?,'Brand (@brand)',?,?,'published','abcdefghijk','https://example.com/p',?,40,3,1,?,?,?)",
+      ).run(id, s.user.id, account, platform, t, t, t, t, t);
+    pub("p-yt", youtube, "youtube");
+    pub("p-tt", tiktok, "tiktok");
+    expect((await call(worker, s.env, "DELETE", `/api/accounts/${youtube}`, undefined, s.user.cookie)).status).toBe(200);
+    const row = (id: string) => s.sqlite.prepare("SELECT status,account_id,account_name,external_id,url,views,likes,comments,metrics_at FROM publications WHERE id=?").get(id);
+    expect(row("p-yt")).toEqual({ status: "published", account_id: null, account_name: "", external_id: null, url: null, views: null, likes: null, comments: null, metrics_at: null });
+    expect(row("p-tt")).toEqual({ status: "published", account_id: tiktok, account_name: "Brand (@brand)", external_id: "abcdefghijk", url: "https://example.com/p", views: 40, likes: 3, comments: 1, metrics_at: t });
+    // The history still lists it, as a disconnected account's post.
+    const shown = (await call(worker, s.env, "GET", "/api/videos/v1/publications", undefined, s.user.cookie)).data.publications;
+    expect(shown.find((p: any) => p.id === "p-yt")).toMatchObject({ status: "published", accountName: "Disconnected account", url: null, views: null });
+  });
+
   it("revokes Google's access when a YouTube channel is disconnected or its account deleted, and goes on when Google fails", async () => {
     const s = setup();
     const youtube = async (externalId: string, refreshToken?: string) => {

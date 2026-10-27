@@ -260,6 +260,10 @@ function terms(op: Operator): Section[] {
               On YouTube, and on TikTok when we post there directly, you can choose to post privately, so that only the account can see the video. For a
               TikTok draft, you choose who can see it when you post it.
             </li>
+            <li>
+              YouTube asks every creator whether their videos are made for kids. You answer it for each video you post to YouTube, and once for the
+              episodes of a series; we never answer it for you.
+            </li>
             <li>You can cancel or move a scheduled post until it starts publishing.</li>
             <li>
               Where importing from YouTube is available on your plan, we also use your YouTube connection to list your channel's latest videos and, when
@@ -629,13 +633,17 @@ function privacy(op: Operator): Section[] {
           </p>
           <ul>
             <li>
-              <strong>What we access:</strong> when you connect, your channel's ID, name, handle and picture; then we upload the videos you post or schedule
-              to it, with their titles and descriptions, and read the views, likes and comment counts of those videos for 30 days after each is posted.
-              Where importing from YouTube is available on your plan, we also list your channel's latest videos and download the one you choose.
+              <strong>What we access:</strong> when you connect, your channel's ID, name, handle and picture, read again every week while it stays
+              connected (which also checks that you still allow our access); then we upload the videos you post or schedule to it, with their titles,
+              descriptions and your answer to whether they are made for kids, and read the views, likes and comment counts of those videos: often in their
+              first 30 days, then weekly while the channel stays connected. Where importing from YouTube is available on your plan, we also list your
+              channel's latest videos and download the one you choose.
             </li>
             <li>
               <strong>What we store and why:</strong> the access tokens (encrypted), the channel's details and, for each video we post, its YouTube ID,
-              link, status and those counts — to post for you and to show you how your videos do. We use this data only to provide {name} to you.
+              link, status and those counts — to post for you and to show you how your videos do. We use this data only to provide {name} to you, and
+              keep it only while we can refresh it: a video's YouTube ID, link and counts that could not be refreshed for 30 days (for example because the
+              video was deleted on YouTube) are deleted.
             </li>
             <li>
               <strong>Who we share it with:</strong> Google, to post your videos, and the providers that host {name} (see above). We don't sell it, don't
@@ -644,10 +652,11 @@ function privacy(op: Operator): Section[] {
             </li>
             <li>
               <strong>How to remove our access:</strong> disconnect the channel on the Channels page, or delete your account. We then delete its tokens
-              and ask Google to revoke our access. You can also revoke it at any time in your{" "}
+              and the YouTube data of the videos we posted (their YouTube IDs, links and counts, and the channel's name), and ask Google to revoke our
+              access; your posting history keeps only that a video was posted. You can also revoke it at any time in your{" "}
               <a href="https://security.google.com/settings/security/permissions" target="_blank" rel="noreferrer">Google account's security settings</a>;
-              the channel then shows as needing to be connected again, until you reconnect or disconnect it. The links and counts of videos already posted
-              stay in your posting history until you delete those videos or your account.
+              the channel then shows as needing to be connected again, and if you don't reconnect it within 14 days we remove it and its YouTube data
+              the same way.
             </li>
           </ul>
           <p>Questions about how we use your YouTube data? Please {op.contact}.</p>

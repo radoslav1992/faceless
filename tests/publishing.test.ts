@@ -6,6 +6,7 @@ import { Publication } from "../server/publish-workflow";
 import { videoReady } from "../server/series";
 import { tiktokChunks } from "../server/social/tiktok";
 import { dueForStats } from "../server/metrics";
+import { keepYouTubeData } from "../server/youtube-data";
 import { specSchema } from "../shared/formats";
 import { seriesSettingsSchema } from "../shared/series";
 import type { Tokens } from "../server/social";
@@ -119,10 +120,10 @@ async function addAccount(s: Ctx, platform: "tiktok" | "youtube" | "instagram", 
   return id;
 }
 
-function addPublication(s: Ctx, videoId: string, accountId: string, platform: string, o: { at?: number; status?: string; private?: boolean } = {}) {
+function addPublication(s: Ctx, videoId: string, accountId: string, platform: string, o: { at?: number; status?: string; private?: boolean; kids?: boolean } = {}) {
   const id = crypto.randomUUID(), t = now();
-  s.sqlite.prepare("INSERT INTO publications(id,user_id,video_id,account_id,account_name,platform,scheduled_at,private,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
-    .run(id, s.user.id, videoId, accountId, `${platform} account (@brandco)`, platform, o.at ?? now() - 5, o.private ? 1 : 0, o.status ?? "scheduled", t, t);
+  s.sqlite.prepare("INSERT INTO publications(id,user_id,video_id,account_id,account_name,platform,scheduled_at,private,made_for_kids,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+    .run(id, s.user.id, videoId, accountId, `${platform} account (@brandco)`, platform, o.at ?? now() - 5, o.private ? 1 : 0, o.kids === undefined ? null : o.kids ? 1 : 0, o.status ?? "scheduled", t, t);
   return id;
 }
 const publication = (s: Ctx, id: string) => s.sqlite.prepare("SELECT * FROM publications WHERE id=?").get(id) as any;
@@ -158,7 +159,12 @@ describe("posting a video", () => {
     const tiktok = await addAccount(s, "tiktok"), youtube = await addAccount(s, "youtube"), instagram = await addAccount(s, "instagram");
     const pending = await addVideo(s, { status: "pending" });
     const before = now();
+    // YouTube asks every creator whether the video is made for kids: we never answer for them.
     let r = await call(worker, s.env, "POST", `/api/videos/${pending}/publish`, { accountIds: [tiktok, youtube, tiktok] }, s.user.cookie);
+    expect(r.status).toBe(400);
+    expect(r.data.error).toBe("Say whether this video is made for kids. YouTube asks every creator whether their videos are made for kids.");
+    expect(publicationsOf(s, pending)).toHaveLength(0);
+    r = await call(worker, s.env, "POST", `/api/videos/${pending}/publish`, { accountIds: [tiktok, youtube, tiktok], madeForKids: false }, s.user.cookie);
     expect(r.status).toBe(201);
     // "Now" is in a minute (the cron's next run).
     expect(r.data.scheduledAt).toBeGreaterThanOrEqual(before + 60);
@@ -172,6 +178,8 @@ describe("posting a video", () => {
     // Posting it is approving it; the account's name is kept with the publication (for after a disconnect).
     expect(video(s, pending)).toMatchObject({ status: "approved", reviewed_at: expect.any(Number) });
     expect(publicationsOf(s, pending).map((p) => p.account_name)).toEqual(["tiktok account (@brandco)", "youtube account (@brandco)"]);
+    // The answer goes with the YouTube post only.
+    expect(publicationsOf(s, pending).map((p) => [p.platform, p.made_for_kids])).toEqual([["tiktok", null], ["youtube", 0]]);
 
     // At a chosen time, privately (TikTok and YouTube only).
     const other = await addVideo(s);
@@ -320,7 +328,7 @@ describe("series episodes", () => {
     const s = setup();
     const tiktok = await addAccount(s, "tiktok"), youtube = await addAccount(s, "youtube"), instagram = await addAccount(s, "instagram");
     const expired = await addAccount(s, "youtube", { status: "expired" });
-    const series = addSeries(s, { accounts: [tiktok, youtube, instagram, expired], private: true });
+    const series = addSeries(s, { accounts: [tiktok, youtube, instagram, expired], private: true, madeForKids: true });
     const slot = now() + 5 * HOUR;
     // Still being made (made ahead of its slot): nothing is scheduled yet.
     const episode = await addVideo(s, { seriesId: series, slotAt: slot, render: "running" });
@@ -334,6 +342,8 @@ describe("series episodes", () => {
     const rows = publicationsOf(s, episode);
     expect(rows.map((p) => [p.platform, p.account_id])).toEqual([["tiktok", tiktok], ["youtube", youtube]]);
     expect(rows.every((p) => p.scheduled_at === slot && p.private === 1 && p.status === "scheduled")).toBe(true);
+    // The series' "made for kids" answer goes with its YouTube posts.
+    expect(rows.map((p) => p.made_for_kids)).toEqual([null, 1]);
     // The owner hears once when it posts.
     expect(s.env.EMAIL.sent).toHaveLength(1);
     expect(s.env.EMAIL.sent[0]).toMatchObject({ to: s.user.email, subject: "New episode of “Kitchen facts”: Meet the new blender." });
@@ -748,7 +758,8 @@ describe("publishing", () => {
     expect(start.headers.get("X-Upload-Content-Type")).toBe("video/mp4");
     const meta = jsonBody(start);
     expect(meta.snippet).toEqual({ title: "Quiet blender 3", description: "Meet the new blender.\nIt is quiet.\n\n#kitchen #launch #Shorts", categoryId: "22" });
-    expect(meta.status).toEqual({ privacyStatus: "public", selfDeclaredMadeForKids: false, containsSyntheticMedia: false });
+    // No "made for kids" answer (a series saved before we asked): YouTube applies the channel's own setting.
+    expect(meta.status).toEqual({ privacyStatus: "public", containsSyntheticMedia: false });
     const put = calls.find((c) => c.method === "PUT")!;
     expect(put.headers.get("Content-Range")).toBe("bytes 0-4095/4096");
     expect(same(bytesOf(put), fill(4096, 1))).toBe(true);
@@ -761,7 +772,7 @@ describe("publishing", () => {
   it("resumes an interrupted YouTube upload instead of uploading a second video (and posts privately when asked)", async () => {
     const s = setup();
     const account = await addAccount(s, "youtube");
-    const pubId = addPublication(s, await addVideo(s), account, "youtube", { private: true });
+    const pubId = addPublication(s, await addVideo(s), account, "youtube", { private: true, kids: true });
     const session = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&upload_id=abc";
     const calls = mockFetch([
       ["POST", "https://www.googleapis.com/upload/youtube/v3/videos", () => new Response(null, { status: 200, headers: { Location: session } })],
@@ -776,7 +787,7 @@ describe("publishing", () => {
     expect(p).toMatchObject({ status: "published", external_id: "abcdefghijk" });
     const starts = calls.filter((c) => c.method === "POST");
     expect(starts).toHaveLength(1);
-    expect(jsonBody(starts[0]).status.privacyStatus).toBe("private");
+    expect(jsonBody(starts[0]).status).toEqual({ privacyStatus: "private", selfDeclaredMadeForKids: true, containsSyntheticMedia: false });
     const puts = calls.filter((c) => c.method === "PUT");
     expect(puts.map((c) => c.headers.get("Content-Range"))).toEqual(["bytes 0-4095/4096", "bytes */4096", "bytes 1000-4095/4096"]);
     expect(bytesOf(puts[2])).toEqual(fill(4096, 1).slice(1000));
@@ -856,5 +867,89 @@ describe("publishing", () => {
     const status = (id: string) => (s.sqlite.prepare("SELECT status FROM social_accounts WHERE id=?").get(id) as any).status;
     expect([status(renewed), status(revoked), status(fresh), status(gone)]).toEqual(["active", "expired", "active", "expired"]);
     vi.restoreAllMocks();
+  });
+});
+
+describe("YouTube data (YouTube API Services policies)", () => {
+  /** A published post on the account, with a video ID, a link and counts read `readAgo` seconds ago (null: never). */
+  async function posted(s: Ctx, account: string, platform: "youtube" | "tiktok", publishedAgo: number, readAgo: number | null) {
+    const id = addPublication(s, await addVideo(s), account, platform, { status: "published" });
+    s.sqlite.prepare("UPDATE publications SET external_id=?,url=?,published_at=?,views=5,likes=1,comments=0,metrics_at=?,metrics_checked_at=? WHERE id=?")
+      .run("abcdefghijk", "https://youtube.com/shorts/abcdefghijk", now() - publishedAgo, readAgo === null ? null : now() - readAgo, readAgo === null ? null : now() - readAgo, id);
+    return id;
+  }
+  const account = (s: Ctx, id: string) => s.sqlite.prepare("SELECT * FROM social_accounts WHERE id=?").get(id) as any;
+  const quiet = () => { vi.spyOn(console, "log").mockImplementation(() => {}); vi.spyOn(console, "warn").mockImplementation(() => {}); };
+
+  it("reads a YouTube post's stats weekly while its channel is connected; other networks' only for 30 days", async () => {
+    const s = setup();
+    const youtube = await addAccount(s, "youtube"), tiktok = await addAccount(s, "tiktok");
+    const lastWeek = await posted(s, youtube, "youtube", 40 * DAY, 7 * DAY);
+    await posted(s, youtube, "youtube", 40 * DAY, 2 * DAY);
+    await posted(s, tiktok, "tiktok", 40 * DAY, 7 * DAY);
+    expect((await dueForStats(s.env, 10)).map((d) => d.id)).toEqual([lastWeek]);
+  });
+
+  it("checks connected channels weekly: their details are read again, and a channel Google refuses is expired", async () => {
+    const s = setup();
+    quiet();
+    const fresh = await addAccount(s, "youtube", { externalId: "UCfresh" });
+    const due = await addAccount(s, "youtube", { externalId: "UCdue", tokens: { expiresAt: now() - 10 } });
+    const revoked = await addAccount(s, "youtube", { externalId: "UCrevoked", tokens: { expiresAt: now() - 10, refreshToken: "revoked" } });
+    s.sqlite.prepare("UPDATE social_accounts SET created_at=? WHERE id IN (?,?)").run(now() - 8 * DAY, due, revoked);
+    const pub = await posted(s, due, "youtube", DAY, HOUR);
+    const calls = mockFetch([
+      ["POST", "https://oauth2.googleapis.com/token", (c) => (c.body as URLSearchParams).get("refresh_token") === "revoked"
+        ? ok({ error: "invalid_grant" }, { status: 400 })
+        : ok({ access_token: "youtube-access-2", expires_in: 3599 })],
+      ["GET", "https://www.googleapis.com/youtube/v3/channels", () =>
+        ok({ items: [{ id: "UCdue", snippet: { title: "Renamed channel", customUrl: "@renamed", thumbnails: { default: { url: "https://yt3.ggpht.com/new.jpg" } } } }] })],
+    ]);
+    await keepYouTubeData(s.env);
+    expect(account(s, due)).toMatchObject({ name: "Renamed channel", handle: "renamed", avatar_url: "https://yt3.ggpht.com/new.jpg", status: "active", profile_at: expect.any(Number) });
+    expect(calls.find((c) => c.method === "GET")!.headers.get("Authorization")).toBe("Bearer youtube-access-2");
+    // The posts made to it carry the new name too (shown once the channel is gone).
+    expect(publication(s, pub).account_name).toBe("Renamed channel (@renamed)");
+    expect(account(s, revoked).status).toBe("expired");
+    // Connected less than a week ago: left alone.
+    expect(account(s, fresh)).toMatchObject({ name: "youtube account", profile_at: null });
+    expect(calls.filter((c) => c.method === "GET")).toHaveLength(1);
+  });
+
+  it("removes a YouTube connection that stopped working 14 days ago, with what YouTube told us about its posts", async () => {
+    const s = setup();
+    quiet();
+    vi.stubGlobal("fetch", async () => { throw new Error("no network calls expected"); });
+    const lost = await addAccount(s, "youtube", { status: "expired" }), recent = await addAccount(s, "youtube", { status: "expired" });
+    const tiktok = await addAccount(s, "tiktok", { status: "expired" });
+    s.sqlite.prepare("UPDATE social_accounts SET updated_at=? WHERE id IN (?,?)").run(now() - 15 * DAY, lost, tiktok);
+    const done = await posted(s, lost, "youtube", 3 * DAY, DAY);
+    const waiting = addPublication(s, await addVideo(s), lost, "youtube", { at: now() + DAY });
+    const kept = await posted(s, recent, "youtube", 3 * DAY, DAY);
+    const series = addSeries(s, { accounts: [lost, tiktok], madeForKids: false });
+    await keepYouTubeData(s.env);
+    expect((s.sqlite.prepare("SELECT id FROM social_accounts ORDER BY id").all() as any[]).map((a) => a.id)).toEqual([recent, tiktok].sort());
+    // The post stays in the history without its YouTube ID, link, counts or the channel's name.
+    expect(publication(s, done)).toMatchObject({
+      status: "published", account_id: null, account_name: "", external_id: null, url: null, views: null, likes: null, comments: null, metrics_at: null,
+    });
+    expect(publication(s, waiting)).toMatchObject({ status: "canceled", account_id: null });
+    expect(JSON.parse((s.sqlite.prepare("SELECT settings FROM series WHERE id=?").get(series) as any).settings).accounts).toEqual([tiktok]);
+    // Stopped working 0 days ago: the person can still reconnect it.
+    expect(publication(s, kept)).toMatchObject({ account_id: recent, external_id: "abcdefghijk", views: 5 });
+  });
+
+  it("forgets a YouTube post's video ID and counts once they haven't been refreshed for 30 days", async () => {
+    const s = setup();
+    quiet();
+    vi.stubGlobal("fetch", async () => { throw new Error("no network calls expected"); });
+    const youtube = await addAccount(s, "youtube"), tiktok = await addAccount(s, "tiktok");
+    const stale = await posted(s, youtube, "youtube", 60 * DAY, 31 * DAY), neverRead = await posted(s, youtube, "youtube", 31 * DAY, null);
+    const fresh = await posted(s, youtube, "youtube", 60 * DAY, 6 * DAY), other = await posted(s, tiktok, "tiktok", 60 * DAY, 31 * DAY);
+    await keepYouTubeData(s.env);
+    for (const id of [stale, neverRead])
+      expect(publication(s, id)).toMatchObject({ status: "published", account_id: youtube, external_id: null, url: null, views: null, likes: null, metrics_at: null });
+    expect(publication(s, fresh)).toMatchObject({ external_id: "abcdefghijk", views: 5 });
+    expect(publication(s, other)).toMatchObject({ external_id: "abcdefghijk", views: 5 });
   });
 });

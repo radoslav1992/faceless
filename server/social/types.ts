@@ -38,6 +38,8 @@ export type PublishContext = {
   synthetic: boolean;
   /** Post so only the account sees it (TikTok SELF_ONLY, YouTube private); Instagram has no private posts. */
   private: boolean;
+  /** The creator's answer to YouTube's "made for kids" question; null leaves it to the channel's own setting. */
+  madeForKids: boolean | null;
   media: PublishMedia;
   /**
    * Saves provider state before an irreversible call (and after IDs are known), so a step that is retried or replayed
@@ -82,6 +84,8 @@ export interface Platform {
   authorizeUrl(env: Env, a: { state: string; redirectUri: string; codeVerifier: string }): Promise<string>;
   exchange(env: Env, a: { code: string; redirectUri: string; codeVerifier: string }): Promise<{ tokens: Tokens; profile: Profile }>;
   refresh?(env: Env, tokens: Tokens): Promise<Tokens>;
+  /** The connected account's details as the network has them now (YouTube re-reads them weekly, youtube-data.ts). */
+  profile?(env: Env, tokens: Tokens): Promise<Profile>;
   /** Starts the post: returns it published, or a ticket to poll with `status`. */
   publish(env: Env, ctx: PublishContext): Promise<PublishResult>;
   status?(env: Env, ctx: PublishContext, ticket: Ticket): Promise<PublishResult>;
