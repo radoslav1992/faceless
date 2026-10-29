@@ -1,10 +1,10 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AudioLines, Download, Eye, Film, Image as ImageIcon, Music, Pencil, Plus, Search, Sparkles, Trash2, Upload as UploadIcon, WandSparkles } from "lucide-react";
 import { Modal, Spinner, Switch, useToast } from "../ui";
 import { ApiError, bytes, del, errorText, patch, post, seconds, useApi, type LibraryItem, type LibraryKind } from "../lib";
 import { ConfirmDialog, Empty, PlayButton, firstFrame, itemLength, usePreviewAudio, useStableCallback } from "./pickers";
 import { categoriesFor, categoryLabel, CATEGORY_MAX } from "../../shared/library";
-import { SOUND_MAX_SECONDS, SOUND_MIN_SECONDS, TRANSITION_CATEGORY } from "../../shared/sounds";
+import { soundIdeas, SOUND_MAX_SECONDS, SOUND_MIN_SECONDS, TRANSITION_CATEGORY } from "../../shared/sounds";
 
 // Admin → Library: the shared music, clips, pictures and sound effects people search and pick from
 // (server/routes/admin-library.ts). Items are uploaded, added from the administrator's own media (an upload, or an AI
@@ -40,7 +40,7 @@ const maxBytes: Record<LibraryKind, number> = { clip: 50 * MB, image: 20 * MB, m
 /** Music and sound effects are heard; clips and pictures are seen. */
 const heard = (kind: LibraryKind) => kind === "music" || kind === "sfx";
 /** ElevenLabs makes sound effects of these lengths (server/providers/elevenlabs.ts). */
-const MADE_SECONDS = { min: 0.5, max: 22 };
+const MADE_SECONDS = { min: 0.5, max: 30 };
 const descriptionHint = "What it shows or sounds like, in plain words: people search by it.";
 /** An item's file for the administrators, offered or switched off. */
 const adminFile = (id: string) => `/api/admin/library/${id}/file`;
@@ -89,7 +89,7 @@ export function LibraryTab() {
   return (
     <div className="stack" style={{ gap: 20 }}>
       <LibraryUpload onUploaded={added} onFromMedia={() => setAdding(true)} />
-      <SoundMaker onMade={added} />
+      <SoundMaker onSaved={(item) => setData((d) => ({ items: [item, ...(d?.items || []).filter((i) => i.id !== item.id)] }))} />
       <section aria-labelledby="library-list-title">
         <div className="section-head">
           <h2 id="library-list-title">Library items</h2>
@@ -549,17 +549,48 @@ function LibraryUpload({ onUploaded, onFromMedia }: { onUploaded: (item: AdminIt
   );
 }
 
+/** A take of a sound effect: the MP3 ElevenLabs made, what it was made from, and the library item once it is kept. */
+type Take = {
+  id: string; n: number; file: File; url: string; duration: number; prompt: string; name: string; category: string; tags: string;
+  saving?: boolean; saved?: AdminItem;
+};
+/** A take made by ElevenLabs from a description (POST /admin/library/generate: an MP3, nothing saved yet). */
+async function makeTake(prompt: string, seconds: number) {
+  let r: Response;
+  try {
+    r = await fetch("/api/admin/library/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, seconds }) });
+  } catch {
+    throw new TypeError("We can't reach the server. Check your connection and try again.");
+  }
+  if (!r.ok) {
+    const data = (await r.json().catch(() => ({}))) as { error?: string };
+    throw new ApiError(data.error || "Something went wrong. Please try again.", r.status, data);
+  }
+  return new File([await r.blob()], "sound.mp3", { type: "audio/mpeg" });
+}
 /**
- * A sound effect made with ElevenLabs from a description (POST /admin/library/generate), added to the library as made
- * with AI; its details open right after, to check. Each one is billed by ElevenLabs.
+ * Sound effects made with ElevenLabs from a description (billed by ElevenLabs per take): each try is a take to listen
+ * to, kept in the library (uploaded as made with AI, its description what it was made from) or discarded. An idea
+ * fills in the form.
  */
-function SoundMaker({ onMade }: { onMade: (item: AdminItem) => void }) {
+function SoundMaker({ onSaved }: { onSaved: (item: AdminItem) => void }) {
   const toast = useToast();
   const [form, setForm] = useState({ prompt: "", seconds: "1.5", name: "", category: TRANSITION_CATEGORY, tags: "" });
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [takes, setTakes] = useState<Take[]>([]);
+  const audio = usePreviewAudio();
+  const urls = useRef(new Set<string>());
+  const made = useRef(0);
+  // The takes' audio lives in the browser until the page is left.
+  useEffect(() => () => urls.current.forEach((u) => URL.revokeObjectURL(u)), []);
   const set = (p: Partial<typeof form>) => setForm((f) => ({ ...f, ...p }));
-  const submit = async (e: FormEvent) => {
+  const update = (id: string, patch: Partial<Take>) => setTakes((list) => list.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+  const idea = (i: number) => {
+    const d = soundIdeas[i];
+    if (d) setForm({ prompt: d.prompt, seconds: String(d.seconds), name: d.name, category: d.category, tags: d.tags });
+  };
+  const make = async (e: FormEvent) => {
     e.preventDefault();
     if (busy) return;
     setProblem(null);
@@ -568,17 +599,41 @@ function SoundMaker({ onMade }: { onMade: (item: AdminItem) => void }) {
     if (!(length >= MADE_SECONDS.min && length <= MADE_SECONDS.max)) return setProblem(`ElevenLabs makes sounds of ${MADE_SECONDS.min} to ${MADE_SECONDS.max} seconds.`);
     setBusy(true);
     try {
-      const { item } = await post<{ item: AdminItem }>("/admin/library/generate", {
-        prompt, seconds: length, name: form.name.trim() || prompt.slice(0, 60), category: form.category.trim(), tags: splitTags(form.tags).join(", "),
-      });
-      toast(`${item.name} is in the library. Listen to it, then check its details.`, "good");
-      setForm((f) => ({ ...f, prompt: "", name: "", tags: "" }));
-      onMade(item);
+      const file = await makeTake(prompt, length);
+      const duration = await measure(file, "sfx").then((m) => m.duration).catch(() => length);
+      const url = URL.createObjectURL(file);
+      urls.current.add(url);
+      const take: Take = {
+        id: crypto.randomUUID(), n: ++made.current, file, url, duration, prompt, name: form.name.trim() || prompt.slice(0, 60), category: form.category.trim(), tags: splitTags(form.tags).join(", "),
+      };
+      setTakes((list) => [take, ...list]);
+      audio.toggle(take.id, url);
     } catch (err) {
       setProblem(errorText(err));
     } finally {
       setBusy(false);
     }
+  };
+  const save = async (t: Take) => {
+    update(t.id, { saving: true });
+    try {
+      const query = new URLSearchParams({
+        kind: "sfx", name: t.name, description: t.prompt, category: t.category, tags: t.tags, ai: "1", duration: t.duration.toFixed(2), width: "0", height: "0",
+      });
+      const { item } = await sendFile<{ item: AdminItem }>(`/admin/library/file?${query}`, t.file, "audio/mpeg");
+      update(t.id, { saving: false, saved: item });
+      onSaved(item);
+      toast(`${item.name} is in the library.`, "good");
+    } catch (err) {
+      update(t.id, { saving: false });
+      toast(errorText(err), "bad");
+    }
+  };
+  const discard = (t: Take) => {
+    if (audio.playing === t.id) audio.stop();
+    URL.revokeObjectURL(t.url);
+    urls.current.delete(t.url);
+    setTakes((list) => list.filter((x) => x.id !== t.id));
   };
   return (
     <section className="card" aria-labelledby="sound-maker-title">
@@ -586,12 +641,19 @@ function SoundMaker({ onMade }: { onMade: (item: AdminItem) => void }) {
         <div>
           <h2 id="sound-maker-title">Make a sound effect</h2>
           <p>
-            ElevenLabs makes a sound from a description, billed to its account per sound. Videos play the “{TRANSITION_CATEGORY}” sounds on scene changes and the
-            others when a scene that fits starts.
+            ElevenLabs makes a take from a description (billed to its account, about 20–40 credits a second). Listen to it, make another if it isn't right, and
+            save the ones you like. Videos play the “{TRANSITION_CATEGORY}” sounds on scene changes and the others when a scene that fits starts.
           </p>
         </div>
       </div>
-      <form className="form-grid" onSubmit={submit}>
+      <form className="form-grid" onSubmit={make}>
+        <div className="field full">
+          <label className="label" htmlFor="sfx-idea">Start from an idea <span className="muted">(optional)</span></label>
+          <select id="sfx-idea" className="select" value="" onChange={(e) => idea(Number(e.target.value))} disabled={busy}>
+            <option value="">Choose one to fill in the form…</option>
+            {soundIdeas.map((d, i) => <option key={d.name} value={i}>{d.name} · {d.category} · {d.seconds} s</option>)}
+          </select>
+        </div>
         <div className="field full">
           <label className="label" htmlFor="sfx-prompt">Description</label>
           <textarea id="sfx-prompt" className="textarea" rows={2} value={form.prompt} onChange={(e) => set({ prompt: e.target.value })} maxLength={300} disabled={busy}
@@ -618,11 +680,35 @@ function SoundMaker({ onMade }: { onMade: (item: AdminItem) => void }) {
         {problem && <div className="notice bad full" role="alert">{problem}</div>}
         <div className="full row wrap">
           <button type="submit" className="btn primary" disabled={busy || form.prompt.trim().length < 3}>
-            {busy ? <Spinner label="Making the sound" /> : <WandSparkles size={16} aria-hidden="true" />}Make with ElevenLabs
+            {busy ? <Spinner label="Making the sound" /> : <WandSparkles size={16} aria-hidden="true" />}{takes.length ? "Make another take" : "Make with ElevenLabs"}
           </button>
           {busy && <span className="small muted" role="status">Making the sound… (up to a minute)</span>}
         </div>
       </form>
+      {takes.length > 0 && (
+        <div className="stack" style={{ gap: 8, marginTop: 16 }}>
+          <span className="label">Takes <span className="muted small">· nothing is in the library until you save it; takes you don't save are gone when you leave the page</span></span>
+          <ul className="pick-rows list-plain">
+            {takes.map((t) => (
+              <li key={t.id} className="pick-row">
+                <PlayButton playing={audio.playing === t.id} onClick={() => audio.toggle(t.id, t.url)} label={t.name} />
+                <span className="grow" style={{ minWidth: 0 }}>
+                  <span className="name" style={{ display: "block" }}>{t.name} <span className="muted small">· take {t.n}</span></span>
+                  <span className="small muted clip" title={t.prompt}>{[t.category, `${t.duration.toFixed(1)} s`, t.prompt].filter(Boolean).join(" · ")}</span>
+                </span>
+                {t.saved ? <span className="chip">In the library</span> : (
+                  <button type="button" className="btn sm primary" disabled={t.saving} onClick={() => void save(t)}>
+                    {t.saving ? <Spinner label="Saving" /> : <Plus size={14} aria-hidden="true" />}Save to library
+                  </button>
+                )}
+                <button type="button" className="btn icon ghost" onClick={() => discard(t)} aria-label={`Discard the take of ${t.name}`} title={t.saved ? "Remove from this list" : "Discard"}>
+                  <Trash2 size={16} aria-hidden="true" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   );
 }

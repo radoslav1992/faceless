@@ -267,8 +267,8 @@ describe("library", () => {
     expect(usage).toEqual({ [picture]: 1, [track]: 1 });
   });
 
-  it("takes sound effects uploaded or made with ElevenLabs, of their own lengths, and counts the videos that play them", async () => {
-    const { env, admin, user, upload, own, sqlite } = await setup({ ELEVENLABS_API_KEY: "el" });
+  it("takes sound effects uploaded or made with ElevenLabs (listened to first), of their own lengths, and counts the videos that play them", async () => {
+    const { admin, user, upload, own, sqlite } = await setup({ ELEVENLABS_API_KEY: "el" });
     // Uploaded: 0.2 to 30 seconds, an audio file of up to 10 MB.
     const whoosh = await upload({ kind: "sfx", name: "Whoosh", category: "Transition", tags: "whoosh", duration: "1.2" }, new Uint8Array(200), "audio/mpeg");
     expect(whoosh.status).toBe(201);
@@ -281,33 +281,38 @@ describe("library", () => {
     await own("upload", "beep.mp3", "audio/mpeg", new Uint8Array(100), { duration: 1 });
     expect((await admin("GET", "/api/admin/library/media?kind=sfx")).status).toBe(400);
 
-    // Made with ElevenLabs from a description: stored as an MP3, made with AI, the description its prompt.
+    // Made with ElevenLabs from a description: a take (an MP3) to listen to; nothing is saved until it is uploaded.
     const sent: { url: string; headers: any; body: any }[] = [];
     let reply = () => new Response(new Uint8Array([0x49, 0x44, 0x33, ...new Array(2000).fill(1)]), { headers: { "Content-Type": "audio/mpeg" } });
     vi.stubGlobal("fetch", async (input: any, init: any = {}) => {
       sent.push({ url: String(input?.url ?? input), headers: init.headers, body: JSON.parse(init.body) });
       return reply();
     });
-    const make = (body: object) => admin("POST", "/api/admin/library/generate", { prompt: "A deep cinematic boom", seconds: 2, name: "Boom", category: "Impact", tags: "boom, hit", ...body });
-    const boom = await make({});
-    expect(boom.status).toBe(201);
-    expect(boom.data.item).toMatchObject({ kind: "sfx", name: "Boom", description: "A deep cinematic boom", category: "Impact", tags: ["boom", "hit"], ai: true, duration: 2 });
+    const count = () => (sqlite.prepare("SELECT COUNT(*) AS n FROM library_items").get() as any).n;
+    const before = count();
+    const make = (body: object) => admin("POST", "/api/admin/library/generate", { prompt: "A deep cinematic boom", seconds: 2, ...body });
+    const take = await make({});
+    expect(take.status).toBe(200);
+    expect([take.headers.get("Content-Type"), take.headers.get("Cache-Control"), take.data.length]).toEqual(["audio/mpeg", "no-store", 2003]);
     expect(sent).toEqual([{ url: `${SOUND_URL}?output_format=mp3_44100_128`, headers: expect.objectContaining({ "xi-api-key": "el" }), body: { text: "A deep cinematic boom", duration_seconds: 2, prompt_influence: 0.5 } }]);
-    const stored = sqlite.prepare("SELECT object_key,mime FROM library_items WHERE id=?").get(boom.data.id) as any;
-    expect(stored).toEqual({ object_key: `library/${boom.data.id}/file.mp3`, mime: "audio/mpeg" });
-    expect((await env.MEDIA.get(stored.object_key))!.size).toBe(2003);
-    // Lengths ElevenLabs makes, a description to make it from, administrators only.
-    for (const body of [{ seconds: 0.2 }, { seconds: 23 }, { prompt: "x" }]) expect((await make(body)).status).toBe(400);
-    expect((await user("POST", "/api/admin/library/generate", { prompt: "A boom", seconds: 2, name: "Boom" })).status).toBe(404);
-    // ElevenLabs refusing, busy or answering something that isn't an MP3: nothing is added.
+    expect(count()).toBe(before);
+    // Kept: uploaded as made with AI, the description what it was made from (Admin → Library does this on Save).
+    const boom = await upload({ kind: "sfx", name: "Boom", description: "A deep cinematic boom", category: "Impact", tags: "boom, hit", ai: "1", duration: "2.04" },
+      new Uint8Array([0x49, 0x44, 0x33, ...new Array(2000).fill(1)]), "audio/mpeg");
+    expect(boom.data.item).toMatchObject({ kind: "sfx", name: "Boom", description: "A deep cinematic boom", category: "Impact", tags: ["boom", "hit"], ai: true, duration: 2.04 });
+    expect(count()).toBe(before + 1);
+    // ElevenLabs makes 0.5 to 30 seconds from a description; administrators only.
+    expect((await make({ seconds: 30 })).status).toBe(200);
+    for (const body of [{ seconds: 0.2 }, { seconds: 31 }, { prompt: "x" }]) expect((await make(body)).status).toBe(400);
+    expect((await user("POST", "/api/admin/library/generate", { prompt: "A boom", seconds: 2 })).status).toBe(404);
+    // ElevenLabs refusing, busy or answering something that isn't an MP3: a message, no take.
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const before = (sqlite.prepare("SELECT COUNT(*) AS n FROM library_items").get() as any).n;
     for (const [status, code, message] of [[401, 503, /isn't set up/], [429, 502, /busy/], [500, 502, /couldn't make this sound/], [200, 502, /couldn't make this sound/]] as const) {
       reply = () => (status === 200 ? new Response("<html>error</html>") : new Response("{}", { status }));
       const r = await make({});
       expect([r.status, r.data.error]).toEqual([code, expect.stringMatching(message)]);
     }
-    expect((sqlite.prepare("SELECT COUNT(*) AS n FROM library_items").get() as any).n).toBe(before);
+    expect(count()).toBe(before + 1);
 
     // A video that plays them: its whoosh and a scene's sound, counted for each.
     const made = await user("POST", "/api/videos", {

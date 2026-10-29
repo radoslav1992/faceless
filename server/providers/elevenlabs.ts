@@ -13,7 +13,7 @@ export const ALIGNMENT_URL = "https://api.elevenlabs.io/v1/forced-alignment";
 const SPEECH_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 export const SOUND_URL = "https://api.elevenlabs.io/v1/sound-generation";
 /** Lengths ElevenLabs makes sound effects of (seconds). */
-export const SOUND_EFFECT_SECONDS = { min: 0.5, max: 22 } as const;
+export const SOUND_EFFECT_SECONDS = { min: 0.5, max: 30 } as const;
 // The text-to-speech-with-timestamps answer: the audio and the timing of each character, as written and as spoken.
 const timings = z.object({ characters: z.array(z.string()), character_start_times_seconds: z.array(z.number()), character_end_times_seconds: z.array(z.number()) });
 const speechAnswer = z.object({ audio_base64: z.string().min(1), alignment: timings.nullish(), normalized_alignment: timings.nullish() });

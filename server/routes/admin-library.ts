@@ -16,7 +16,7 @@ import { SOUND_MAX_SECONDS, SOUND_MIN_SECONDS } from "../../shared/sounds";
 // Admin → Library: the shared music, clips, pictures and sound effects people search and pick from (server/library.ts).
 // Items are uploaded, copied from the administrator's own media (an upload, or an AI picture or clip they made for a
 // video) with its details: its name, its prompt as the description, whether AI made it — or, for sound effects, made
-// with ElevenLabs from a description (POST /generate). Name, description, genre or category,
+// with ElevenLabs from a description (POST /generate: a take to listen to, uploaded when kept). Name, description, genre or category,
 // tags and the AI mark are edited here, written or suggested by AI (POST /describe); an item is switched off (no
 // longer offered) or deleted.
 export const adminLibrary = new Hono<App>();
@@ -225,15 +225,15 @@ adminLibrary.post("/describe", async (c) => {
   return c.json({ suggestion });
 });
 /**
- * A sound effect made with ElevenLabs from a description (billed by ElevenLabs per sound), added to the library as made
- * with AI; its description is what it was made from. 30 an hour.
+ * A take of a sound effect made with ElevenLabs from a description (billed by ElevenLabs per take), as an MP3 to listen
+ * to: nothing is saved. The administrator keeps the takes they like by uploading them (PUT /file, made with AI, the
+ * description they were made from). 60 an hour.
  */
 adminLibrary.post("/generate", async (c) => {
   const d = z.object({
     prompt: z.string().trim().min(3).max(300), seconds: z.number().min(SOUND_EFFECT_SECONDS.min).max(SOUND_EFFECT_SECONDS.max),
-    name: fields.name, category: fields.category.default(""), tags: fields.tags.default(""),
   }).parse(await c.req.json());
-  await rate(c, "sound-generate", 30, 3600, c.get("user").id);
+  await rate(c, "sound-generate", 60, 3600, c.get("user").id);
   let bytes: Uint8Array;
   try {
     bytes = await soundEffect(c.env, d.prompt, d.seconds);
@@ -245,11 +245,7 @@ adminLibrary.post("/generate", async (c) => {
         : code === "SOUND_BUSY" ? "ElevenLabs is busy. Try again in a minute." : "ElevenLabs couldn't make this sound. Try again, or describe it differently.",
     });
   }
-  const id = uid(), key = `library/${id}/file.mp3`;
-  await c.env.MEDIA.put(key, bytes, { httpMetadata: { contentType: "audio/mpeg" } });
-  await c.env.DB.prepare("INSERT INTO library_items(id,kind,name,description,category,tags,object_key,mime,bytes,duration,ai,created_at) VALUES (?,'sfx',?,?,?,?,?,'audio/mpeg',?,?,1,?)")
-    .bind(id, d.name, d.prompt, d.category, tidyTags(d.tags), key, bytes.length, d.seconds, now()).run();
-  return c.json({ id, item: adminView(await row(c.env, id)) }, 201);
+  return new Response(bytes.slice().buffer, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" } });
 });
 /** An item's file whether it is offered or switched off (people only get offered ones), to preview or describe it. */
 adminLibrary.get("/:id/file", async (c) => {

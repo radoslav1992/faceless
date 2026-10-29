@@ -194,7 +194,9 @@ thumbnail come from the browser) or copy one of their own media files (`POST /ap
 or an AI picture or clip made for one of their videos, with its name, its prompt as the description and the AI mark;
 `source_asset` keeps it from being added twice; the administrator's own audio becomes music), or, for sound effects
 (0.2–30 s), have ElevenLabs make one from a description (`POST /api/admin/library/generate`: `/v1/sound-generation`,
-0.5–22 s, 30 an hour, stored as an MP3 marked as made with AI, its prompt the description), then rename, describe,
+0.5–30 s, 60 an hour; the answer is the MP3 take itself and nothing is saved: Admin → Library plays each take and
+uploads the ones kept through `PUT /file` as made with AI, the description what it was made from; `shared/sounds.ts`
+`soundIdeas` fill in the form), then rename, describe,
 tag, mark as AI-made, switch off or delete them; the list shows how many videos and series use each item. `GET /api/library?kind=clip,image&q=&tag=` searches
 the active items (all of them, folded to lowercase without accents, a plural matching its singular): every word must
 be in the name, genre or category, description or tags, name matches first, then the genre or category, then tags,
