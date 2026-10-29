@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, CalendarClock, Check, Clapperboard, Film, Link2, Play, Scissors, Sparkles, Trash2, UploadCloud, Youtube } from "lucide-react";
+import { ArrowLeft, CalendarClock, Check, Clapperboard, Film, Link2, Play, Scissors, Sparkles, Trash2, UploadCloud } from "lucide-react";
 import { del, errorText, newKey, post, useApi, useAuth, usePoll, type Account, type Asset, type Source, type Video } from "../lib";
 import { Modal, Spinner, Switch, useToast } from "../ui";
 import { ConfirmDialog, CreditBlockNotice, DropZone, FileButton, ACCEPT, UploadList, creditBlock, firstFrame, useRetryKey, useSignedInUser, useUploads } from "./pickers";
@@ -122,88 +122,42 @@ export function ClipsPage() {
   );
 }
 
-type OwnVideo = { id: string; title: string; seconds: number; published: string | null; privacy: string; problem: string | null };
-type OwnVideos = { enabled: boolean; reason: "off" | "plan" | "no-channel" | null; channels: { id: string; name: string; videos: OwnVideo[] }[] };
-const watchUrl = (id: string) => `https://www.youtube.com/watch?v=${id}`;
-
-/**
- * Imports a video from a link (a video file, or a Dropbox or Google Drive share link) or, when YouTube import is on for
- * the person's plan, one of the latest videos of their own connected YouTube channel.
- */
+/** Imports a video from a link: a video file, or a Dropbox or Google Drive share link. */
 function ImportDialog({ onClose, onImported }: { onClose: () => void; onImported: (asset: Asset) => void }) {
   const [url, setUrl] = useState("");
-  const [busy, setBusy] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const own = useApi<OwnVideos>("/media/youtube");
-  const youtube = own.data?.enabled ?? false;
-  const start = async (link: string, key: string) => {
-    setBusy(key);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
     setProblem(null);
     try {
-      onImported((await post<{ asset: Asset }>("/media/imports", { url: link })).asset);
+      onImported((await post<{ asset: Asset }>("/media/imports", { url })).asset);
     } catch (err) {
       setProblem(errorText(err));
-      setBusy(null);
+      setBusy(false);
     }
   };
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    void start(url, "link");
-  };
-  const videos = own.data?.channels.flatMap((c) => c.videos.map((v) => ({ ...v, channel: c.name }))) || [];
   return (
-    <Modal title="Import a video" onClose={onClose} wide={youtube} footer={
+    <Modal title="Import a video" onClose={onClose} footer={
       <>
         <button type="button" className="btn" onClick={onClose}>Cancel</button>
-        <button type="submit" form="import-link" className="btn primary" disabled={!!busy || !url.trim()}>
-          {busy === "link" ? <Spinner label="Opening the link" /> : <Link2 size={16} aria-hidden="true" />}Import link
+        <button type="submit" form="import-link" className="btn primary" disabled={busy || !url.trim()}>
+          {busy ? <Spinner label="Opening the link" /> : <Link2 size={16} aria-hidden="true" />}Import link
         </button>
       </>
     }>
-      <div className="stack">
-        {youtube && (
-          <section className="stack" aria-labelledby="own-youtube" style={{ gap: 8 }}>
-            <h3 id="own-youtube" className="row" style={{ gap: 8, fontSize: 15 }}><Youtube size={16} aria-hidden="true" /> From your YouTube channel <span className="chip">Beta</span></h3>
-            {own.data?.reason === "no-channel" ? (
-              <p className="small muted">Connect your YouTube channel to import its videos. <Link className="text-link" to="/app/channels">Connect a channel</Link></p>
-            ) : own.loading && !own.data ? <p className="row small"><Spinner label="Loading your videos" /> Loading your videos…</p> : !videos.length ? (
-              <p className="small muted">No videos found on your connected channel yet.</p>
-            ) : (
-              <ul className="own-videos list-plain">
-                {videos.map((v) => (
-                  <li key={v.id} className="own-video">
-                    <img src={`https://i.ytimg.com/vi/${v.id}/mqdefault.jpg`} alt="" loading="lazy" referrerPolicy="no-referrer" />
-                    <div className="own-video-body">
-                      <strong>{v.title}</strong>
-                      <span className="muted small">{length(v.seconds)}{v.published ? ` · ${new Date(v.published).toLocaleDateString()}` : ""}{own.data!.channels.length > 1 ? ` · ${v.channel}` : ""}</span>
-                      {v.problem && <span className="small muted">{v.problem}</span>}
-                    </div>
-                    <button type="button" className="btn sm" disabled={!!busy || !!v.problem} onClick={() => void start(watchUrl(v.id), v.id)}>
-                      {busy === v.id ? <Spinner label="Starting the import" /> : null}Import
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {own.error && <p className="notice bad small" role="alert">{own.error}</p>}
-            <p className="muted small">Only videos of your own connected channel. YouTube sometimes refuses downloads; if it does, download the video in YouTube Studio and upload it.</p>
-          </section>
-        )}
-        <form id="import-link" className="stack" onSubmit={submit}>
-          <label className="field"><span className="small">{youtube ? "Or paste a link" : "Link to the video"}</span>
-            <input className="input" type="url" inputMode="url" autoComplete="off" spellCheck={false} maxLength={2000} required value={url}
-              onChange={(e) => setUrl(e.target.value)} placeholder="https://www.dropbox.com/scl/fi/…/episode.mp4" aria-describedby="import-link-hint" />
-          </label>
-          <p id="import-link-hint" className="muted small">
-            {youtube
-              ? "A direct link to an MP4, MOV or WebM file, a Dropbox or Google Drive link that anyone with the link can open, or a link to a video on your own connected YouTube channel."
-              : own.data?.reason === "plan"
-                ? "A direct link to an MP4, MOV or WebM file, or a Dropbox or Google Drive link that anyone with the link can open. Importing from your own YouTube channel is part of the paid plans."
-                : "A direct link to an MP4, MOV or WebM file, or a Dropbox or Google Drive link that anyone with the link can open. YouTube links can't be imported: if it's your video, download it in YouTube Studio and upload the file."}
-          </p>
-          {problem && <p className="notice bad small" role="alert">{problem}</p>}
-        </form>
-      </div>
+      <form id="import-link" className="stack" onSubmit={(e) => void submit(e)}>
+        <label className="field"><span className="small">Link to the video</span>
+          <input className="input" type="url" inputMode="url" autoComplete="off" spellCheck={false} maxLength={2000} required value={url}
+            onChange={(e) => setUrl(e.target.value)} placeholder="https://www.dropbox.com/scl/fi/…/episode.mp4" aria-describedby="import-link-hint" />
+        </label>
+        <p id="import-link-hint" className="muted small">
+          A direct link to an MP4, MOV or WebM file, or a Dropbox or Google Drive link that anyone with the link can open. YouTube links can't be imported: if
+          it's your video, download it in YouTube Studio and upload the file.
+        </p>
+        {problem && <p className="notice bad small" role="alert">{problem}</p>}
+      </form>
     </Modal>
   );
 }

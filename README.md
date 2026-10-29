@@ -46,9 +46,8 @@ and the maintenance cron.
   The editor shows the exact credit price before anything is made.
 - **Clips from long videos** (`shared/highlights.ts`, `server/highlights.ts`). The owner uploads a podcast, interview,
   stream or webinar (up to 10 minutes on the free trial, 2 hours and 2 GB on paid plans), or imports it from a link to
-  the file or a Dropbox or Google Drive share link (`server/imports.ts`), or, in a beta behind `YOUTUBE_IMPORT`, picks
-  a video of their own connected YouTube channel (`server/youtube-import.ts`; other people's YouTube videos are never
-  imported). Its speech is transcribed by ElevenLabs Scribe — free up to 10 minutes, 1 credit per started 30 minutes
+  the file or a Dropbox or Google Drive share link (`server/imports.ts`; links to YouTube and other video platforms
+  are refused: the app never downloads from them). Its speech is transcribed by ElevenLabs Scribe — free up to 10 minutes, 1 credit per started 30 minutes
   beyond — and the text model finds the moments that stand on their own (3–12 at a time, short, medium or long,
   optionally about a topic), each with a title, a reason, post text and a **virality score** — the writer's rating of
   its hook, payoff, clarity and energy, plus the laughter and applause heard in it; an estimate, never a promise of

@@ -117,19 +117,11 @@ export type InspectPayload = { id: string; operation: "inspect"; url: string; ma
  */
 export type TrackPayload = { id: string; operation: "track"; url: string; start: number; length: number; turns?: [number, number, number][] };
 /**
- * Downloads one YouTube video by its ID (a video of the person's own connected channel, checked by the Worker,
- * server/youtube-import.ts) as an MP4 of at most 1080p, at most `maxSeconds` long and `maxBytes` large: one file comes
- * back. Runs only on the renderer's download container (DOWNLOAD_SLOT, server/renderer.ts). A refusal by YouTube is
- * reported as YOUTUBE_BLOCKED (bot checks, rate limits), YOUTUBE_RESTRICTED (members-only, age-restricted, private),
- * YOUTUBE_UNAVAILABLE (removed, region-blocked) or YOUTUBE_FAILED.
- */
-export type YoutubePayload = { id: string; operation: "youtube"; video: string; maxSeconds: number; maxBytes: number };
-/**
  * The first `seconds` (at most 15) of a style example's video (`url`: its public address), fitted to 540 × 960 and
  * without sound, for the style cards: one MP4 comes back, AI-marked when the example is (server/examples.ts).
  */
 export type PreviewPayload = { id: string; operation: "preview"; url: string; seconds: number };
-export type RenderPayload = ComposePayload | StillsPayload | InspectPayload | TrackPayload | PreviewPayload | YoutubePayload;
+export type RenderPayload = ComposePayload | StillsPayload | InspectPayload | TrackPayload | PreviewPayload;
 
 export type RenderStatus = {
   status: "running" | "completed" | "failed";

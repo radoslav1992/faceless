@@ -14,7 +14,7 @@ and `npx wrangler deploy` as the deploy command (a full deploy, so the container
 | D1 database `faceless` | `DB` | Created (Western Europe); its `database_id` is in `wrangler.jsonc` and `0001_initial.sql` is applied. On another account: `npx wrangler d1 create faceless` and put the printed ID there |
 | R2 bucket `faceless-media` (private) | `MEDIA` | Created (location: Eastern North America). On another account: `npx wrangler r2 bucket create faceless-media --location weur` |
 | Workflows `faceless-content` (`ContentGeneration`) and `faceless-publish` (`Publication`) | `CONTENT`, `PUBLISH` | Created by `wrangler deploy` |
-| Container `MediaRenderer` (`renderer/Dockerfile`, up to 4 instances of `standard-2`: three render, one downloads YouTube imports) | `MEDIA_RENDERER` (Durable Object, migration `renderer-v1`) | Enable Containers on the account; `wrangler deploy` builds and pushes the image. The first rollout takes a few minutes |
+| Container `MediaRenderer` (`renderer/Dockerfile`, up to 3 instances of `standard-2`, each rendering one job at a time) | `MEDIA_RENDERER` (Durable Object, migration `renderer-v1`) | Enable Containers on the account; `wrangler deploy` builds and pushes the image. The first rollout takes a few minutes |
 | Workers AI | `AI` | Nothing to create; scripts and picture descriptions run on `TEXT_MODEL` (default `openai/gpt-6-luna`) |
 | Email Sending | `EMAIL` | Onboard the domain in Cloudflare Email, then add `"allowed_sender_addresses": ["hello@your-domain"]` to the `send_email` entry in `wrangler.jsonc` |
 | Cron `* * * * *` | – | Set by `wrangler deploy` (`triggers` in `wrangler.jsonc`) |
@@ -77,7 +77,6 @@ the Worker reads (`Env` in `server/types.ts`); `.dev.vars.example` lists them fo
 | `REGISTRATION_ENABLED` | text | `true` opens sign-ups |
 | `BILLING_ENABLED` | text | `true` opens checkout and credit packs, and turns on reconciliation and contract e-mails |
 | `MEDIA_ENABLED` | text | `true` turns on making videos (AI generation and rendering) and the series autopilot |
-| `YOUTUBE_IMPORT` | text | `true` lets paid plans import videos of their own connected YouTube channel for clips (beta, off by default; read "YouTube import" under Known limits first) |
 | `APP_ENV` | text | `development` lets sign-ups work without Turnstile. Local only |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | text / secret | Bot checks on sign-up, the contact form and repeated failed sign-ins. Sign-ups refuse without the secret outside development |
 | `TRIAL_HASH_SECRET` | secret | Long random string: keys the HMAC that makes the free trial once per mailbox |
@@ -221,9 +220,7 @@ everything you upload, including permission for every person shown.
     9. On a paid plan, upload a podcast over 10 minutes on the Clips page, find clips in it (check the credits charged
        for its transcription), make one clip of two people talking with "Speaker focus" (check the crop cuts to
        whoever talks) and one with "Two speakers", and post one. Import a video from a Dropbox and a Google Drive
-       link, and check that a YouTube link is refused with its explanation. If you switch on `YOUTUBE_IMPORT`,
-       connect a YouTube channel, import one of its videos from the picker, and check a video of another channel is
-       refused.
+       link, and check that a YouTube link is refused with its explanation.
 
 ## Known limits
 
@@ -240,19 +237,9 @@ everything you upload, including permission for every person shown.
   camera, off screen or very small is not followed (the crop stays where it was), and videos transcribed before
   speakers were told apart only know when someone talks, not who.
 - **Imports from links**: a video can be imported from a direct link to the file or a Dropbox or Google Drive share
-  link (`server/imports.ts`). Links to other video platforms are refused with what to do instead, as are YouTube links
-  while `YOUTUBE_IMPORT` is off. Google Drive may answer large files with a page instead of the file for some
+  link (`server/imports.ts`). Links to YouTube and other video platforms are refused with what to do instead (the app
+  never downloads from YouTube: its terms and the YouTube API Services policies don't allow it). Google Drive may answer large files with a page instead of the file for some
   accounts; such imports fail with a clear message and the file can still be uploaded.
-- **YouTube import (beta)**: with `YOUTUBE_IMPORT=true`, paid plans can import videos of a YouTube channel they
-  connected, and only those (`server/youtube-import.ts`). It is a business decision, not a technical one: YouTube's
-  terms, and the YouTube API Services policies that the app's YouTube posting depends on, don't allow downloading
-  YouTube videos without YouTube's permission, so Google could object and, at worst, withdraw the app's YouTube API
-  access, which would also stop posting to YouTube. Limiting imports to people's own channels keeps copyright risk
-  low, not the terms risk; have it reviewed before switching it on, and set `YOUTUBE_IMPORT=false` at once (no deploy)
-  if Google raises it. YouTube also blocks downloads from cloud servers at times: those imports fail with
-  `YOUTUBE_BLOCKED` and people are told to upload the file; nothing works around YouTube's checks (no proxies, cookies
-  or accounts). yt-dlp must be updated every few weeks (the version in `renderer/Dockerfile`, then a deploy) as
-  YouTube changes. Videos of other people's channels are never imported.
 - **Legal pages**: the terms and privacy policy are a starting point; have them reviewed for your business and
   markets, in particular the withdrawal section (14 days, refund less the used share of the period's credits) and the
   retention periods ([PRIVACY.md](PRIVACY.md)).
