@@ -7,6 +7,7 @@ import { videoKinds } from "./templates";
 import { HIGHLIGHT_MAX_SECONDS, HIGHLIGHT_MIN_SECONDS, layoutSchema } from "./highlights";
 import { LONG_VIDEO_SECONDS } from "./speech";
 import { trackSchema } from "./track";
+import { SOUND_VOLUME } from "./sounds";
 import {
   characterSheetPrompt, clipPrompt, fingerprint, narrationKey, narrationSchema, placeKey, placeOf, placeSchema, placeSheetPrompt, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_PLACES, STORY_MAX_SCENES, voicedScript, type StoryStyle,
 } from "./story";
@@ -48,6 +49,20 @@ export const headlineSchema = z.object({
   seconds: z.number().min(0).max(180).default(0),
 });
 export type Headline = z.infer<typeof headlineSchema>;
+/**
+ * Sound effects (shared/sounds.ts): a library sound on every scene change (`transitionId`, a whoosh) and the scenes'
+ * own sounds (a scene's `soundId`), at one volume; switched off, they are kept but not played. A video without it
+ * (made before sound effects) has none.
+ */
+export const soundsSchema = z.object({
+  enabled: z.boolean().default(true),
+  volume: z.number().min(0).max(1).default(SOUND_VOLUME),
+  transitionId: uuid.optional(),
+});
+export type Sounds = z.infer<typeof soundsSchema>;
+/** The sound effects a story plays: none while they are switched off. */
+export const playedSounds = (spec: Pick<StorySpec, "sounds" | "scenes">) =>
+  spec.sounds?.enabled ? { transitionId: spec.sounds.transitionId, scenes: spec.scenes.map((s) => s.soundId) } : { transitionId: undefined, scenes: spec.scenes.map(() => undefined) };
 /** One clip (the owner's video or a library clip) that loops behind the whole video instead of a picture per scene. */
 export const backdropSchema = z.object({ libraryId: uuid.optional(), assetId: uuid.optional() })
   .refine((b) => !!b.libraryId !== !!b.assetId, "Choose one background clip.");
@@ -74,6 +89,7 @@ export const storySpec = z.object({
   headline: headlineSchema.nullable().default(null),
   backdrop: backdropSchema.nullable().default(null),
   music: musicSchema,
+  sounds: soundsSchema.optional(),
   /** An on-screen presenter speaking the AI voice (shared/presenter.ts); needs the AI voice and no background clip. */
   presenter: presenterSchema.nullable().default(null),
   generated: generatedVoice.optional(),
@@ -250,10 +266,11 @@ export function referencedAssets(spec: Spec): string[] {
   if (spec.backdrop?.assetId) ids.push(spec.backdrop.assetId);
   return [...new Set(ids.filter((x): x is string => !!x))];
 }
-/** Library items a spec references. */
+/** Library items a spec references (sound effects while they are on). */
 export function referencedLibrary(spec: Spec): string[] {
   if (isHighlight(spec)) return spec.music?.trackId ? [spec.music.trackId] : [];
-  const ids: (string | undefined)[] = [spec.music?.trackId, spec.backdrop?.libraryId, ...spec.scenes.map((s) => s.libraryId)];
+  const sounds = playedSounds(spec);
+  const ids: (string | undefined)[] = [spec.music?.trackId, spec.backdrop?.libraryId, ...spec.scenes.map((s) => s.libraryId), sounds.transitionId, ...sounds.scenes];
   return [...new Set(ids.filter((x): x is string => !!x))];
 }
 /** The hook shown in lists: the first sentence. */

@@ -18,7 +18,8 @@ and the maintenance cron.
 ## What it does
 
 - **Video types.** Every video is a narrated vertical video (1080×1920, up to 3 minutes): a voiceover, a picture for
-  every scene of one or two sentences, word-by-word subtitles, transitions and background music. Five types
+  every scene of one or two sentences, word-by-word subtitles, transitions, background music and sound effects (a
+  whoosh on scene changes, a sound for scenes you would hear). Five types
   (`shared/templates.ts`):
   - **AI story**: a story or explainer with a new AI picture for every sentence and a title card;
   - **POV**: second-person scenes with a "POV: …" line on screen the whole time;
@@ -31,7 +32,7 @@ and the maintenance cron.
   mood. There are 15 art styles, 26 narration languages, 21 caption styles, and the narration voices administrators
   choose from their ElevenLabs account (Admin → Voices; twelve to start).
 - **Series on autopilot.** A series is one faceless channel: a style, a topic, a language, voice, art style, length
-  (30, 45, 60 or 90 s), music mood, subtitles, the connected accounts it posts to and a schedule (times per day on
+  (30, 45, 60 or 90 s), music mood, sound effects, subtitles, the connected accounts it posts to and a schedule (times per day on
   chosen weekdays, in its time zone). For every slot an episode is written and made ahead of time (6 hours before;
   24 hours in review mode) and posted at the slot, or it waits for approval when the series asks for review. When the
   series sends notices, the owner is e-mailed when an episode is ready or could not be made, and when slots start being
@@ -39,7 +40,8 @@ and the maintenance cron.
 - **Editing.** Any video can be changed before it posts: the words of each scene (on a timeline of the voice, with
   draggable scene edges, split and merge), each scene's picture (a new AI picture, an AI clip made from it, the owner's
   own image or video, or a clip or picture searched in the shared library), transitions, the on-screen title,
-  subtitles, music, an optional AI presenter on camera (HeyGen, lip-synced to the AI voice) and the post text. The
+  subtitles, music, sound effects (on or off, their volume, the whoosh, and a sound added, changed or removed per
+  scene), an optional AI presenter on camera (HeyGen, lip-synced to the AI voice) and the post text. The
   voice can be an AI voice or the owner's own recording, timed by its transcript or by forced alignment of its script.
   The editor shows the exact credit price before anything is made.
 - **Clips from long videos** (`shared/highlights.ts`, `server/highlights.ts`). The owner uploads a podcast, interview,
@@ -65,7 +67,7 @@ and the maintenance cron.
   1 credit per started 20 seconds (a 30-second video is 2), script, narration and every picture included. Bringing a scene to life with an AI
   clip costs 1 credit per 5 seconds (2 in high quality, 1080p); redoing pictures of a made video 1 credit per 5 pictures; new narration for
   changed words 1 credit per started 30 seconds. A clip of a long video costs 1 credit per started minute, transcribing
-  a video over 10 minutes 1 credit per started 30 minutes. Editing subtitles, music, transitions, timing, layouts and
+  a video over 10 minutes 1 credit per started 30 minutes. Editing subtitles, music, sound effects, transitions, timing, layouts and
   text is free.
 
   | Plan | Monthly | Yearly | Credits a month | Series | Social accounts | Storage |
@@ -87,7 +89,8 @@ and the maintenance cron.
   scripts and AI assistants can make videos, find and make clips of the owner's long videos, fetch download links and
   pause or resume series, with the same credits and limits as the app.
 - **Administration.** Administrators (`ADMIN_EMAILS`) fill the shared library people search (music tagged by mood,
-  clips and pictures, each with a description; uploaded or copied from their own AI pictures and clips), choose the
+  clips, pictures and sound effects, each with a description; uploaded, copied from their own AI pictures and clips,
+  or, for sound effects, made with ElevenLabs), choose the
   narration voices, see operations and failures, handle withdrawals within 14 days and give a paid plan for free (1 to 12 months, found by
   email).
 

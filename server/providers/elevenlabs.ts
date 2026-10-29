@@ -5,11 +5,15 @@ import { providerVoiceId } from "../voices";
 import { failureCode, providerFetch, ProviderError } from "./http";
 
 // Speech for narrated videos, with per-character timings that become word-by-word captions;
-// and forced alignment (rech-bg's fallback for missing timings, server/studio-speech.ts): known words timed on a
-// recording, for a voice without timings and for an owner's voiceover whose exact script they gave.
+// forced alignment (rech-bg's fallback for missing timings, server/studio-speech.ts): known words timed on a
+// recording, for a voice without timings and for an owner's voiceover whose exact script they gave; and sound effects
+// from a description, for the shared library (Admin → Library).
 export const SPEECH_MODEL = "eleven_v4";
 export const ALIGNMENT_URL = "https://api.elevenlabs.io/v1/forced-alignment";
 const SPEECH_URL = "https://api.elevenlabs.io/v1/text-to-speech";
+export const SOUND_URL = "https://api.elevenlabs.io/v1/sound-generation";
+/** Lengths ElevenLabs makes sound effects of (seconds). */
+export const SOUND_EFFECT_SECONDS = { min: 0.5, max: 22 } as const;
 // The text-to-speech-with-timestamps answer: the audio and the timing of each character, as written and as spoken.
 const timings = z.object({ characters: z.array(z.string()), character_start_times_seconds: z.array(z.number()), character_end_times_seconds: z.array(z.number()) });
 const speechAnswer = z.object({ audio_base64: z.string().min(1), alignment: timings.nullish(), normalized_alignment: timings.nullish() });
@@ -72,9 +76,29 @@ export async function speakSample(e: Env, providerVoice: string, text: string) {
     throw new ProviderError(r.status === 401 || r.status === 402 ? "VOICE_UNAVAILABLE" : r.status === 429 ? "VOICE_BUSY" : "VOICE_FAILED");
   }
   const audio = new Uint8Array(await r.arrayBuffer());
-  // An MP3 starts with an ID3 tag or a frame sync; anything else (an error page) is not a sample.
-  const mp3 = (audio[0] === 0x49 && audio[1] === 0x44 && audio[2] === 0x33) || (audio[0] === 0xff && (audio[1] & 0xe0) === 0xe0);
-  if (audio.length < 1000 || audio.length > 5 * 1024 * 1024 || !mp3) throw new ProviderError("VOICE_FAILED");
+  if (audio.length < 1000 || audio.length > 5 * 1024 * 1024 || !isMp3(audio)) throw new ProviderError("VOICE_FAILED");
+  return audio;
+}
+/** An MP3 starts with an ID3 tag or a frame sync; anything else (an error page) is not one. */
+const isMp3 = (b: Uint8Array) => (b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) || (b[0] === 0xff && (b[1] & 0xe0) === 0xe0);
+
+/**
+ * A sound effect made from `text` (ElevenLabs Sound Effects), `seconds` long, as an MP3. Once: no automatic retries,
+ * each call is billed.
+ */
+export async function soundEffect(e: Env, text: string, seconds: number) {
+  const key = e.ELEVENLABS_API_KEY?.trim();
+  if (!key) throw new ProviderError("SOUND_UNAVAILABLE");
+  const r = await providerFetch(`${SOUND_URL}?output_format=mp3_44100_128`, {
+    method: "POST", headers: { "xi-api-key": key, "Content-Type": "application/json", Accept: "audio/mpeg" },
+    body: JSON.stringify({ text, duration_seconds: seconds, prompt_influence: 0.5 }), signal: AbortSignal.timeout(120000),
+  }).catch((error) => { throw error instanceof ProviderError ? error : new ProviderError("SOUND_FAILED"); });
+  if (!r.ok) {
+    await r.body?.cancel();
+    throw new ProviderError(r.status === 401 || r.status === 402 ? "SOUND_UNAVAILABLE" : r.status === 429 ? "SOUND_BUSY" : "SOUND_FAILED");
+  }
+  const audio = new Uint8Array(await r.arrayBuffer());
+  if (audio.length < 500 || audio.length > 5 * 1024 * 1024 || !isMp3(audio)) throw new ProviderError("SOUND_FAILED");
   return audio;
 }
 

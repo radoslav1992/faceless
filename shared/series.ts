@@ -53,6 +53,11 @@ export const seriesSettingsSchema = z.object({
   animate: z.number().int().min(0).max(3).default(0),
   captions: z.object({ enabled: z.boolean().default(true), style: z.enum(captionStyles).default("keyword" satisfies CaptionStyle) })
     .default({ enabled: true, style: "keyword" }),
+  /**
+   * Sound effects in every episode (shared/sounds.ts): a whoosh on scene changes and sounds the writer picks. New
+   * series start with them on (defaultSeriesSettings); series made before them keep none until it is switched on.
+   */
+  sounds: z.boolean().default(false),
   /** Connected accounts every episode posts to (none: videos are only made, for download or e-mail). */
   accounts: z.array(z.uuid()).max(10).default([]),
   /** Post privately (only the account can see it) where the network allows it, to check before going public. */
@@ -72,7 +77,7 @@ export type SeriesSettings = z.infer<typeof seriesSettingsSchema>;
 export const defaultSeriesSettings = (template: TemplateId = "facts"): SeriesSettings => {
   const t = templates[template];
   const seconds = (episodeLengths as readonly number[]).includes(t.seconds) ? t.seconds : 60;
-  return seriesSettingsSchema.parse({ style: t.style, voiceId: t.voice, seconds, music: { mood: t.music } });
+  return seriesSettingsSchema.parse({ style: t.style, voiceId: t.voice, seconds, music: { mood: t.music }, sounds: true });
 };
 /** Credits an episode of the series takes (its length, plus the scenes brought to life). */
 export const episodeCredits = (s: Pick<SeriesSettings, "seconds" | "animate">) => videoCredits(s.seconds) + s.animate;

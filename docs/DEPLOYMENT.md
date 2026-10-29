@@ -26,9 +26,10 @@ video; `0003_voices.sql` creates the narration voices managed in Admin → Voice
 before; `0004_library.sql` rebuilds `library_items` with its rows to add pictures, descriptions and the AI mark;
 `0005_style_examples.sql` creates each style's example video, `0006_example_previews.sql` adds the columns of their
 short previews, `0007_library_categories.sql` the library's genre or category, `0008_avatars.sql` the presenters'
-avatars managed in Admin → Presenters, `0009_growth.sql` the affiliate program and calls for credits and
-`0010_tiktok_drafts.sql` marks posts sent to TikTok as drafts; the code
-already running keeps working on each):
+avatars managed in Admin → Presenters, `0009_growth.sql` the affiliate program and calls for credits,
+`0010_tiktok_drafts.sql` marks posts sent to TikTok as drafts, `0011_youtube_data.sql` adds when a YouTube channel's
+details were last read and the creator's "made for kids" answer, and `0012_sound_effects.sql` rebuilds `library_items`
+with its rows to add sound effects; the code already running keeps working on each):
 
 ```sh
 npm run db:remote     # wrangler d1 migrations apply faceless --remote
@@ -92,7 +93,7 @@ the Worker reads (`Env` in `server/types.ts`); `.dev.vars.example` lists them fo
 | `FAL_CLIP_MODEL_ADMIN` | text | Optional: more clip models administrators (`ADMIN_EMAILS`) can choose per scene in the editor to compare them, comma-separated (e.g. `minimax-h3,flux-3-max`). Kling and everyone's model are always offered; customers never see the choice, and a model taken off the list stops being used |
 | `FAL_REFERENCE_MODEL` | text | Optional: the model a video's scene pictures are drawn with from its reference sheets (its characters, and each place shown twice), so the scenes keep the same characters, colours, style and places. Default `fal-ai/nano-banana-2/edit`, or `google/nano-banana-2.1/edit` when `FAL_IMAGE_MODEL` is `google/nano-banana-2.1` (another Nano Banana edit endpoint works, e.g. `fal-ai/nano-banana-pro/edit`); `off` draws every picture from its text alone |
 | `FAL_IMAGE_QUALITY` | text | Optional GPT Image 2.5 quality: `low`, `medium`, `high` (default), `xhigh` or `max`. Each step up costs more per picture |
-| `ELEVENLABS_API_KEY` | secret | Narration (`eleven_v4` with timestamps), forced alignment, and Scribe v2 transcription of uploads (the files are uploaded to ElevenLabs from storage, so nothing there depends on ElevenLabs reaching `SITE_URL`). Admin → Voices lists the account's voices to import, so the key needs the Voices read permission (and Text to Speech, Speech to Text, Forced Alignment). A key without Speech to Text shows as `SPEECH_PERMISSION` under Admin → Operations |
+| `ELEVENLABS_API_KEY` | secret | Narration (`eleven_v4` with timestamps), forced alignment, and Scribe v2 transcription of uploads (the files are uploaded to ElevenLabs from storage, so nothing there depends on ElevenLabs reaching `SITE_URL`). Admin → Voices lists the account's voices to import, so the key needs the Voices read permission (and Text to Speech, Speech to Text, Forced Alignment, and Sound Effects for Admin → Library's **Make a sound effect**). A key without Speech to Text shows as `SPEECH_PERMISSION` under Admin → Operations |
 | `CALL_BOOKING_URL` | text | Optional. The https scheduling page (Cal.com, Calendly…) where customers book a 15-minute call for 30 credits; the app fills in their name and email. Without it the offer isn't shown |
 | `HEYGEN_API_KEY` | secret | Optional. On-screen presenters: HeyGen API v3 lip-syncs an avatar to the video's ElevenLabs voice (Avatar IV for regular quality, Avatar V for high), and Admin → Presenters lists HeyGen's stock avatars and links the account's own. HeyGen reads the voice through a capability link on `SITE_URL`. Without it presenters aren't offered. The account's API credits pay for each presenter video (about $0.04 a second with Avatar IV, $0.12 with Avatar V) |
 | `TOKEN_ENCRYPTION_KEY` | secret | `openssl rand -base64 32`. Seals OAuth tokens (AES-256-GCM) and signs API download links. Never change it once accounts are connected |
@@ -163,8 +164,9 @@ bound to the person who started it. Review and audit steps per network: [SOCIAL.
 ## 5. Content library (as an admin)
 
 Sign in with an address in `ADMIN_EMAILS` (confirmed), open **Admin → Library** and upload (each file up to 50 MB,
-pictures up to 20 MB; clips and tracks half a second to 10 minutes; at most 4096 px a side; length, size and a
-thumbnail are made in the browser), or **Add from my media**: your own uploads, and the AI pictures and clips made for
+pictures up to 20 MB and sound effects 10 MB; clips and tracks half a second to 10 minutes, sound effects 0.2 to 30
+seconds; at most 4096 px a side; length, size and a thumbnail are made in the browser), make a sound effect with
+ElevenLabs (**Make a sound effect**), or **Add from my media**: your own uploads, and the AI pictures and clips made for
 your videos, copied with their name, their prompt as the description and the AI mark. Give each item a description
 and tags: people search the library by name, description and tag. Mark what was made with AI (videos using it are
 then disclosed as AI-made when they're posted).
@@ -178,6 +180,13 @@ then disclosed as AI-made when they're posted).
   videos get AI pictures instead.
 - **Pictures**: vertical stills any scene can show (with the same slow zoom or pan as AI pictures), for example the
   best AI pictures of your own videos, so people can reuse them instead of paying for new ones.
+- **Sound effects**: short sounds licensed for commercial use, or made with ElevenLabs from a description (0.5 to 22
+  seconds, billed to the ElevenLabs account per sound, with the key's Sound Effects permission). A few of category
+  `Transition` (whooshes, swooshes): new videos get one of them at random on every scene change. The others (fire,
+  waves, a crowd, an explosion, a door) are what the writer gives the scenes you would hear, at most one scene in
+  three. Without sound effects in the library, videos have none. They are mixed in the container, so videos with them
+  need this version's renderer image: deploy with `wrangler deploy` where Docker runs (section 1), not only the
+  Worker.
 
 Switching an item off removes it from new videos; videos already made keep their render. You need the rights to
 everything you upload, including permission for every person shown.

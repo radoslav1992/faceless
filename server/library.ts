@@ -5,10 +5,10 @@ import type { App, Env } from "./types";
 import { serveObject } from "./storage";
 
 // The shared library people pick from and search: background music (tagged with moods), clips (storytime backgrounds,
-// scenes) and pictures (scenes). Administrators fill it in Admin → Library (server/routes/admin.ts) with a name, a
+// scenes), pictures (scenes) and sound effects (shared/sounds.ts). Administrators fill it in Admin → Library (server/routes/admin.ts) with a name, a
 // description and tags people search by; items made with AI say so, and videos that use them are disclosed as AI-made.
 export const library = new Hono<App>();
-export const libraryKinds = ["music", "clip", "image"] as const;
+export const libraryKinds = ["music", "clip", "image", "sfx"] as const;
 export type LibraryKind = (typeof libraryKinds)[number];
 export type LibraryRow = {
   id: string; kind: LibraryKind; name: string; description: string; category: string; tags: string; object_key: string; thumb_key: string | null; mime: string;

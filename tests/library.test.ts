@@ -1,12 +1,13 @@
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync, readdirSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import worker from "../server/index";
 import { searchScore, searchTerms } from "../server/library";
 import { fitSuggestion } from "../server/describe";
 import { mediaName } from "../server/routes/admin-library";
 import { planRender } from "../server/render-plan";
 import { call, signedIn, SITE, subscribe, testEnv } from "./helpers";
+import { SOUND_URL } from "../server/providers/elevenlabs";
 
 // The shared library: music, clips and pictures administrators add (uploads, or their own uploads and AI media with its
 // details), describe, give a genre or category and tag in Admin → Library (by hand, or filled in by a multimodal model),
@@ -21,8 +22,8 @@ function png(width: number, height: number, bytes = 200) {
   new DataView(b.buffer).setUint32(20, height);
   return b;
 }
-async function setup() {
-  const { env, sqlite } = testEnv({ MEDIA_ENABLED: "true" });
+async function setup(extra: Record<string, unknown> = {}) {
+  const { env, sqlite } = testEnv({ MEDIA_ENABLED: "true", ...extra });
   const admin = signedIn(sqlite, "admin@example.com"), user = signedIn(sqlite);
   for (const u of [admin, user]) {
     subscribe(sqlite, u.id, "daily");
@@ -47,6 +48,8 @@ async function setup() {
   return { env, sqlite, admin: as(admin), user: as(user), upload, own, userId: user.id };
 }
 
+afterEach(() => vi.unstubAllGlobals());
+
 describe("library", () => {
   it("keeps the items it had when pictures, descriptions and the AI mark arrive", () => {
     const sqlite = new DatabaseSync(":memory:");
@@ -61,6 +64,13 @@ describe("library", () => {
     sqlite.prepare("INSERT INTO library_items(id,kind,name,object_key,mime,bytes,created_at) VALUES ('p1','image','Moon','library/p1/file.png','image/png',10,6)").run();
     sqlite.prepare("DELETE FROM library_items WHERE id='p1'").run();
     expect(sqlite.prepare("SELECT prefix FROM cleanup_tasks").all()).toEqual([{ prefix: "library/p1/" }]);
+    // Sound effects are a kind too (0012 rebuilt the table with its rows); anything else is still refused.
+    sqlite.prepare("INSERT INTO library_items(id,kind,name,category,object_key,mime,bytes,duration,created_at) VALUES ('s1','sfx','Whoosh','Transition','library/s1/file.mp3','audio/mpeg',10,1,7)").run();
+    expect(() => sqlite.prepare("INSERT INTO library_items(id,kind,name,object_key,mime,bytes,created_at) VALUES ('x1','font','X','library/x1/f','font/ttf',1,8)").run()).toThrow(/CHECK/);
+    expect(sqlite.prepare("SELECT id,kind FROM library_items ORDER BY created_at").all()).toEqual([{ id: "m1", kind: "music" }, { id: "s1", kind: "sfx" }]);
+    sqlite.prepare("DELETE FROM library_items WHERE id='s1'").run();
+    expect(sqlite.prepare("SELECT prefix FROM cleanup_tasks ORDER BY prefix").all()).toEqual([{ prefix: "library/p1/" }, { prefix: "library/s1/" }]);
+    expect(sqlite.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='library_browse'").all()).toHaveLength(1);
   });
 
   it("takes pictures, clips and music uploaded with a description, tags and the AI mark", async () => {
@@ -255,6 +265,62 @@ describe("library", () => {
     // Administrators see what uses each item.
     const usage = Object.fromEntries((await admin("GET", "/api/admin/library")).data.items.map((i: any) => [i.id, i.usage]));
     expect(usage).toEqual({ [picture]: 1, [track]: 1 });
+  });
+
+  it("takes sound effects uploaded or made with ElevenLabs, of their own lengths, and counts the videos that play them", async () => {
+    const { env, admin, user, upload, own, sqlite } = await setup({ ELEVENLABS_API_KEY: "el" });
+    // Uploaded: 0.2 to 30 seconds, an audio file of up to 10 MB.
+    const whoosh = await upload({ kind: "sfx", name: "Whoosh", category: "Transition", tags: "whoosh", duration: "1.2" }, new Uint8Array(200), "audio/mpeg");
+    expect(whoosh.status).toBe(201);
+    expect(whoosh.data.item).toMatchObject({ kind: "sfx", name: "Whoosh", category: "Transition", duration: 1.2, thumb: null });
+    for (const duration of ["0.1", "31"]) expect((await upload({ kind: "sfx", name: "Bad", duration }, new Uint8Array(200), "audio/mpeg")).data.error).toBe("Sound effects must be between 0.2 and 30 seconds long.");
+    expect((await upload({ kind: "sfx", name: "Bad", duration: "1" }, new Uint8Array(200), "video/mp4")).data.error).toBe("Upload an MP3, M4A, OGG or WAV sound.");
+    // Music keeps its own lengths.
+    expect((await upload({ kind: "music", name: "Song", duration: "31" }, new Uint8Array(200), "audio/mpeg")).status).toBe(201);
+    // The administrator's own audio becomes music: sound effects are not added from media.
+    await own("upload", "beep.mp3", "audio/mpeg", new Uint8Array(100), { duration: 1 });
+    expect((await admin("GET", "/api/admin/library/media?kind=sfx")).status).toBe(400);
+
+    // Made with ElevenLabs from a description: stored as an MP3, made with AI, the description its prompt.
+    const sent: { url: string; headers: any; body: any }[] = [];
+    let reply = () => new Response(new Uint8Array([0x49, 0x44, 0x33, ...new Array(2000).fill(1)]), { headers: { "Content-Type": "audio/mpeg" } });
+    vi.stubGlobal("fetch", async (input: any, init: any = {}) => {
+      sent.push({ url: String(input?.url ?? input), headers: init.headers, body: JSON.parse(init.body) });
+      return reply();
+    });
+    const make = (body: object) => admin("POST", "/api/admin/library/generate", { prompt: "A deep cinematic boom", seconds: 2, name: "Boom", category: "Impact", tags: "boom, hit", ...body });
+    const boom = await make({});
+    expect(boom.status).toBe(201);
+    expect(boom.data.item).toMatchObject({ kind: "sfx", name: "Boom", description: "A deep cinematic boom", category: "Impact", tags: ["boom", "hit"], ai: true, duration: 2 });
+    expect(sent).toEqual([{ url: `${SOUND_URL}?output_format=mp3_44100_128`, headers: expect.objectContaining({ "xi-api-key": "el" }), body: { text: "A deep cinematic boom", duration_seconds: 2, prompt_influence: 0.5 } }]);
+    const stored = sqlite.prepare("SELECT object_key,mime FROM library_items WHERE id=?").get(boom.data.id) as any;
+    expect(stored).toEqual({ object_key: `library/${boom.data.id}/file.mp3`, mime: "audio/mpeg" });
+    expect((await env.MEDIA.get(stored.object_key))!.size).toBe(2003);
+    // Lengths ElevenLabs makes, a description to make it from, administrators only.
+    for (const body of [{ seconds: 0.2 }, { seconds: 23 }, { prompt: "x" }]) expect((await make(body)).status).toBe(400);
+    expect((await user("POST", "/api/admin/library/generate", { prompt: "A boom", seconds: 2, name: "Boom" })).status).toBe(404);
+    // ElevenLabs refusing, busy or answering something that isn't an MP3: nothing is added.
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const before = (sqlite.prepare("SELECT COUNT(*) AS n FROM library_items").get() as any).n;
+    for (const [status, code, message] of [[401, 503, /isn't set up/], [429, 502, /busy/], [500, 502, /couldn't make this sound/], [200, 502, /couldn't make this sound/]] as const) {
+      reply = () => (status === 200 ? new Response("<html>error</html>") : new Response("{}", { status }));
+      const r = await make({});
+      expect([r.status, r.data.error]).toEqual([code, expect.stringMatching(message)]);
+    }
+    expect((sqlite.prepare("SELECT COUNT(*) AS n FROM library_items").get() as any).n).toBe(before);
+
+    // A video that plays them: its whoosh and a scene's sound, counted for each.
+    const made = await user("POST", "/api/videos", {
+      spec: {
+        format: "story", narration: { kind: "voice", voiceId: "george" }, scenes: [{ text: "Hello there.", description: "A wave", soundId: boom.data.id }],
+        sounds: { enabled: true, transitionId: whoosh.data.id },
+      }, idempotencyKey: crypto.randomUUID(),
+    });
+    expect(made.status).toBe(201);
+    const usage = Object.fromEntries((await admin("GET", "/api/admin/library")).data.items.map((i: any) => [i.id, i.usage]));
+    expect([usage[whoosh.data.id], usage[boom.data.id]]).toEqual([1, 1]);
+    // People find them in the library by kind.
+    expect((await user("GET", "/api/library?kind=sfx")).data.items.map((i: any) => i.name).sort()).toEqual(["Boom", "Whoosh"]);
   });
 
   it("marks videos that show an AI-made library item as AI-made", () => {

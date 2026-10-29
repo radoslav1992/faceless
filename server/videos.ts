@@ -11,7 +11,7 @@ import { voiceUsable } from "./voices";
 import { avatarFor } from "./avatars";
 import { heygenEnabled } from "./providers/heygen";
 import {
-  isHighlight, presenterNeeded, referencedAssets, referencedLibrary, specCredits, specHook, specSchema, visualPart, type HighlightSpec, type Spec, type StorySpec,
+  isHighlight, playedSounds, presenterNeeded, referencedAssets, referencedLibrary, specCredits, specHook, specSchema, visualPart, type HighlightSpec, type Spec, type StorySpec,
 } from "../shared/formats";
 import { storyScript, STORY_MAX_CHARS, STORY_MAX_SECONDS } from "../shared/story";
 import { creditsLabel } from "../shared/credits";
@@ -37,12 +37,16 @@ export async function checkReferences(env: Env, userId: string, spec: Spec, kept
   if (items.length) {
     const found = new Map((await env.DB.prepare(`SELECT id,kind FROM library_items WHERE active=1 AND id IN (${items.map(() => "?").join(",")})`)
       .bind(...items).all<{ id: string; kind: string }>()).results.map((r) => [r.id, r.kind]));
-    if (found.size !== items.length) throw new HTTPException(400, { message: "A clip, picture or track in this video is no longer in the library. Choose another one." });
+    if (found.size !== items.length) throw new HTTPException(400, { message: "A clip, picture, track or sound in this video is no longer in the library. Choose another one." });
     // Music is a track, the background a clip, a scene a clip or a picture.
     const wrong = (id: string | undefined, kinds: string[]) => !!id && !kinds.includes(found.get(id)!);
     if (wrong(spec.music?.trackId, ["music"])) throw new HTTPException(400, { message: "Choose a library track for the music." });
     if (!isHighlight(spec) && (wrong(spec.backdrop?.libraryId, ["clip"]) || spec.scenes.some((s) => wrong(s.libraryId, ["clip", "image"]))))
       throw new HTTPException(400, { message: "Choose a library clip for the background, and a clip or picture for each scene." });
+    // Sound effects (while they are on) are library sound effects.
+    const sounds = isHighlight(spec) ? null : playedSounds(spec);
+    if (sounds && [sounds.transitionId, ...sounds.scenes].some((id) => wrong(id, ["sfx"])))
+      throw new HTTPException(400, { message: "Choose a library sound effect for the scene changes and for each scene's sound." });
   }
   if (isHighlight(spec)) return checkSource(env, userId, spec);
   // An AI voice reads at most STORY_MAX_CHARS; an own voiceover is a recording with sound, up to the render's three minutes.

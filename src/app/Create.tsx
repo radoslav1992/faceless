@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Repeat, Search, Wand2 } from "lucide-react";
 import { errorText, newKey, post, useAuth } from "../lib";
-import { useToast } from "../ui";
+import { Switch, useToast } from "../ui";
 import { StyleArt } from "../art";
 import { ExampleVideo, useExamples } from "../examples";
 import { StoryStylePicker } from "./StoryStyles";
@@ -57,10 +57,12 @@ function Gallery({ onPick }: { onPick: (id: TemplateId) => void }) {
 type Form = {
   prompt: string; script: string; title: string; animal: string; object: string; seconds: number;
   language: string; voiceId: string; style: StoryStyle; music: MusicMood; musicTrackId: string | null; subject: string;
+  /** Sound effects from the library: a whoosh on scene changes and sounds the writer picks (changed in the editor). */
+  sounds: boolean;
 };
 const formFor = (id: TemplateId, prompt = ""): Form => {
   const t = templates[id];
-  return { prompt, script: "", title: "", animal: "", object: "", seconds: t.seconds, language: "en", voiceId: t.voice, style: t.style, music: t.music, musicTrackId: null, subject: "" };
+  return { prompt, script: "", title: "", animal: "", object: "", seconds: t.seconds, language: "en", voiceId: t.voice, style: t.style, music: t.music, musicTrackId: null, subject: "", sounds: true };
 };
 
 export function Create() {
@@ -101,7 +103,7 @@ export function Create() {
     try {
       const { spec: draft } = await post<{ spec: StorySpec }>("/story/draft", {
         template, prompt: form.prompt, script: form.script, title: form.title, mashup: { animal: form.animal, object: form.object },
-        seconds: form.seconds, language: form.language, voiceId: form.voiceId, style: form.style, music: form.music, subject: form.subject,
+        seconds: form.seconds, language: form.language, voiceId: form.voiceId, style: form.style, music: form.music, subject: form.subject, sounds: form.sounds,
         ...(form.musicTrackId && { musicTrackId: form.musicTrackId }),
       });
       setSpec(draft);
@@ -216,6 +218,13 @@ export function Create() {
           </div>
           <MusicChoice label="Music" mood={form.music} trackId={form.musicTrackId} onChange={({ mood, trackId }) => set({ music: mood, musicTrackId: trackId })}
             moodName={(m) => (m === "auto" ? "Pick one that fits" : m === "none" ? "No music" : m[0].toUpperCase() + m.slice(1))} />
+          <div className="field">
+            <span className="row" style={{ gap: 10 }}>
+              <Switch checked={form.sounds} onChange={(sounds) => set({ sounds })} label="Sound effects" />
+              <span>Sound effects</span>
+            </span>
+            <span className="hint">A whoosh on scene changes and sounds for scenes you'd hear (fire, waves, a crowd). Add, change or remove them in the editor.</span>
+          </div>
           {t.kind !== "backdrop" && (
             <label className="field"><span>Main character <span className="muted small">(optional)</span></span>
               <input className="input" maxLength={300} value={form.subject} placeholder="A curious orange fox with a blue scarf" onChange={(e) => set({ subject: e.target.value })} />

@@ -5,11 +5,11 @@ The payloads and the HTTP API are described in shared/render.ts:
   GET    /jobs/:id          -> {status, duration?, error?, files?, meta?}
   GET    /jobs/:id/file/:n  -> the n-th output file (video/mp4 or image/jpeg)
   DELETE /jobs/:id          -> forgets the job (stops it if running)
-Operations: 'compose' (segments + voice + music + burned ASS -> MP4, optional JPEG cover), 'stills' (one JPEG per
-slide; carousel slides place a picture in a rounded box on a page colour and a logo over it), 'inspect' (what an
-uploaded file is), 'track' (where the speaker is in a part of a video, and the two people seen most, for clips),
-'preview' (the first seconds of a style example, small and silent, for the style cards) and 'youtube' (one video of the
-person's own YouTube channel, by its ID, with yt-dlp: only on the download container).
+Operations: 'compose' (segments + voice + music + sound effects + burned ASS -> MP4, optional JPEG cover), 'stills'
+(one JPEG per slide; carousel slides place a picture in a rounded box on a page colour and a logo over it), 'inspect'
+(what an uploaded file is), 'track' (where the speaker is in a part of a video, and the two people seen most, for
+clips), 'preview' (the first seconds of a style example, small and silent, for the style cards) and 'youtube' (one
+video of the person's own YouTube channel, by its ID, with yt-dlp: only on the download container).
 One job runs at a time; inputs are downloaded only from SOURCE_ORIGIN (a YouTube video only from YouTube, by its ID).
 """
 import bisect, json, math, os, re, shutil, signal, struct, subprocess, tempfile, threading, time, urllib.error, urllib.request
@@ -28,7 +28,7 @@ MAX_VIDEO_PIXELS = 9_000_000        # pixels of one input video frame
 MAX_LENGTH = 600                    # seconds of an upload checked by 'inspect' unless the Worker allows more
 LONG_LENGTH = 7200                  # seconds of the longest input (a long video on a paid plan)
 MAX_OUTPUT = 180                    # seconds of a composed video
-MAX_URLS = 48                       # a narrated video: a picture per scene, the voice and the music
+MAX_URLS = 96                       # a narrated video: a picture and a sound per scene, the voice, the music and a whoosh
 MAX_SEGMENTS = 40
 MAX_SLIDES = 10
 MAX_DUCK_RANGES = 500
@@ -43,6 +43,10 @@ YOUTUBE_DEADLINE = 1500             # seconds of one YouTube download (the Worke
 FADE_IN, FADE_OUT = 1.0, 1.5        # music fades (seconds)
 DUCK, DUCK_RAMP = 0.7, 0.3          # music is lowered by 70% under speech, with 0.3 s ramps
 MAX_KEEP = 300                      # parts kept of one video segment (instant cuts, shared/cuts.ts)
+MAX_SOUNDS = 80                     # sound effects placed in one video (shared/sounds.ts)
+MAX_SOUND = 30                      # seconds one sound effect plays
+SOUND_FADE = 0.15                   # seconds a sound effect fades out where it is cut
+SOUND_LIMIT = 0.95                  # peak of a mix with sound effects (they land on the voice and the music)
 # Transitions between segments (FFmpeg xfade, in FFmpeg since 4.3; zoomin since 5.0), as shared/story.ts lists them.
 TRANSITIONS = ('fade', 'fadeblack', 'dissolve', 'slideleft', 'slideup', 'wipeleft', 'smoothleft', 'circleopen', 'zoomin')
 MAX_TRANSITION = 2.0                # seconds
@@ -506,11 +510,49 @@ def compose_plan(payload, origin):
                  'duck': merge_ranges(ranges, frames / FPS)}
     overlay = payload.get('overlay')
     if overlay is not None: overlay = overlay_plan(overlay, len(urls), width, frames)
+    sounds = sounds_plan(payload.get('sounds'), len(urls), frames)
     cover = payload.get('coverAt')
-    used = {s['input'] for s in segments if 'input' in s} | {x['input'] for x in (voice, music, overlay) if x}
+    used = ({s['input'] for s in segments if 'input' in s} | {x['input'] for x in (voice, music, overlay) if x}
+            | {s['input'] for s in sounds})
     return {'width': width, 'height': height, 'urls': urls, 'used': used, 'segments': segments, 'frames': frames,
-            'voice': voice, 'music': music, 'overlay': overlay, 'ass': text(payload['ass']), 'synthetic': synthetic(payload),
-            'cover': None if cover is None else number(cover, 0, 3600)}
+            'voice': voice, 'music': music, 'overlay': overlay, 'sounds': sounds, 'ass': text(payload['ass']),
+            'synthetic': synthetic(payload), 'cover': None if cover is None else number(cover, 0, 3600)}
+
+def sounds_plan(sounds, count, total_frames):
+    """Sound effects on the output clock, in samples: each plays its file from the beginning for `duration` seconds
+    from `start`, cut by the end of the video (one starting after it is left out)."""
+    if sounds is None: return []
+    if not isinstance(sounds, list) or len(sounds) > MAX_SOUNDS: raise ValueError('Invalid sounds')
+    total, plan = total_frames * SAMPLES_PER_FRAME, []
+    for s in sounds:
+        if not isinstance(s, dict): raise ValueError('Invalid sound')
+        start = int(round(number(s['start'], 0, MAX_OUTPUT) * RATE))
+        samples = min(int(round(number(s['duration'], 0.05, MAX_SOUND) * RATE)), total - start)
+        if samples < 0.05 * RATE: continue
+        plan.append({'input': index(s['input'], count), 'start': start, 'samples': samples, 'volume': number(s['volume'], 0, 1)})
+    return plan
+
+def sound_effects(graph, add_input, files, media, sounds, total_samples):
+    """The sound effects as one track [sfx] of the video's length: each file is read once and split for every time it
+    plays (a whoosh on each scene change), cut to its length with a short fade, at its volume, moved to its start."""
+    uses = {}
+    for s in sounds: uses.setdefault(s['input'], []).append(s)
+    labels = []
+    for i, placed in uses.items():
+        if not media[i]['hasAudio']: raise ValueError('Sound has no audio')
+        k = add_input('-i', files[i])
+        branches = [f'[sx{k}_{j}]' for j in range(len(placed))]
+        graph.append(f'[{k}:a:0]aresample={RATE}:async=1:first_pts=0,aformat=sample_rates={RATE}:channel_layouts=stereo,'
+                     f'asplit={len(placed)}{"".join(branches)}')
+        for branch, s in zip(branches, placed):
+            seconds = s['samples'] / RATE
+            fade = min(SOUND_FADE, seconds / 3)
+            label = f'[sfx{len(labels)}]'
+            graph.append(f'{branch}atrim=end_sample={s["samples"]},afade=t=out:st={seconds - fade:.4f}:d={fade:.4f},'
+                         f'volume={s["volume"]:.4f},adelay=delays={s["start"]}S:all=1{label}')
+            labels.append(label)
+    mixed = f'amix=inputs={len(labels)}:duration=longest:normalize=0,' if len(labels) > 1 else ''
+    graph.append(f'{"".join(labels)}{mixed}apad,atrim=end_sample={total_samples}[sfx]')
 
 def overlay_plan(o, count, width, total_frames):
     """A green-screen clip keyed over the segments. Its times are on the output clock, snapped to frames; it ends
@@ -675,9 +717,14 @@ def compose(job, payload, origin):
         graph.append(f'[{k}:a:0]aformat=sample_rates={RATE}:channel_layouts=stereo,asetpts=N/SR/TB,atrim=end_sample={total_samples},'
                      f"volume='{music_gain(music['volume'], music['duck'], total)}':eval=frame[music]")
         sounds.append('[music]')
+    if plan['sounds']:
+        sound_effects(graph, add_input, files, media, plan['sounds'], total_samples)
+        sounds.append('[sfx]')
     audio = '[acat]'
     if len(sounds) > 1:
-        graph.append(f'{"".join(sounds)}amix=inputs={len(sounds)}:duration=first:normalize=0[aout]')
+        # Sound effects land on the voice and the music: their peaks are held under clipping.
+        limit = f',alimiter=limit={SOUND_LIMIT}:level=false' if plan['sounds'] else ''
+        graph.append(f'{"".join(sounds)}amix=inputs={len(sounds)}:duration=first:normalize=0{limit}[aout]')
         audio = '[aout]'
     output = os.path.join(job['dir'], 'output0.mp4')
     command(['ffmpeg','-nostdin','-v','error','-filter_complex_threads','1','-protocol_whitelist','file,pipe',
