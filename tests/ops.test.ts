@@ -346,7 +346,8 @@ describe("plan grants", () => {
     expect((await find("IVANOVA@")).data.accounts).toMatchObject([{ id: other.id, paidPlan: "double", grantId: null, grantPlan: null }]);
     // Emails starting with the search come first; % and _ are matched as they are.
     expect((await find("example.com")).data.accounts.map((a: any) => a.email)).toEqual([admin.email, user.email].sort());
-    expect((await find("ad")).data.accounts.map((a: any) => a.email)).toEqual([admin.email]);
+    // ("adm": the other test user's email is random hex, which can hold "ad" but never an "m".)
+    expect((await find("adm")).data.accounts.map((a: any) => a.email)).toEqual([admin.email]);
     expect((await find("a_i")).data.accounts.map((a: any) => a.email)).toEqual([other.email]);
     expect((await find("%%")).data.accounts).toEqual([]);
     expect((await find("a_m")).data.accounts).toEqual([]);
