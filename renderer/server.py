@@ -8,9 +8,8 @@ The payloads and the HTTP API are described in shared/render.ts:
 Operations: 'compose' (segments + voice + music + sound effects + burned ASS -> MP4, optional JPEG cover), 'stills'
 (one JPEG per slide; carousel slides place a picture in a rounded box on a page colour and a logo over it), 'inspect'
 (what an uploaded file is), 'track' (where the speaker is in a part of a video, and the two people seen most, for
-clips), 'preview' (the first seconds of a style example, small and silent, for the style cards) and 'youtube' (one
-video of the person's own YouTube channel, by its ID, with yt-dlp: only on the download container).
-One job runs at a time; inputs are downloaded only from SOURCE_ORIGIN (a YouTube video only from YouTube, by its ID).
+clips) and 'preview' (the first seconds of a style example, small and silent, for the style cards).
+One job runs at a time; inputs are downloaded only from SOURCE_ORIGIN.
 """
 import bisect, json, math, os, re, shutil, signal, struct, subprocess, tempfile, threading, time, urllib.error, urllib.request
 from http.client import HTTPException
@@ -20,7 +19,7 @@ from xml.sax.saxutils import escape, quoteattr
 
 JOBS = {}
 LOCK = threading.Lock()
-OPERATIONS = ('compose', 'stills', 'inspect', 'track', 'preview', 'youtube')
+OPERATIONS = ('compose', 'stills', 'inspect', 'track', 'preview')
 MAX_BODY = 2 * 1024 * 1024          # bytes of a POST /jobs payload
 MAX_BYTES = 2 * 1024 * 1024 * 1024  # bytes of one downloaded input (long videos for clips, ~1.9 GB uploads)
 MAX_SIDE = 4096                     # pixels on either side of an input picture
@@ -38,8 +37,6 @@ SAMPLES_PER_FRAME = RATE // FPS     # 1600: segment sound is cut on the same gri
 FRAME_SIZES = ((1080, 1920), (720, 1280), (1080, 1350), (1080, 1080))  # 9:16 video; 4:5 and 1:1 carousel slides
 FINISHED_TTL = 1800                 # seconds a finished job's files wait for the Worker
 DOWNLOAD_DEADLINE = 1200
-YOUTUBE_VIDEO = re.compile(r'[A-Za-z0-9_-]{11}')
-YOUTUBE_DEADLINE = 1500             # seconds of one YouTube download (the Worker waits up to 30 minutes)
 FADE_IN, FADE_OUT = 1.0, 1.5        # music fades (seconds)
 DUCK, DUCK_RAMP = 0.7, 0.3          # music is lowered by 70% under speech, with 0.3 s ramps
 MAX_KEEP = 300                      # parts kept of one video segment (instant cuts, shared/cuts.ts)
@@ -138,9 +135,9 @@ def cancelled():
     job = getattr(CURRENT, 'job', None)
     return bool(job and job.get('cancelled'))
 
-def command(args, timeout=90, explain=None):
-    """Runs FFmpeg/ffprobe (or yt-dlp) with a deadline; a cancel (DELETE) kills it. Returns its standard output. A
-    failure raises 'Media processing failed', or what `explain` makes of the program's error output."""
+def command(args, timeout=90):
+    """Runs FFmpeg/ffprobe with a deadline; a cancel (DELETE) kills it. Returns its standard output. A failure raises
+    'Media processing failed'."""
     job = getattr(CURRENT, 'job', None)
     p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if job is not None:
@@ -160,7 +157,7 @@ def command(args, timeout=90, explain=None):
             # The program's last words, for the Worker's log (the job's status): enough to tell one failure from another.
             last = next((line for line in reversed(text.splitlines()) if line.strip()), '') or f'exit status {p.returncode}'
             if job is not None: job['detail'] = re.sub(r'[^\x20-\x7e]', '', f'{os.path.basename(args[0])}: {last}')[:240]
-        raise ValueError(explain(err.decode('utf-8', 'replace')) if explain and not cancelled() else 'Media processing failed')
+        raise ValueError('Media processing failed')
     return out
 
 def filter_path(path):
@@ -1238,52 +1235,9 @@ def track(job, payload, origin):
         if pair: path['faces'] = pair
     job.update(status='completed', duration=round(length, 3), files=0, outputs=[], track=path)
 
-def youtube_plan(payload):
-    """Validates a youtube payload: the video's ID (11 characters), its longest length and largest size."""
-    video = payload.get('video')
-    if not isinstance(video, str) or not YOUTUBE_VIDEO.fullmatch(video): raise ValueError('Invalid video')
-    return {'video': video, 'maxSeconds': number(payload.get('maxSeconds'), 20, LONG_LENGTH), 'maxBytes': int(number(payload.get('maxBytes'), 1, MAX_BYTES))}
-
-def youtube_failure(err):
-    """Why YouTube refused a download, from yt-dlp's error output, as one of the reasons failure_code knows."""
-    m = err.lower()
-    # Bot checks, rate limits and refused media requests (YouTube answers a download it doesn't trust with 403).
-    if 'not a bot' in m or 'http error 429' in m or 'http error 403' in m or 'too many requests' in m or 'rate-limit' in m or 'rate limit' in m:
-        return 'YouTube blocked'
-    if 'members' in m or 'confirm your age' in m or 'age-restricted' in m or 'inappropriate' in m or 'private video' in m or 'sign in' in m:
-        return 'YouTube restricted'
-    if 'unavailable' in m or 'removed' in m or 'not available' in m or 'terminated' in m: return 'YouTube unavailable'
-    return 'YouTube download failed'
-
-def youtube(job, payload, origin):
-    """Downloads one YouTube video as an MP4 of at most 1080p (H.264 and AAC when YouTube has them) with yt-dlp, which
-    asks YouTube by the video's ID only (the Worker checked it is on the person's own channel). No proxy, cookies or
-    account: when YouTube refuses the download, the job fails with the reason."""
-    plan = checked(youtube_plan, payload)
-    out = command([
-        'yt-dlp', '--ignore-config', '--no-playlist', '--no-cache-dir', '--no-progress', '--no-mtime', '--no-colors',
-        '--socket-timeout', '30', '--retries', '3', '--fragment-retries', '5',
-        '--match-filter', f'duration <= {int(plan["maxSeconds"])} & live_status != is_live & live_status != is_upcoming',
-        '--max-filesize', str(plan['maxBytes']),
-        '-f', 'bv*[height<=1080][vcodec^=avc1]+ba[acodec^=mp4a]/bv*[height<=1080]+ba/b[height<=1080]/b',
-        '--merge-output-format', 'mp4', '--remux-video', 'mp4',
-        '-P', job['dir'], '-o', 'video.%(ext)s', '--', f'https://www.youtube.com/watch?v={plan["video"]}',
-    ], timeout=YOUTUBE_DEADLINE, explain=youtube_failure).decode('utf-8', 'replace').lower()
-    path = os.path.join(job['dir'], 'video.mp4')
-    if not os.path.isfile(path):
-        # yt-dlp skips (without failing) a video over the size or one its filter refuses.
-        if 'max-filesize' in out: raise ValueError('Input file too large')
-        if 'does not pass filter' in out: raise ValueError('Media too long')
-        raise ValueError('YouTube download failed')
-    if os.path.getsize(path) > plan['maxBytes']: raise ValueError('Input file too large')
-    job.update(status='completed', files=1, outputs=[path])
-
 def failure_code(e):
     """A short reason the Worker can explain to the user (never the raw message)."""
     m = str(e).lower()
-    youtube_codes = {'youtube blocked': 'YOUTUBE_BLOCKED', 'youtube restricted': 'YOUTUBE_RESTRICTED', 'youtube unavailable': 'YOUTUBE_UNAVAILABLE',
-                     'youtube download failed': 'YOUTUBE_FAILED'}
-    if m in youtube_codes: return youtube_codes[m]
     if isinstance(e, (subprocess.TimeoutExpired, TimeoutError)) or 'timed out' in m: return 'MEDIA_TIMEOUT'
     if isinstance(e, (OSError, HTTPException)): return 'MEDIA_INPUT'  # urllib errors, refused connections, broken reads
     if 'invalid' in m: return 'MEDIA_INVALID'
@@ -1304,7 +1258,6 @@ def process(job, payload, id=None):
         elif operation == 'inspect': inspect(job, payload, origin)
         elif operation == 'track': track(job, payload, origin)
         elif operation == 'preview': preview(job, payload, origin)
-        elif operation == 'youtube': youtube(job, payload, origin)
         else: raise ValueError('Invalid operation')
     except Exception as e:
         job.update(status='failed', error=failure_code(e))

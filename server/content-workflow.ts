@@ -19,7 +19,6 @@ import { failAsset } from "./media";
 import { claimSpeech, mayHaveSpeech, storedTranscript, transcribe } from "./speech";
 import { momentsAfterSpeech } from "./highlights";
 import { downloadImport, importFailure } from "./imports";
-import { storeYoutube, youtubeJob } from "./youtube-import";
 import { narrationContext } from "./story";
 import { runEpisode, videoReady, videoFailed } from "./series";
 import { LONG_VIDEO_SECONDS, SPEECH_MAX_SECONDS, speechSpans } from "../shared/speech";
@@ -639,22 +638,14 @@ async function inspectUpload(e: Env, step: WorkflowStep, assetId: string) {
 const importOnce = { retries: { limit: 1, delay: "1 minute" as const }, timeout: "45 minutes" as const };
 /**
  * A video imported from a link (server/imports.ts): downloaded into storage, then checked and transcribed like an
- * upload. A video of the person's own YouTube channel (server/youtube-import.ts) is downloaded by the renderer's
- * download container first (up to 30 minutes, waiting its turn). A failed download fails the file with the reason;
- * nothing is charged.
+ * upload. A failed download fails the file with the reason; nothing is charged.
  */
 async function importVideo(e: Env, step: WorkflowStep, assetId: string) {
-  let youtube: RenderPayload | null = null;
   try {
-    youtube = await step.do("import-youtube", safe, () => youtubeJob(e, assetId));
-    if (youtube) {
-      const job = youtube;
-      const { slot } = await rendererJob(e, step, "youtube", job, 120, "15 seconds");
-      if (!(await step.do("youtube-store", importOnce, () => storeYoutube(e, assetId, slot, job.id)))) return;
-    } else if (!(await step.do("import", importOnce, () => downloadImport(e, assetId)))) return;
+    if (!(await step.do("import", importOnce, () => downloadImport(e, assetId)))) return;
   } catch (error) {
     console.warn("Import failed", { assetId, code: error instanceof Error && /^[A-Z_]{3,40}$/.test(error.message) ? error.message : error instanceof Error ? error.name : "INTERNAL" });
-    await step.do("import-failed", () => failAsset(e, assetId, importFailure(error, !!youtube)));
+    await step.do("import-failed", () => failAsset(e, assetId, importFailure(error)));
     return;
   }
   await inspectUpload(e, step, assetId);

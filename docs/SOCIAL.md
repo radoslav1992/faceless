@@ -158,8 +158,9 @@ YouTube Terms of Service (`/terms#social-accounts`); the privacy policy's "YouTu
 (`/privacy#youtube`) says the app uses YouTube API Services, links the Google Privacy Policy, explains what YouTube data
 is accessed, stored and shared, how long it is kept, and how to revoke access (disconnect, account deletion, or Google's
 security settings page); disconnecting revokes the token and deletes the channel's YouTube data (see "YouTube data"
-below). Keep `YOUTUBE_IMPORT` off: downloading YouTube videos is outside what the
-YouTube API Services policies allow (see DEPLOYMENT.md). The Channels page warns that videos may post as private
+below). The app never downloads YouTube videos (the YouTube API Services policies don't allow it): YouTube links are
+refused for imports. The privacy policy also states that the use of data received from Google APIs adheres to the
+Google API Services User Data Policy, including the Limited Use requirements. The Channels page warns that videos may post as private
 until Google finishes its review: take that sentence out of `src/app/Channels.tsx` once the audit passes.
 
 ### YouTube data (what the YouTube API Services policies ask)

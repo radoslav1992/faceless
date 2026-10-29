@@ -34,9 +34,7 @@ hours rather than in one expensive run.
 
 The scene descriptions and script sent to the AI providers are part of the video itself (its spec): they stay as long
 as the video does. A video imported from a link is fetched from that link by our Worker; the link is kept only until
-the file is downloaded (then the file is kept like an upload). A video imported from the person's own YouTube channel
-(a beta) is downloaded from YouTube by our renderer, after its channel was checked with the person's YouTube
-connection; the connection also lists the channel's latest videos for the import picker, which are not stored. A long
+the file is downloaded (then the file is kept like an upload). Videos are never downloaded from YouTube. A long
 video's transcript is sent to the text model (Cloudflare Workers AI) when the owner finds clips in it; the moments
 found are kept with the video until it is deleted. Transcripts also hold who spoke when (speakers numbered by
 ElevenLabs Scribe, never identified) and the sounds it tagged, such as laughter or applause, for as long as the file.
