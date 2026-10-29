@@ -740,7 +740,8 @@ def compose(job, payload, origin):
         if not os.path.exists(cover) or not os.path.getsize(cover): raise ValueError('Media processing failed: no cover')
         if plan['synthetic']: mark_jpeg(cover)
         outputs.append(cover)
-    job.update(status='completed', duration=round(total, 3), files=len(outputs), outputs=outputs)
+    # How many sound effects were mixed: the Worker refuses a video that asked for some and got none (an older renderer).
+    job.update(status='completed', duration=round(total, 3), files=len(outputs), outputs=outputs, sounds=len(plan['sounds']))
 
 def join_with_transitions(graph, segments, own_sound, total_samples):
     """Joins the segments' pictures ([v0]...) into [vcat] and their sound ([a0]...) into [acat]. A segment with a
@@ -1281,7 +1282,7 @@ def process(job, payload, id=None):
             path = os.path.join(job['dir'], name)
             if path not in keep: os.remove(path)
 
-STATUS_FIELDS = ('status', 'duration', 'error', 'detail', 'files', 'meta', 'track')
+STATUS_FIELDS = ('status', 'duration', 'error', 'detail', 'files', 'meta', 'track', 'sounds')
 CONTENT_TYPES = {'.mp4': 'video/mp4', '.jpg': 'image/jpeg'}
 
 class Handler(BaseHTTPRequestHandler):

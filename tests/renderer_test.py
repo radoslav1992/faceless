@@ -1164,6 +1164,8 @@ class SoundEffectsTest(RendererTest):
             {'input': 4, 'start': 1.2, 'duration': 0.6, 'volume': 1}, {'input': 4, 'start': 2.7, 'duration': 0.6, 'volume': 1},
             {'input': 5, 'start': 0.1, 'duration': 2, 'volume': 0.5}]))
         self.assertEqual((job['status'], job.get('duration')), ('completed', 4.0), job)
+        # It says how many it mixed: the Worker refuses a video that asked for some and got none (an older renderer).
+        self.assertEqual(job['sounds'], 3)
         mp4 = job['outputs'][0]
         audio = next(s for s in ffprobe(mp4)['streams'] if s['codec_type'] == 'audio')
         self.assertAlmostEqual(float(audio['duration']), 4.0, delta=0.03)
@@ -1183,7 +1185,7 @@ class SoundEffectsTest(RendererTest):
         self.assertAlmostEqual(float(audio['duration']), 4.0, delta=0.03)
         for sounds in (None, []):
             job, graph = self.graph(self.video(sounds, voice=True))
-            self.assertEqual(job['status'], 'completed', job)
+            self.assertEqual((job['status'], job['sounds']), ('completed', 0), job)
             self.assertNotIn('[sfx]', graph)
             self.assertNotIn('alimiter', graph)
 

@@ -164,6 +164,8 @@ python3 tests/renderer_test.py
 
 CI (`.github/workflows/ci.yml`) runs `npm run ci` and `wrangler deploy --dry-run`, the renderer test on Python 3.12
 with FFmpeg and Noto fonts, and a Docker build of the renderer image. None of it replaces a smoke test with real keys.
+Pushes to `main` deploy the Worker and the renderer image from GitHub (`.github/workflows/deploy.yml`, with the
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets: docs/DEPLOYMENT.md).
 
 ## Project layout
 

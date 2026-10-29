@@ -561,7 +561,16 @@ async function renderJob(e: Env, step: WorkflowStep, run: RunInfo, part: Plan["c
       }
       return renderStatus(e, slot, payload.id);
     });
-    if (status.status === "completed") return status;
+    if (status.status === "completed") {
+      // A renderer from before sound effects (its image not rolled out yet) finishes without them: never a video that
+      // quietly lacks them; the run fails and is refunded, to be made again once the renderer is updated.
+      const sounds = part.sounds?.length ?? 0;
+      if (sounds && status.sounds !== sounds) {
+        console.error("Renderer outdated", { runId: run.id, sounds, mixed: status.sounds ?? null });
+        throw new Error("RENDERER_OUTDATED");
+      }
+      return status;
+    }
     if (status.status === "failed") {
       const code = typeof status.error === "string" && /^MEDIA_[A-Z_]+$/.test(status.error) ? status.error : "MEDIA_PROCESSING_FAILED";
       // What FFmpeg said: Workers Logs tell one failure from another (the person reads the code's message).

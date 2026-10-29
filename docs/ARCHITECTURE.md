@@ -361,7 +361,8 @@ seconds; music loops, fades and is lowered under the voice; sound effects (`comp
 the whoosh from 0.3 s before every scene change the picture shows (at most 2 s; none over one background clip) and a
 scene's own sound from its start until half a second after its end (or its own end), all at the video's sound volume,
 mixed over the voice and music in the container with their peaks held under clipping (`alimiter`), each file read once
-however often it plays; free-trial videos get a small watermark with the product name. The cover is taken once the first words (and the headline) are on screen. Output is 1080×1920 at 30 fps, at most
+however often it plays (the renderer reports how many it mixed, and the Worker fails and refunds a video that asked
+for some and got none, `RENDERER_OUTDATED`: a renderer image older than the Worker); free-trial videos get a small watermark with the product name. The cover is taken once the first words (and the headline) are on screen. Output is 1080×1920 at 30 fps, at most
 180 seconds.
 
 **The container** (`renderer/`, Python 3.12 with FFmpeg, libass and the bundled Noto fonts): three render instances
