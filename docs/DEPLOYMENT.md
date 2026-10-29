@@ -1,9 +1,22 @@
 # Deployment
 
 Hookstreak Shorts deploys as one Cloudflare Worker (`faceless`, with its static assets) plus a container image for the
-renderer. `npm run deploy` builds the client and runs `wrangler deploy`, which also publishes the renderer image,
-creates the Workflows and sets the cron. With GitHub → Workers Builds use `npm ci && npm run build` as the build command
-and `npx wrangler deploy` as the deploy command (a full deploy, so the container image is published too).
+renderer. `npm run deploy` builds the client and runs `wrangler deploy`, which also publishes the renderer image
+(Docker must run where it does), creates the Workflows and sets the cron.
+
+**From GitHub** (`.github/workflows/deploy.yml`): every push to `main` runs the CI checks, then `wrangler deploy
+--containers-rollout=immediate` on a GitHub runner, whose Docker builds the renderer image; **Actions → Deploy → Run
+workflow** deploys by hand. It needs two repository secrets (**Settings → Secrets and variables → Actions**):
+
+- `CLOUDFLARE_ACCOUNT_ID`: the account ID (Workers & Pages overview, or the ID in the dashboard's address).
+- `CLOUDFLARE_API_TOKEN`: an API token (**My Profile → API Tokens → Create Token → Edit Cloudflare Workers**) for this
+  account and the site's zone; add **Account → Containers → Edit** where the form offers it.
+
+Cloudflare's Workers Builds (connected in the Worker's **Settings → Build**) have no Docker, so they can only deploy
+the Worker (`npx wrangler deploy --containers-rollout=none`), never a new renderer. With the GitHub deploy in place,
+disconnect them (or leave them: they deploy the same Worker code and never touch the containers). A Worker that is
+newer than its renderer refuses videos whose sound effects the renderer didn't mix (`RENDERER_OUTDATED`, refunded)
+rather than delivering them without.
 
 ## 1. Cloudflare resources
 
@@ -186,8 +199,8 @@ then disclosed as AI-made when they're posted).
   `Transition` (whooshes, swooshes): new videos get one of them at random on every scene change. The others (fire,
   waves, a crowd, an explosion, a door) are what the writer gives the scenes you would hear, at most one scene in
   three. Without sound effects in the library, videos have none. They are mixed in the container, so videos with them
-  need this version's renderer image: deploy with `wrangler deploy` where Docker runs (section 1), not only the
-  Worker.
+  need this version's renderer image: the GitHub deploy (or `npm run deploy` where Docker runs) publishes it, Workers
+  Builds don't; until it is out such videos fail with `RENDERER_OUTDATED` and are refunded.
 
 Switching an item off removes it from new videos; videos already made keep their render. You need the rights to
 everything you upload, including permission for every person shown.

@@ -141,6 +141,7 @@ video is attached to it); its failure refunds the credits and the Clips page say
 | `SPEECH_UNCERTAIN` | a paid transcription was claimed but its answer was lost: it may have been billed by ElevenLabs |
 | `SPEECH_INVALID` | the video to transcribe was deleted or changed before the run started. Caused by the request |
 | `RENDERER_UNAVAILABLE` | the container did not answer, or the `MEDIA_RENDERER` binding is missing |
+| `RENDERER_OUTDATED` | the renderer finished a video without the sound effects it asked for: its image is older than the Worker (deployed without the container, or mid-rollout). Run **Actions → Deploy** on GitHub (or `npm run deploy` with Docker); the person tries again |
 | `MEDIA_TIMEOUT` | no render finished in about 40 minutes (no free container, or a stuck render), or maintenance ended a run at 3 hours |
 | `MEDIA_LOST` | the container no longer knew the job (it restarted) |
 | `MEDIA_PROCESSING_FAILED`, `MEDIA_INVALID`, `MEDIA_NO_AUDIO`, `MEDIA_TOO_LONG`, `MEDIA_CANCELLED` | the renderer refused or failed the job; the workflow log (`Render failed`) has the run ID and FFmpeg's last error line (`detail`) |

@@ -649,11 +649,14 @@ describe("the writer", () => {
 function jpeg(width = 1080, height = 1920) {
   return new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, height >> 8, height & 255, width >> 8, width & 255, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, 0xff, 0xd9, ...new Array(40).fill(0)]);
 }
-/** A fake renderer container: accepts jobs, completes them at once, serves small files. */
+/**
+ * A fake renderer container: accepts jobs, completes them at once, serves small files. `outdated`: one from before
+ * sound effects, which finishes a video without mixing them (and doesn't say how many it mixed).
+ */
 function renderer(log: any[] = []) {
   const jobs = new Map<string, any>();
-  return {
-    log, jobs,
+  const fake = {
+    log, jobs, outdated: false,
     idFromName: (n: string) => n,
     get: () => ({
       fetch: async (url: string, init: any = {}) => {
@@ -663,10 +666,11 @@ function renderer(log: any[] = []) {
         const job = jobs.get(path[1]);
         if (!job) return new Response("{}", { status: 404 });
         if (path[2] === "file") return new Response(path[3] === "0" ? new Uint8Array(4000).fill(7) : jpeg());
-        return Response.json({ status: "completed", duration: DURATION, files: 2 });
+        return Response.json({ status: "completed", duration: DURATION, files: 2, ...(!fake.outdated && job.operation === "compose" && { sounds: job.sounds?.length ?? 0 }) });
       },
     }),
   };
+  return fake;
 }
 /** ElevenLabs character timings of the original text (`alignment`), saying `said`. */
 function alignment() {
@@ -1203,5 +1207,22 @@ describe("planning and writing through the API", () => {
     expect(post.renderStatus).toBe("ready");
     expect(composes().at(-1).sounds.map((x: any) => x.volume)).toEqual([0.8, 0.8, 0.8, 0.8]);
     expect(used()).toBe(price);
+    // A renderer from before sound effects finishes without mixing them: the video isn't kept, the run fails and is
+    // refunded, with a message to try again (the old render stays).
+    env.MEDIA_RENDERER.outdated = true;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const stale = await call(worker, env, "PUT", `/api/videos/${post.id}`, { spec: { ...post.spec, sounds: { ...post.spec.sounds, volume: 0.5 } }, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(stale.data.rendering).toBe(true);
+    await run();
+    post = (await call(worker, env, "GET", `/api/videos/${post.id}`, undefined, user.cookie)).data.video;
+    expect(post.renderStatus).toBe("failed");
+    expect(post.renderError).toMatch(/sound effects couldn't be mixed in/);
+    expect(used()).toBe(price);
+    // Videos without sound effects don't depend on it.
+    const quietVideo = await call(worker, env, "POST", "/api/videos", { spec: { ...base }, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(quietVideo.status).toBe(201);
+    env.CONTENT.created.splice(0, env.CONTENT.created.length - 1);
+    await run();
+    expect((await call(worker, env, "GET", `/api/videos/${quietVideo.data.id}`, undefined, user.cookie)).data.video.renderStatus).toBe("ready");
   });
 });

@@ -89,4 +89,5 @@ export const renderFailures: Record<string, string> = {
   MEDIA_FORMAT: "A file in this post can't be read. Use MP4, MOV or WebM videos and JPG or PNG images.",
   MEDIA_LOST: "The video service restarted while making this post. Try again.",
   RENDERER_UNAVAILABLE: "The video service didn't answer. Try again in a few minutes.",
+  RENDERER_OUTDATED: "The video service is being updated, so the sound effects couldn't be mixed in. Try again in a few minutes.",
 };

@@ -140,4 +140,6 @@ export type RenderStatus = {
   meta?: { kind: "video" | "audio" | "image"; width: number; height: number; hasAudio: boolean };
   /** track: the speaker path and the two people seen most (checked against shared/track.ts by the Worker). */
   track?: { v: number; points: [number, number][]; faces?: [number, number][] };
+  /** compose: how many sound effects were mixed (a renderer from before sound effects reports none). */
+  sounds?: number;
 };
