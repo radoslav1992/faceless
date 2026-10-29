@@ -84,13 +84,17 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
           </label>
         </Section>
       )}
-      <Section title="Music and subtitles">
+      <Section title="Music, sound effects and subtitles">
         <div className="form-row">
           <MusicChoice label="Music" small mood={settings.music.mood} trackId={settings.music.trackId} onChange={({ mood, trackId }) => set({ music: { ...settings.music, mood, trackId } })}
             moodName={(m) => (m === "auto" ? "A track that fits each episode" : m === "none" ? "No music" : `${m[0].toUpperCase()}${m.slice(1)} tracks`)} />
           <label className="field"><span className="small">Music volume: {Math.round(settings.music.volume * 100)}%</span>
             <input type="range" min={0} max={1} step={0.05} value={settings.music.volume} onChange={(e) => set({ music: { ...settings.music, volume: Number(e.target.value) } })} />
           </label>
+        </div>
+        <div className="row between">
+          <span className="small">Sound effects <span className="muted">(a whoosh on scene changes and sounds for scenes you'd hear)</span></span>
+          <Switch checked={settings.sounds} onChange={(sounds) => set({ sounds })} label="Sound effects" />
         </div>
         <div className="row between"><span className="small">Subtitles</span><Switch checked={settings.captions.enabled} onChange={(enabled) => set({ captions: { ...settings.captions, enabled } })} label="Subtitles" /></div>
         {settings.captions.enabled && <CaptionStylePicker label="Subtitle style" value={settings.captions.style} onChange={(style) => set({ captions: { ...settings.captions, style } })} />}

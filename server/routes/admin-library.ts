@@ -7,27 +7,42 @@ import { json } from "../db";
 import { extOf, head, imageFits, imageInfo, serveObject, storeStream } from "../storage";
 import { libraryKinds, libraryView, splitTags, type LibraryKind, type LibraryRow } from "../library";
 import { describeMedia } from "../describe";
+import { rate } from "../security";
+import { soundEffect, SOUND_EFFECT_SECONDS } from "../providers/elevenlabs";
+import { ProviderError } from "../providers/http";
 import { CATEGORY_MAX } from "../../shared/library";
+import { SOUND_MAX_SECONDS, SOUND_MIN_SECONDS } from "../../shared/sounds";
 
-// Admin → Library: the shared music, clips and pictures people search and pick from (server/library.ts). Items are
-// uploaded, or copied from the administrator's own media (an upload, or an AI picture or clip they made for a video)
-// with its details: its name, its prompt as the description, whether AI made it. Name, description, genre or category,
+// Admin → Library: the shared music, clips, pictures and sound effects people search and pick from (server/library.ts).
+// Items are uploaded, copied from the administrator's own media (an upload, or an AI picture or clip they made for a
+// video) with its details: its name, its prompt as the description, whether AI made it — or, for sound effects, made
+// with ElevenLabs from a description (POST /generate: a take to listen to, uploaded when kept). Name, description, genre or category,
 // tags and the AI mark are edited here, written or suggested by AI (POST /describe); an item is switched off (no
 // longer offered) or deleted.
 export const adminLibrary = new Hono<App>();
 
+const audio = ["audio/mpeg", "audio/mp4", "audio/x-m4a", "audio/aac", "audio/ogg", "audio/wav", "audio/x-wav"];
 const mimes: Record<LibraryKind, string[]> = {
-  music: ["audio/mpeg", "audio/mp4", "audio/x-m4a", "audio/aac", "audio/ogg", "audio/wav", "audio/x-wav"],
+  music: audio,
   clip: ["video/mp4", "video/quicktime", "video/webm"],
   image: ["image/jpeg", "image/png", "image/webp"],
+  sfx: audio,
 };
-const limits: Record<LibraryKind, number> = { music: 50 * MB, clip: 50 * MB, image: 20 * MB };
+const limits: Record<LibraryKind, number> = { music: 50 * MB, clip: 50 * MB, image: 20 * MB, sfx: 10 * MB };
 const wrongType: Record<LibraryKind, string> = {
   music: "Upload an MP3, M4A, OGG or WAV track.", clip: "Upload an MP4, MOV or WebM video.", image: "Upload a JPG, PNG or WebP picture.",
+  sfx: "Upload an MP3, M4A, OGG or WAV sound.",
 };
+/** The kind an own media file becomes (audio: music; sound effects are uploaded or made with ElevenLabs). */
 const kindOfMime = (mime: string): LibraryKind | null => (libraryKinds.find((k) => mimes[k].includes(mime)) ?? null);
 const tooBig = (kind: LibraryKind) => `Library ${kind === "image" ? "pictures" : "files"} can be up to ${limits[kind] / MB} MB.`;
 const LENGTH = "Library clips and tracks must be between half a second and 10 minutes long.";
+const SOUND_LENGTH = `Sound effects must be between ${SOUND_MIN_SECONDS} and ${SOUND_MAX_SECONDS} seconds long.`;
+/** Why a clip, track or sound of `duration` seconds can't be in the library, or null (pictures have no length). */
+const lengthProblem = (kind: LibraryKind, duration: number) =>
+  kind === "image" ? null
+    : kind === "sfx" ? (duration < SOUND_MIN_SECONDS || duration > SOUND_MAX_SECONDS ? SOUND_LENGTH : null)
+      : duration < 0.5 || duration > 600 ? LENGTH : null;
 const fields = {
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(500),
@@ -54,13 +69,17 @@ async function storedImage(env: Env, key: string) {
   return info && imageFits(info) ? info : null;
 }
 
-/** How many videos and series use each library item (music, background clip or a scene's clip or picture). */
+/**
+ * How many videos and series use each library item (music, background clip, a scene's clip or picture, the whoosh of
+ * scene changes or a scene's sound).
+ */
 async function libraryUsage(env: Env) {
   const usage = new Map<string, number>();
   const add = (rows: { item: string | null; n: number }[]) => { for (const r of rows) if (r.item) usage.set(r.item, (usage.get(r.item) || 0) + r.n); };
-  for (const path of ["$.music.trackId", "$.backdrop.libraryId"])
+  for (const path of ["$.music.trackId", "$.backdrop.libraryId", "$.sounds.transitionId"])
     add((await env.DB.prepare("SELECT json_extract(spec,?) AS item,COUNT(*) AS n FROM videos GROUP BY item").bind(path).all<any>()).results);
-  add((await env.DB.prepare("SELECT json_extract(s.value,'$.libraryId') AS item,COUNT(DISTINCT v.id) AS n FROM videos v, json_each(v.spec,'$.scenes') s GROUP BY item").all<any>()).results);
+  for (const path of ["$.libraryId", "$.soundId"])
+    add((await env.DB.prepare("SELECT json_extract(s.value,?) AS item,COUNT(DISTINCT v.id) AS n FROM videos v, json_each(v.spec,'$.scenes') s GROUP BY item").bind(path).all<any>()).results);
   for (const path of ["$.music.trackId", "$.backdropId"])
     add((await env.DB.prepare("SELECT json_extract(settings,?) AS item,COUNT(*) AS n FROM series GROUP BY item").bind(path).all<any>()).results);
   return usage;
@@ -83,7 +102,8 @@ adminLibrary.put("/file", async (c) => {
   }).parse(c.req.query());
   const mime = (c.req.header("Content-Type") || "").split(";")[0].toLowerCase();
   if (!mimes[q.kind].includes(mime)) throw new HTTPException(415, { message: wrongType[q.kind] });
-  if (q.kind !== "image" && q.duration < 0.5) throw new HTTPException(400, { message: LENGTH });
+  const problem = lengthProblem(q.kind, q.duration);
+  if (problem) throw new HTTPException(400, { message: problem });
   if (Number(c.req.header("Content-Length")) > limits[q.kind]) throw new HTTPException(413, { message: tooBig(q.kind) });
   const id = uid(), key = `library/${id}/file.${extOf(mime)}`;
   let bytes: number;
@@ -110,7 +130,8 @@ adminLibrary.put("/file", async (c) => {
 
 /** The administrator's own media that can be added: uploads and AI pictures and clips, newest first. */
 adminLibrary.get("/media", async (c) => {
-  const q = z.object({ kind: z.enum(libraryKinds) }).parse(c.req.query());
+  // Own audio becomes music: sound effects are uploaded or made with ElevenLabs.
+  const q = z.object({ kind: z.enum(["music", "clip", "image"]) }).parse(c.req.query());
   const user = c.get("user");
   const rows = (await c.env.DB.prepare(
     `SELECT a.id,a.kind,a.name,a.mime,a.bytes,a.duration,a.width,a.height,a.created_at,json_extract(a.meta,'$.prompt') AS prompt,
@@ -122,7 +143,7 @@ adminLibrary.get("/media", async (c) => {
     files: rows.map((a) => ({
       id: a.id, name: a.name, ai: a.kind !== "upload", prompt: a.prompt || "", mime: a.mime, bytes: a.bytes, duration: a.duration, width: a.width, height: a.height,
       createdAt: a.created_at, url: `/api/media/${a.id}/file`, added: a.added ?? null,
-      problem: a.bytes > limits[q.kind] ? tooBig(q.kind) : q.kind !== "image" && (a.duration < 0.5 || a.duration > 600) ? LENGTH : null,
+      problem: a.bytes > limits[q.kind] ? tooBig(q.kind) : lengthProblem(q.kind, a.duration),
     })),
   });
 });
@@ -149,7 +170,8 @@ adminLibrary.post("/from-media", async (c) => {
   if (!kind || !["upload", "ai_image", "ai_clip"].includes(a.kind)) throw new HTTPException(400, { message: "Choose an upload, an AI picture or an AI clip." });
   if (await c.env.DB.prepare("SELECT 1 FROM library_items WHERE source_asset=?").bind(a.id).first()) throw new HTTPException(409, { message: "This file is already in the library." });
   if (a.bytes > limits[kind]) throw new HTTPException(413, { message: tooBig(kind) });
-  if (kind !== "image" && (a.duration < 0.5 || a.duration > 600)) throw new HTTPException(400, { message: LENGTH });
+  const problem = lengthProblem(kind, a.duration);
+  if (problem) throw new HTTPException(400, { message: problem });
   const source = await c.env.MEDIA.get(a.object_key);
   if (!source) throw new HTTPException(404, { message: "File not found." });
   const id = uid(), key = `library/${id}/file.${extOf(a.mime)}`;
@@ -195,11 +217,35 @@ adminLibrary.post("/describe", async (c) => {
   }).parse(await c.req.json());
   const frames = d.frames.map((f) => sample(f, 1.6 * MB, isJpeg));
   const audio = d.audio === undefined ? null : sample(d.audio, 8 * MB, isWav);
-  const wanted = d.kind === "music" ? !!audio && !frames.length : !audio && frames.length > 0 && (d.kind === "clip" || frames.length === 1);
+  const heard = d.kind === "music" || d.kind === "sfx";
+  const wanted = heard ? !!audio && !frames.length : !audio && frames.length > 0 && (d.kind === "clip" || frames.length === 1);
   if (!wanted || frames.some((f) => !f) || (d.audio !== undefined && !audio)) throw new HTTPException(400, { message: "These samples can't be described. Reload the page and try again." });
   const suggestion = await describeMedia(c.env, { kind: d.kind, duration: d.duration, frames: frames as Uint8Array[], audio });
   if (!suggestion) throw new HTTPException(503, { message: "The AI couldn't describe this right now. Try again in a minute, or fill it in yourself." });
   return c.json({ suggestion });
+});
+/**
+ * A take of a sound effect made with ElevenLabs from a description (billed by ElevenLabs per take), as an MP3 to listen
+ * to: nothing is saved. The administrator keeps the takes they like by uploading them (PUT /file, made with AI, the
+ * description they were made from). 60 an hour.
+ */
+adminLibrary.post("/generate", async (c) => {
+  const d = z.object({
+    prompt: z.string().trim().min(3).max(300), seconds: z.number().min(SOUND_EFFECT_SECONDS.min).max(SOUND_EFFECT_SECONDS.max),
+  }).parse(await c.req.json());
+  await rate(c, "sound-generate", 60, 3600, c.get("user").id);
+  let bytes: Uint8Array;
+  try {
+    bytes = await soundEffect(c.env, d.prompt, d.seconds);
+  } catch (e) {
+    const code = e instanceof ProviderError ? e.code : "SOUND_FAILED";
+    console.warn("Sound effect not made", { code });
+    throw new HTTPException(code === "SOUND_UNAVAILABLE" ? 503 : 502, {
+      message: code === "SOUND_UNAVAILABLE" ? "ElevenLabs isn't set up, or its account can't make sound effects. Upload a sound instead."
+        : code === "SOUND_BUSY" ? "ElevenLabs is busy. Try again in a minute." : "ElevenLabs couldn't make this sound. Try again, or describe it differently.",
+    });
+  }
+  return new Response(bytes.slice().buffer, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" } });
 });
 /** An item's file whether it is offered or switched off (people only get offered ones), to preview or describe it. */
 adminLibrary.get("/:id/file", async (c) => {

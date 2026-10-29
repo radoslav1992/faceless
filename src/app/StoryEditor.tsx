@@ -8,6 +8,7 @@ import { StoryPreview, type ScenePicture } from "./StoryPreview";
 import { StoryTimeline } from "./StoryTimeline";
 import { StoryStylePicker } from "./StoryStyles";
 import { PresenterSection } from "./presenter-ui";
+import { SceneSound, SoundSection, useSoundLibrary } from "./sound-ui";
 import {
   clockText, mergeScenes, moveEdge, segmentsOf, splitScene, toggleKey, useStoryClock, useStoryPlayer, type UploadTiming,
 } from "./story-model";
@@ -28,7 +29,7 @@ import { headlineFor } from "../../shared/headline";
 import "./story.css";
 
 // The video editor: the preview and the selected scene, the timeline of the whole voice, the on-screen title, the
-// presenter, the subtitles, the background clip, the music, and the plan with its exact price. Nothing is paid until
+// presenter, the subtitles, the background clip, the music, the sound effects, and the plan with its exact price. Nothing is paid until
 // the video is made: then its run makes what is still missing (the voice, AI pictures, AI clips, the presenter),
 // refunded if it fails.
 
@@ -91,6 +92,7 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
   const segments = useMemo(() => segmentsOf(spec, clock.timing), [spec, clock.timing]);
   const player = useStoryPlayer(clock.duration);
   const media = useStoryMedia(spec);
+  const sounds = useSoundLibrary();
   const [selected, setSelected] = useState(0);
   const [picker, setPicker] = useState<null | "image" | "video" | "library">(null);
   const audio = usePreviewAudio();
@@ -148,6 +150,7 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
         </div>
         <SceneInspector spec={spec} index={selected} scene={scene} seconds={timed[selected] ? timed[selected].end - timed[selected].start : 0}
           known={media.known} onChange={setScene} pick={setPicker} initial={initial} allClips={allClips} presenter={avatar?.name ?? "The presenter"}
+          sounds={sounds} onSpec={onChange}
           onSplit={(at) => setScenes(splitScene(spec.scenes, selected, at))}
           onMerge={() => setScenes(mergeScenes(spec.scenes, selected))}
           onDelete={() => { setScenes(spec.scenes.filter((_, i) => i !== selected)); setSelected(Math.max(0, selected - 1)); }} />
@@ -203,6 +206,7 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
           </label>
         </EditorSection>
       )}
+      <SoundSection spec={spec} onChange={onChange} library={sounds} />
       <StoryPlan spec={spec} creditsLeft={creditsLeft} music={music} initial={initial} recordingSeconds={spec.narration.kind === "upload" ? clock.duration : undefined} />
       {picker === "library" && <LibraryPicker kind="scene" onClose={() => setPicker(null)}
         onPick={(i) => { media.remember(i.id, libraryKnown(i)); setScene({ source: "library", libraryId: i.id, assetId: undefined }); setPicker(null); }} />}
@@ -212,9 +216,11 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
   );
 }
 
-/** The selected scene: its words (key words, split), its picture (source, description, price) and its way in. */
-function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, onSplit, onMerge, onDelete, initial, allClips, presenter }: {
+/** The selected scene: its words (key words, split), its picture (source, description, price), its way in and its sound. */
+function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, onSplit, onMerge, onDelete, initial, allClips, presenter, sounds, onSpec }: {
   spec: StorySpec; index: number; scene: StoryScene; seconds: number; known: Record<string, Known>; initial: boolean;
+  /** The library's sound effects; `onSpec` changes the whole video (adding a sound switches sound effects on). */
+  sounds: Map<string, LibraryItem>; onSpec: (spec: StorySpec) => void;
   /** The presenter's name (shown on its scenes). */
   presenter: string;
   /** The scenes still showing an AI picture, what turning them all into AI clips costs, and doing it. */
@@ -366,6 +372,7 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
         </select>
         {index === 0 && <span className="hint">The first scene starts the video.</span>}
       </label>
+      <SceneSound spec={spec} index={index} scene={scene} library={sounds} onScene={onChange} onSpec={onSpec} />
     </div>
   );
 }
@@ -405,17 +412,17 @@ function StoryPlan({ spec, creditsLeft, music, initial, recordingSeconds }: { sp
       [`New video · about ${clockText(p.seconds)}`, `${spec.narration.kind === "voice" ? `AI voice ${voiceName}` : "your recording"}, ${spec.backdrop ? "a background clip" : `${p.pictures} AI pictures in ${storyStyles[spec.style].name}`}`, p.video],
       ["Animated scenes", p.clips.length ? p.clips.map((c) => `${c.seconds} s${c.quality === "high" ? " HQ" : ""}`).join(", ") : "none", p.clipCredits],
       ...presenter,
-      ["Subtitles, transitions" + (music ? ", music" : ""), "rendering", 0],
+      ["Subtitles, transitions" + (music ? ", music" : "") + (spec.sounds?.enabled ? ", sound effects" : ""), "rendering", 0],
     ]
     : [
       [`New narration${voiceName ? ` · ${voiceName}` : ""}`, p.voice ? `${p.script.length.toLocaleString("en-US")} characters` : "unchanged", p.voice],
       [`New pictures · ${storyStyles[spec.style].name}`, p.pictures ? `${p.pictures} to make` : "none", p.redo],
       ["Animated scenes", p.clips.length ? p.clips.map((c) => `${c.seconds} s${c.quality === "high" ? " HQ" : ""}`).join(", ") : "none", p.clipCredits],
       ...presenter,
-      ["Subtitles, transitions, timing" + (music ? ", music" : ""), "rendering", 0],
+      ["Subtitles, transitions, timing" + (music ? ", music" : "") + (spec.sounds?.enabled ? ", sound effects" : ""), "rendering", 0],
     ];
   return (
-    <EditorSection title="Plan and price" hint={initial ? `A new video costs 1 credit per started ${SECONDS_PER_CREDIT} seconds, everything included. If it fails, the credits come back.` : "Only new AI work costs credits; text, subtitles, timing and music changes are free."}>
+    <EditorSection title="Plan and price" hint={initial ? `A new video costs 1 credit per started ${SECONDS_PER_CREDIT} seconds, everything included. If it fails, the credits come back.` : "Only new AI work costs credits; text, subtitles, timing, music and sound effect changes are free."}>
       <table className="story-plan">
         <tbody>
           {rows.map(([what, detail, credits]) => (

@@ -10,7 +10,7 @@ import { allowance } from "./billing";
 import { canCreate, checkReferences, createVideo, requireVerified, videoView } from "./videos";
 import { scheduleEpisode, cancelScheduled } from "./publishing";
 import { voiceUsable } from "./voices";
-import { backdropFor, conceptToSpec, musicCatalog, writeVideo } from "./story";
+import { backdropFor, conceptToSpec, musicCatalog, soundChoices, writeVideo } from "./story";
 import { episodeCredits, LATE_GRACE, MAKE_AHEAD, seriesSettingsSchema, type SeriesSettings } from "../shared/series";
 import { seriesTemplates, templateOf, type TemplateId } from "../shared/templates";
 import { slots, validZone } from "../shared/schedule";
@@ -187,15 +187,16 @@ export async function makeEpisode(env: Env, user: DbUser, s: any, slot: number |
   const recent = (await env.DB.prepare("SELECT title FROM videos WHERE series_id=? AND title<>'' ORDER BY created_at DESC LIMIT 40").bind(s.id).all<{ title: string }>()).results.map((r) => r.title);
   const catalog = settings.music.trackId ? [] : await musicCatalog(env, settings.music.mood);
   const backdropId = template.kind === "backdrop" ? await backdropFor(env, settings.backdropId) : null;
+  const sounds = settings.sounds ? await soundChoices(env) : null;
   const concept = await writeVideo(env, {
     template: s.template, prompt: settings.prompt, seconds: settings.seconds, language: settings.language, style: settings.style,
-    subject: settings.subject, recent, music: catalog,
+    subject: settings.subject, recent, music: catalog, sounds: sounds?.catalog,
   });
   if (!concept) return { error: "We couldn't write this episode right now. Please try again in a minute.", status: 503, blocked: "failed" };
   const picked = settings.music.trackId || (concept.music && catalog.find((m) => m.ref === concept.music)?.id) || catalog[0]?.id;
   const spec = conceptToSpec(concept, {
     kind: template.kind, voiceId: settings.voiceId, style: settings.style, language: settings.language, captions: settings.captions,
-    subject: settings.subject, animate: settings.animate, hashtags: settings.hashtags, backdropId,
+    subject: settings.subject, animate: settings.animate, hashtags: settings.hashtags, backdropId, sounds,
     music: picked && settings.music.mood !== "none" ? { trackId: picked, volume: settings.music.volume } : null,
   });
   if (!spec) return { error: "The episode we wrote didn't come out right. Please try again.", status: 502, blocked: "failed" };

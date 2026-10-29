@@ -14,6 +14,7 @@ import {
 import { captionTimeline } from "../shared/caption-scene";
 import { alignmentWords, keyWordIndex, styledCaptions, titleCase, type CaptionWord } from "../shared/captions";
 import { CLIP_CREDITS, pictureCredits, videoCredits, voiceCredits } from "../shared/credits";
+import { SCENE_SOUND_TAIL, SOUND_VOLUME, WHOOSH_LEAD } from "../shared/sounds";
 
 // Narrated videos (shared/story.ts): scenes on the voiceover's clock, their pictures, transitions centred on scene
 // edges, the "keyword" subtitles, prices, the run that makes them, the timing of an owner's voiceover, and the writer.
@@ -401,6 +402,44 @@ describe("the render plan", () => {
     expect(JSON.stringify(compose).length).toBeLessThan(1.5 * 1024 * 1024);
   });
 
+  it("plays a whoosh before every scene change and each scene's own sound from its start, only while sound effects are on", () => {
+    const media = {
+      ...ctx().media,
+      [id(7)]: { key: "library/whoosh.mp3", kind: "audio" as const, duration: 1.2, ai: true },
+      [id(8)]: { key: "library/fire.mp3", kind: "audio" as const, duration: 10 },
+      [id(9)]: { key: "library/pop.mp3", kind: "audio" as const, duration: 0.4 },
+    };
+    const base = made();
+    const spec: StorySpec = {
+      ...base, sounds: { enabled: true, volume: 0.5, transitionId: id(7) },
+      scenes: base.scenes.map((x, n) => (n === 1 ? { ...x, soundId: id(8) } : n === 4 ? { ...x, soundId: id(9) } : x)),
+    };
+    const { compose } = planRender(spec, ctx({ media }));
+    const at = (key: string) => compose.keys.indexOf(key);
+    // Scene changes on the output clock: where each scene starts (the middle of its transition).
+    const edges = storyTiming(spec.scenes, words, DURATION).scenes.map((x) => x.startFrame / FPS);
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    const whoosh = (k: number) => ({ input: at("library/whoosh.mp3"), start: r2(edges[k] - WHOOSH_LEAD), duration: 1.2, volume: 0.5 });
+    expect(compose.sounds).toEqual([
+      whoosh(1), { input: at("library/fire.mp3"), start: r2(edges[1]), duration: r2(edges[2] - edges[1] + SCENE_SOUND_TAIL), volume: 0.5 },
+      whoosh(2), whoosh(3), whoosh(4), { input: at("library/pop.mp3"), start: r2(edges[4]), duration: 0.4, volume: 0.5 },
+    ]);
+    // One input per file, however often it plays.
+    expect(compose.keys.filter((k) => k === "library/whoosh.mp3")).toHaveLength(1);
+    // Switched off (or never on, or silent): nothing is played or downloaded; the scenes keep their sounds.
+    for (const off of [{ ...spec, sounds: { ...spec.sounds!, enabled: false } }, { ...spec, sounds: undefined }, { ...spec, sounds: { ...spec.sounds!, volume: 0 } }]) {
+      const plan = planRender(off, ctx({ media })).compose;
+      expect(plan.sounds).toBeUndefined();
+      expect(plan.keys.some((k) => k.startsWith("library/") && k.endsWith(".mp3"))).toBe(false);
+    }
+    // Over one background clip the picture never changes: no whoosh, the scenes' sounds still play.
+    const told = planRender({ ...spec, backdrop: { libraryId: id(5) } }, ctx({ media })).compose;
+    expect(told.sounds!.map((x) => told.keys[x.input])).toEqual(["library/fire.mp3", "library/pop.mp3"]);
+    // A sound that is missing, or isn't a sound, stops the render.
+    expect(() => planRender({ ...spec, sounds: { ...spec.sounds!, transitionId: id(1) } }, ctx({ media }))).toThrow("MEDIA_INPUT");
+    expect(() => planRender({ ...spec, sounds: { ...spec.sounds!, transitionId: id(10) } }, ctx({ media }))).toThrow("MEDIA_INPUT");
+  });
+
   it("shows no subtitles without real timings, refuses a missing picture and a voice over three minutes", () => {
     const quiet = planRender(made(), ctx({ narration: { key: "media/u/voice.wav", duration: DURATION, words: [] } }));
     expect(quiet.compose.ass).not.toContain("Octopuses");
@@ -503,9 +542,9 @@ describe("the writer", () => {
     const k = acceptStory(answer)!;
     expect(k.scenes).toEqual([
       // A tone the voice knows is kept (as a plain word); anything else is no tone.
-      { text: "Octopuses have three hearts and blue blood.", picture: "An orange octopus pointing at three hearts", keys: ["hearts", "blue"], tone: "excited", place: "" },
-      { text: "Two hearts pump blood to the gills.", picture: "An illustration of: Two hearts pump blood to the gills.", keys: ["gills"], tone: "", place: "" },
-      { text: "When it swims, the third heart stops.", picture: "The octopus swimming, one heart greyed out", keys: ["stops"], tone: "", place: "" },
+      { text: "Octopuses have three hearts and blue blood.", picture: "An orange octopus pointing at three hearts", keys: ["hearts", "blue"], tone: "excited", place: "", sound: "" },
+      { text: "Two hearts pump blood to the gills.", picture: "An illustration of: Two hearts pump blood to the gills.", keys: ["gills"], tone: "", place: "", sound: "" },
+      { text: "When it swims, the third heart stops.", picture: "The octopus swimming, one heart greyed out", keys: ["stops"], tone: "", place: "", sound: "" },
     ]);
     expect(k).toMatchObject({ subject: "a small orange octopus with big round eyes", look: "", music: "music2", headline: "Three hearts and blue blood", title: "Three hearts" });
     expect(acceptStory({ ...answer, music: "Lo-fi beats" })!.music).toBe("");
@@ -517,6 +556,23 @@ describe("the writer", () => {
     expect(acceptStory(answer, 82)!.scenes.map((x) => x.text)).toEqual(["Octopuses have three hearts and blue blood.", "Two hearts pump blood to the gills."]);
     expect(acceptStory(answer, 60)).toBeNull();
     expect(acceptStory({ scenes: "x" })).toBeNull();
+  });
+
+  it("gives scenes the sounds it picked from the list, never the same one twice in a row and on at most half of them", () => {
+    const four = ["One fact.", "Two facts.", "Three facts.", "Four facts."];
+    const write = (sounds: string[]) => acceptStory({ ...answer, scenes: four.map((text, i) => ({ text, picture: "A picture", keys: [], sound: sounds[i] })) })!;
+    expect(write(["sound1", "sound1", " sound3 ", "a crackling fire"]).scenes.map((x) => x.sound)).toEqual(["sound1", "", "sound3", ""]);
+    expect(write(["sound1", "sound2", "sound3", "sound4"]).scenes.map((x) => x.sound)).toEqual(["sound1", "sound2", "", ""]);
+    expect(acceptStory(answer)!.scenes.every((x) => x.sound === "")).toBe(true);
+    // In the spec: sound effects on with the whoosh, each code as its library sound; without them, none.
+    const k = write(["sound1", "", "sound3", "sound9"]);
+    const option = (ref: string, n: number) => ({ ref, id: id(n), name: ref, category: "Fire", tags: "", description: "" });
+    const spec = conceptToSpec(k, { kind: "story", voiceId: "aria", style: "clay", language: "en", sounds: { transitionId: id(7), catalog: [option("sound1", 8), option("sound3", 9)] } })!;
+    expect(spec.sounds).toEqual({ enabled: true, volume: SOUND_VOLUME, transitionId: id(7) });
+    expect(spec.scenes.map((x) => x.soundId)).toEqual([id(8), undefined, id(9), undefined]);
+    const plain = conceptToSpec(k, { kind: "story", voiceId: "aria", style: "clay", language: "en" })!;
+    expect(plain.sounds).toBeUndefined();
+    expect(plain.scenes.some((x) => "soundId" in x)).toBe(false);
   });
 
   it("names each place once and sets every scene in one of them, or none", () => {
@@ -582,7 +638,7 @@ describe("the writer", () => {
 
   it("plans pictures by scene ID", () => {
     expect(acceptScenePlan({ subject: "a fox", look: " A snowy pine forest at dusk, blue and amber ", title: "  The night fox ", scenes: [{ id: "s2", picture: "A fox at night", keys: ["night"] }, { id: "s9", picture: "Nope" }] }, ["Hello.", "It was night."]))
-      .toEqual({ subject: "a fox", look: "A snowy pine forest at dusk, blue and amber", places: [], title: "The night fox", scenes: [{ description: "", keys: [], tone: "", place: "" }, { description: "A fox at night", keys: ["night"], tone: "", place: "" }] });
+      .toEqual({ subject: "a fox", look: "A snowy pine forest at dusk, blue and amber", places: [], title: "The night fox", scenes: [{ description: "", keys: [], tone: "", place: "", sound: "" }, { description: "A fox at night", keys: ["night"], tone: "", place: "", sound: "" }] });
     expect(acceptScenePlan({ places: [{ label: "the den", description: "A burrow under pine roots" }], scenes: [{ id: "s1", picture: "A fox sleeps", place: "The Den" }, { id: "s2", picture: "A fox at night", place: "the den" }] }, ["Hello.", "It was night."]))
       .toMatchObject({ places: [{ label: "the den", description: "A burrow under pine roots" }], scenes: [{ place: "the den" }, { place: "the den" }] });
     expect(acceptScenePlan({ scenes: [] }, ["Hi."])).toBeNull();
@@ -1033,7 +1089,7 @@ describe("planning and writing through the API", () => {
     };
     const plan = await call(worker, env, "POST", "/api/story/plan", { texts: said.map((s) => s[0]), style: "doodle" }, user.cookie);
     expect(plan.status).toBe(200);
-    expect(plan.data.scenes[0]).toEqual({ description: "Picture 1 of the octopus", keys: ["have"], tone: "", place: "" });
+    expect(plan.data.scenes[0]).toEqual({ description: "Picture 1 of the octopus", keys: ["have"], tone: "", place: "", sound: "" });
     expect(JSON.parse(seen[0].input).scenes[0]).toEqual({ id: "s1", text: said[0][0] });
     const draft = await call(worker, env, "POST", "/api/story/draft", { template: "facts", prompt: "octopus facts", seconds: 20, voiceId: "aria", style: "doodle" }, user.cookie);
     expect(draft.status).toBe(200);
@@ -1086,5 +1142,66 @@ describe("planning and writing through the API", () => {
     // Only an active library track.
     for (const musicTrackId of [hidden, crypto.randomUUID()]) expect((await draft({ musicTrackId })).data.error).toMatch(/no longer in the library/);
     expect((await draft({ musicTrackId: "drums" })).status).toBe(400);
+  });
+
+  it("drafts with sound effects from the library, saves only real ones, and renders them for free", async () => {
+    const { env, sqlite, user, spec: base, used, run } = await setup();
+    providers();
+    const sound = (name: string, category: string, active = 1, kind = "sfx") => {
+      const id = crypto.randomUUID();
+      sqlite.prepare("INSERT INTO library_items(id,kind,name,category,tags,object_key,mime,bytes,duration,ai,active,created_at) VALUES (?,?,?,?,'',?,'audio/mpeg',1000,1.5,1,?,1)")
+        .run(id, kind, name, category, `library/${id}/file.mp3`, active);
+      return id;
+    };
+    const whoosh = sound("Airy whoosh", "Transition"), fire = sound("Crackling fire", "Fire"), off = sound("Old thunder", "Weather", 0), track = sound("Calm piano", "Piano", 1, "music");
+    const inputs: any[] = [];
+    env.AI.run = async (_model: string, input: any) => {
+      inputs.push(input);
+      return answer({
+        topic: "Octopus hearts", caption: "Nature is weird.", hashtags: [], title: "Three hearts", headline: "", subject: "", music: "",
+        scenes: said.map((x, n) => ({ text: x[0], picture: `Picture ${n + 1}`, keys: [], sound: n === 2 ? "sound1" : "" })),
+      });
+    };
+    const draft = (body: object) => call(worker, env, "POST", "/api/story/draft", { template: "facts", prompt: "octopus facts", seconds: 20, ...body }, user.cookie);
+    // The writer reads the scene sounds (not the whooshes, not switched-off ones) and its rule; a whoosh is picked.
+    const spec = (await draft({})).data.spec;
+    expect(JSON.parse(inputs.at(-1).input).sounds).toEqual([{ code: "sound1", name: "Crackling fire", category: "Fire", tags: "" }]);
+    expect(inputs.at(-1).instructions).toMatch(/sound: a soundN from the sound list/);
+    expect(spec.sounds).toEqual({ enabled: true, volume: SOUND_VOLUME, transitionId: whoosh });
+    expect(spec.scenes.map((x: any) => x.soundId ?? null)).toEqual([null, null, fire, null, null]);
+    // Switched off in Create: none, and the writer gets no list.
+    const quiet = (await draft({ sounds: false })).data.spec;
+    expect(quiet.sounds).toBeUndefined();
+    expect(JSON.parse(inputs.at(-1).input).sounds).toEqual([]);
+    // Saving: sound effects (while on) are active library sound effects.
+    const save = (sounds: object, soundId?: string) => call(worker, env, "POST", "/api/videos", {
+      spec: { ...base, sounds, scenes: base.scenes.map((x, n) => (n === 1 && soundId ? { ...x, soundId } : x)) }, idempotencyKey: crypto.randomUUID(),
+    }, user.cookie);
+    expect((await save({ enabled: true, transitionId: track })).data.error).toMatch(/library sound effect/);
+    expect((await save({ enabled: true }, off)).data.error).toMatch(/no longer in the library/);
+    // Switched off, a sound that has gone since doesn't stand in the way.
+    expect((await save({ enabled: false }, off)).status).toBe(201);
+    const created = await save({ enabled: true, volume: 0.4, transitionId: whoosh }, fire);
+    expect(created.status).toBe(201);
+    const price = used();
+    env.CONTENT.created.splice(0, env.CONTENT.created.length - 1);
+    await run();
+    const composes = () => env.MEDIA_RENDERER.log.filter((p: any) => p.operation === "compose");
+    const first = composes().at(-1);
+    // A whoosh before each of the 4 scene changes and the fire from scene 2, each file one input.
+    expect(first.sounds).toHaveLength(5);
+    expect(new Set(first.sounds.map((x: any) => x.input)).size).toBe(2);
+    expect(first.sounds.every((x: any) => x.volume === 0.4)).toBe(true);
+    // Removing the scene's sound and changing the volume renders again, for free.
+    let post = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
+    expect(post.renderStatus).toBe("ready");
+    const edited = { ...post.spec, sounds: { ...post.spec.sounds, volume: 0.8 }, scenes: post.spec.scenes.map((x: any) => ({ ...x, soundId: undefined })) };
+    const r = await call(worker, env, "PUT", `/api/videos/${post.id}`, { spec: edited, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(r.data).toMatchObject({ rendering: true, credits: 0 });
+    await run();
+    post = (await call(worker, env, "GET", `/api/videos/${post.id}`, undefined, user.cookie)).data.video;
+    expect(post.renderStatus).toBe("ready");
+    expect(composes().at(-1).sounds.map((x: any) => x.volume)).toEqual([0.8, 0.8, 0.8, 0.8]);
+    expect(used()).toBe(price);
   });
 });

@@ -1,14 +1,16 @@
-import { useRef, useState, type FormEvent } from "react";
-import { Download, Eye, Film, Image as ImageIcon, Music, Pencil, Plus, Search, Sparkles, Trash2, Upload as UploadIcon } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { AudioLines, Download, Eye, Film, Image as ImageIcon, Music, Pencil, Plus, Search, Sparkles, Trash2, Upload as UploadIcon, WandSparkles } from "lucide-react";
 import { Modal, Spinner, Switch, useToast } from "../ui";
 import { ApiError, bytes, del, errorText, patch, post, seconds, useApi, type LibraryItem, type LibraryKind } from "../lib";
-import { ConfirmDialog, Empty, PlayButton, firstFrame, usePreviewAudio, useStableCallback } from "./pickers";
+import { ConfirmDialog, Empty, PlayButton, firstFrame, itemLength, usePreviewAudio, useStableCallback } from "./pickers";
 import { categoriesFor, categoryLabel, CATEGORY_MAX } from "../../shared/library";
+import { soundIdeas, SOUND_MAX_SECONDS, SOUND_MIN_SECONDS, TRANSITION_CATEGORY } from "../../shared/sounds";
 
-// Admin → Library: the shared music, clips and pictures people search and pick from (server/routes/admin-library.ts).
-// Items are uploaded, or added from the administrator's own media (an upload, or an AI picture or clip they made for a
-// video) with its details: its name, its prompt as the description, the AI mark. Name, description, genre (music) or
-// category (clips and pictures), tags and the AI mark are edited afterwards, written by hand or filled in by AI (✨):
+// Admin → Library: the shared music, clips, pictures and sound effects people search and pick from
+// (server/routes/admin-library.ts). Items are uploaded, added from the administrator's own media (an upload, or an AI
+// picture or clip they made for a video) with its details: its name, its prompt as the description, the AI mark — or,
+// for sound effects, made with ElevenLabs from a description. Name, description, genre (music) or category (the
+// others), tags and the AI mark are edited afterwards, written by hand or filled in by AI (✨):
 // the browser makes small samples of the file and a multimodal model suggests them; nothing is saved until Save or
 // Upload. Descriptions, genres, categories and tags are what people search by.
 
@@ -17,20 +19,28 @@ type MediaFile = {
   id: string; name: string; ai: boolean; prompt: string; mime: string; bytes: number; duration: number; width: number; height: number; createdAt: number; url: string;
   added: string | null; problem: string | null;
 };
-const kinds: LibraryKind[] = ["clip", "image", "music"];
-const kindNames: Record<LibraryKind, string> = { clip: "Clip", image: "Picture", music: "Music" };
-const kindPlural: Record<LibraryKind, string> = { clip: "Clips", image: "Pictures", music: "Music" };
-const kindIcons: Record<LibraryKind, typeof Film> = { clip: Film, image: ImageIcon, music: Music };
+const kinds: LibraryKind[] = ["clip", "image", "music", "sfx"];
+/** What can be added from the administrator's own media (their audio becomes music). */
+const mediaKinds: LibraryKind[] = ["clip", "image", "music"];
+const kindNames: Record<LibraryKind, string> = { clip: "Clip", image: "Picture", music: "Music", sfx: "Sound effect" };
+const kindPlural: Record<LibraryKind, string> = { clip: "Clips", image: "Pictures", music: "Music", sfx: "Sound effects" };
+const kindIcons: Record<LibraryKind, typeof Film> = { clip: Film, image: ImageIcon, music: Music, sfx: AudioLines };
 const tagIdeas: Record<LibraryKind, string[]> = {
   clip: ["satisfying", "gameplay-style", "parkour", "cooking", "nature", "city", "ocean", "space"],
   image: ["nature", "city", "space", "animals", "food", "history", "abstract", "night"],
   music: ["calm", "upbeat", "inspiring", "dark", "epic", "mysterious", "playful", "ambient"],
+  sfx: ["whoosh", "swoosh", "boom", "hit", "explosion", "fire", "waves", "crowd"],
 };
+const audioTypes = "audio/*,.mp3,.m4a,.wav,.ogg";
 const accepts: Record<LibraryKind, string> = {
-  clip: "video/mp4,video/quicktime,video/webm,.mov", image: "image/jpeg,image/png,image/webp", music: "audio/*,.mp3,.m4a,.wav,.ogg",
+  clip: "video/mp4,video/quicktime,video/webm,.mov", image: "image/jpeg,image/png,image/webp", music: audioTypes, sfx: audioTypes,
 };
 const MB = 1024 * 1024;
-const maxBytes: Record<LibraryKind, number> = { clip: 50 * MB, image: 20 * MB, music: 50 * MB };
+const maxBytes: Record<LibraryKind, number> = { clip: 50 * MB, image: 20 * MB, music: 50 * MB, sfx: 10 * MB };
+/** Music and sound effects are heard; clips and pictures are seen. */
+const heard = (kind: LibraryKind) => kind === "music" || kind === "sfx";
+/** ElevenLabs makes sound effects of these lengths (server/providers/elevenlabs.ts). */
+const MADE_SECONDS = { min: 0.5, max: 30 };
 const descriptionHint = "What it shows or sounds like, in plain words: people search by it.";
 /** An item's file for the administrators, offered or switched off. */
 const adminFile = (id: string) => `/api/admin/library/${id}/file`;
@@ -74,11 +84,12 @@ export function LibraryTab() {
     setData((d) => ({ items: [item, ...(d?.items || []).filter((i) => i.id !== item.id)] }));
     setEditing({ item });
   };
-  const counts: Record<"all" | LibraryKind, number> = { all: items.length, clip: 0, image: 0, music: 0 };
+  const counts: Record<"all" | LibraryKind, number> = { all: items.length, clip: 0, image: 0, music: 0, sfx: 0 };
   for (const i of items) counts[i.kind]++;
   return (
     <div className="stack" style={{ gap: 20 }}>
       <LibraryUpload onUploaded={added} onFromMedia={() => setAdding(true)} />
+      <SoundMaker onSaved={(item) => setData((d) => ({ items: [item, ...(d?.items || []).filter((i) => i.id !== item.id)] }))} />
       <section aria-labelledby="library-list-title">
         <div className="section-head">
           <h2 id="library-list-title">Library items</h2>
@@ -101,7 +112,8 @@ export function LibraryTab() {
           <div className="notice bad" role="alert">{error} <button type="button" className="link" onClick={() => void reload()}>Try again</button></div>
         ) : !items.length ? (
           <Empty icon={<Film size={24} />} title="The library is empty">
-            Upload clips, pictures and music above, or add your own AI pictures and clips. Music tagged with a mood is picked for series of that mood.
+            Upload clips, pictures, music and sound effects above, or add your own AI pictures and clips. Music tagged with a mood is picked for series of that
+            mood; sound effects of the “{TRANSITION_CATEGORY}” category are the whooshes on scene changes.
           </Empty>
         ) : !shown.length ? (
           <p className="muted center" style={{ padding: 24 }}>Nothing matches.</p>
@@ -133,7 +145,7 @@ export function LibraryTab() {
                         </span>
                       </td>
                       <td><span className="clip small" title={i.rawTags}>{i.rawTags || <span className="muted">No tags</span>}</span></td>
-                      <td className="small">{i.kind === "image" ? "—" : seconds(i.duration)}</td>
+                      <td className="small">{i.kind === "image" ? "—" : itemLength(i)}</td>
                       <td className="small">{i.usage ? `${i.usage} video${i.usage === 1 ? "" : "s"} or series` : <span className="muted">Not used</span>}</td>
                       <td><Switch checked={i.active} onChange={(v) => void setActive(i, v)} label={`${i.name} is offered`} /></td>
                       <td>
@@ -312,7 +324,7 @@ const LISTEN_RATE = 22050, LISTEN_SECONDS = 60, FRAMES = 6;
 async function samplesOf(src: File | string, kind: LibraryKind): Promise<{ duration: number; frames: string[]; audio?: string }> {
   const url = typeof src === "string" ? src : URL.createObjectURL(src);
   try {
-    if (kind === "music") {
+    if (heard(kind)) {
       const data = typeof src === "string"
         ? await fetch(url).then((r) => { if (!r.ok) throw new Error("This track couldn't be loaded."); return r.arrayBuffer(); })
         : await src.arrayBuffer();
@@ -321,7 +333,7 @@ async function samplesOf(src: File | string, kind: LibraryKind): Promise<{ durat
       try {
         decoded = await context.decodeAudioData(data);
       } catch {
-        throw new Error("The browser can't decode this track. Try an MP3.");
+        throw new Error(`The browser can't decode this ${kind === "sfx" ? "sound" : "track"}. Try an MP3.`);
       } finally {
         void context.close();
       }
@@ -379,7 +391,7 @@ function CategoryField({ kind, id, value, onChange, disabled }: { kind: LibraryK
   return (
     <>
       <input id={id} className="input" list={`${id}-list`} value={value} onChange={(e) => onChange(e.target.value)} maxLength={CATEGORY_MAX} disabled={disabled}
-        placeholder={kind === "music" ? "e.g. Lo-fi" : "e.g. Nature"} autoComplete="off" />
+        placeholder={kind === "music" ? "e.g. Lo-fi" : kind === "sfx" ? `e.g. ${TRANSITION_CATEGORY}` : "e.g. Nature"} autoComplete="off" />
       <datalist id={`${id}-list`}>{categoriesFor(kind).map((c) => <option key={c} value={c} />)}</datalist>
     </>
   );
@@ -407,12 +419,15 @@ function LibraryUpload({ onUploaded, onFromMedia }: { onUploaded: (item: AdminIt
     if (!file) return setProblem("Choose a file.");
     const mime = mimeOf(file);
     const wanted = kind === "clip" ? "video/" : kind === "image" ? "image/" : "audio/";
-    if (!mime.startsWith(wanted)) return setProblem(kind === "clip" ? "Choose an MP4, MOV or WebM video." : kind === "image" ? "Choose a JPG, PNG or WebP picture." : "Choose an MP3, M4A, OGG or WAV track.");
+    if (!mime.startsWith(wanted)) {
+      return setProblem(kind === "clip" ? "Choose an MP4, MOV or WebM video." : kind === "image" ? "Choose a JPG, PNG or WebP picture." : `Choose an MP3, M4A, OGG or WAV ${kind === "sfx" ? "sound" : "track"}.`);
+    }
     if (file.size > maxBytes[kind]) return setProblem(`Library ${kind === "image" ? "pictures" : "files"} can be up to ${maxBytes[kind] / MB} MB.`);
     try {
       setStage("Reading the file…");
       const m = await measure(file, kind);
-      if (kind !== "image" && (m.duration < 0.5 || m.duration > 600)) throw new Error("Library clips and tracks must be between half a second and 10 minutes long.");
+      if (kind === "sfx" && (m.duration < SOUND_MIN_SECONDS || m.duration > SOUND_MAX_SECONDS)) throw new Error(`Sound effects must be between ${SOUND_MIN_SECONDS} and ${SOUND_MAX_SECONDS} seconds long.`);
+      if ((kind === "clip" || kind === "music") && (m.duration < 0.5 || m.duration > 600)) throw new Error("Library clips and tracks must be between half a second and 10 minutes long.");
       if (m.width > 4096 || m.height > 4096) throw new Error(`${kind === "image" ? "Pictures" : "Videos"} can be up to 4096 pixels on each side.`);
       const title = name.trim() || baseName(file.name) || "Untitled";
       const query = new URLSearchParams({
@@ -462,7 +477,10 @@ function LibraryUpload({ onUploaded, onFromMedia }: { onUploaded: (item: AdminIt
       <div className="card-head">
         <div>
           <h2 id="library-upload-title">Add to the library</h2>
-          <p>Upload a clip, picture or track (up to 50 MB; pictures 20 MB), or add AI pictures and clips you made for your own videos. Length, size and a thumbnail are made here in your browser.</p>
+          <p>
+            Upload a clip, picture, track or sound effect (up to 50 MB; pictures 20 MB, sounds 10 MB and {SOUND_MAX_SECONDS} seconds), or add AI pictures and clips you
+            made for your own videos. Length, size and a thumbnail are made here in your browser.
+          </p>
         </div>
         <button type="button" className="btn" onClick={onFromMedia}><Sparkles size={16} aria-hidden="true" />Add from my media</button>
       </div>
@@ -473,6 +491,7 @@ function LibraryUpload({ onUploaded, onFromMedia }: { onUploaded: (item: AdminIt
             <option value="clip">Clip (backgrounds and scenes)</option>
             <option value="image">Picture (scenes)</option>
             <option value="music">Music</option>
+            <option value="sfx">Sound effect (whooshes and scene sounds)</option>
           </select>
         </div>
         <div className="field">
@@ -508,7 +527,8 @@ function LibraryUpload({ onUploaded, onFromMedia }: { onUploaded: (item: AdminIt
         <div className="field full">
           <label className="label" htmlFor="lib-description">Description</label>
           <textarea id="lib-description" className="textarea" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} disabled={busy}
-            placeholder={kind === "music" ? "e.g. Soft piano with light strings, slow and hopeful" : "e.g. A slow drone shot over a misty pine forest at sunrise"} aria-describedby="lib-description-hint" />
+            placeholder={kind === "music" ? "e.g. Soft piano with light strings, slow and hopeful" : kind === "sfx" ? "e.g. A fast airy whoosh, like a sword swung past" : "e.g. A slow drone shot over a misty pine forest at sunrise"}
+            aria-describedby="lib-description-hint" />
           <span className="hint" id="lib-description-hint">{descriptionHint}</span>
         </div>
         <div className="field full row" style={{ gap: 10, flexDirection: "row" }}>
@@ -518,13 +538,177 @@ function LibraryUpload({ onUploaded, onFromMedia }: { onUploaded: (item: AdminIt
         {problem && <div className="notice bad full" role="alert">{problem}</div>}
         <div className="full row wrap">
           <button type="button" className="btn" disabled={!file || busy} onClick={() => void fillIn()} title={file ? undefined : "Choose a file first"}>
-            {suggesting ? <Spinner label="Filling in" /> : <Sparkles size={16} aria-hidden="true" />}{suggesting ? (kind === "music" ? "Listening…" : "Looking…") : "Fill in with AI"}
+            {suggesting ? <Spinner label="Filling in" /> : <Sparkles size={16} aria-hidden="true" />}{suggesting ? (heard(kind) ? "Listening…" : "Looking…") : "Fill in with AI"}
           </button>
           <button type="submit" className="btn primary" disabled={!file || busy}>{stage ? <Spinner label="Uploading" /> : <UploadIcon size={16} aria-hidden="true" />}Upload</button>
           {stage && <span className="small muted" role="status">{stage}{progress !== null && ` ${Math.round(progress * 100)}%`}</span>}
           {progress !== null && <div className="meter grow" style={{ maxWidth: 260 }} aria-hidden="true"><span style={{ width: `${Math.max(2, progress * 100)}%` }} /></div>}
         </div>
       </form>
+    </section>
+  );
+}
+
+/** A take of a sound effect: the MP3 ElevenLabs made, what it was made from, and the library item once it is kept. */
+type Take = {
+  id: string; n: number; file: File; url: string; duration: number; prompt: string; name: string; category: string; tags: string;
+  saving?: boolean; saved?: AdminItem;
+};
+/** A take made by ElevenLabs from a description (POST /admin/library/generate: an MP3, nothing saved yet). */
+async function makeTake(prompt: string, seconds: number) {
+  let r: Response;
+  try {
+    r = await fetch("/api/admin/library/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, seconds }) });
+  } catch {
+    throw new TypeError("We can't reach the server. Check your connection and try again.");
+  }
+  if (!r.ok) {
+    const data = (await r.json().catch(() => ({}))) as { error?: string };
+    throw new ApiError(data.error || "Something went wrong. Please try again.", r.status, data);
+  }
+  return new File([await r.blob()], "sound.mp3", { type: "audio/mpeg" });
+}
+/**
+ * Sound effects made with ElevenLabs from a description (billed by ElevenLabs per take): each try is a take to listen
+ * to, kept in the library (uploaded as made with AI, its description what it was made from) or discarded. An idea
+ * fills in the form.
+ */
+function SoundMaker({ onSaved }: { onSaved: (item: AdminItem) => void }) {
+  const toast = useToast();
+  const [form, setForm] = useState({ prompt: "", seconds: "1.5", name: "", category: TRANSITION_CATEGORY, tags: "" });
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [takes, setTakes] = useState<Take[]>([]);
+  const audio = usePreviewAudio();
+  const urls = useRef(new Set<string>());
+  const made = useRef(0);
+  // The takes' audio lives in the browser until the page is left.
+  useEffect(() => () => urls.current.forEach((u) => URL.revokeObjectURL(u)), []);
+  const set = (p: Partial<typeof form>) => setForm((f) => ({ ...f, ...p }));
+  const update = (id: string, patch: Partial<Take>) => setTakes((list) => list.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+  const idea = (i: number) => {
+    const d = soundIdeas[i];
+    if (d) setForm({ prompt: d.prompt, seconds: String(d.seconds), name: d.name, category: d.category, tags: d.tags });
+  };
+  const make = async (e: FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    setProblem(null);
+    const prompt = form.prompt.trim(), length = Number(form.seconds);
+    if (prompt.length < 3) return setProblem("Describe the sound.");
+    if (!(length >= MADE_SECONDS.min && length <= MADE_SECONDS.max)) return setProblem(`ElevenLabs makes sounds of ${MADE_SECONDS.min} to ${MADE_SECONDS.max} seconds.`);
+    setBusy(true);
+    try {
+      const file = await makeTake(prompt, length);
+      const duration = await measure(file, "sfx").then((m) => m.duration).catch(() => length);
+      const url = URL.createObjectURL(file);
+      urls.current.add(url);
+      const take: Take = {
+        id: crypto.randomUUID(), n: ++made.current, file, url, duration, prompt, name: form.name.trim() || prompt.slice(0, 60), category: form.category.trim(), tags: splitTags(form.tags).join(", "),
+      };
+      setTakes((list) => [take, ...list]);
+      audio.toggle(take.id, url);
+    } catch (err) {
+      setProblem(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const save = async (t: Take) => {
+    update(t.id, { saving: true });
+    try {
+      const query = new URLSearchParams({
+        kind: "sfx", name: t.name, description: t.prompt, category: t.category, tags: t.tags, ai: "1", duration: t.duration.toFixed(2), width: "0", height: "0",
+      });
+      const { item } = await sendFile<{ item: AdminItem }>(`/admin/library/file?${query}`, t.file, "audio/mpeg");
+      update(t.id, { saving: false, saved: item });
+      onSaved(item);
+      toast(`${item.name} is in the library.`, "good");
+    } catch (err) {
+      update(t.id, { saving: false });
+      toast(errorText(err), "bad");
+    }
+  };
+  const discard = (t: Take) => {
+    if (audio.playing === t.id) audio.stop();
+    URL.revokeObjectURL(t.url);
+    urls.current.delete(t.url);
+    setTakes((list) => list.filter((x) => x.id !== t.id));
+  };
+  return (
+    <section className="card" aria-labelledby="sound-maker-title">
+      <div className="card-head">
+        <div>
+          <h2 id="sound-maker-title">Make a sound effect</h2>
+          <p>
+            ElevenLabs makes a take from a description (billed to its account, about 20–40 credits a second). Listen to it, make another if it isn't right, and
+            save the ones you like. Videos play the “{TRANSITION_CATEGORY}” sounds on scene changes and the others when a scene that fits starts.
+          </p>
+        </div>
+      </div>
+      <form className="form-grid" onSubmit={make}>
+        <div className="field full">
+          <label className="label" htmlFor="sfx-idea">Start from an idea <span className="muted">(optional)</span></label>
+          <select id="sfx-idea" className="select" value="" onChange={(e) => idea(Number(e.target.value))} disabled={busy}>
+            <option value="">Choose one to fill in the form…</option>
+            {soundIdeas.map((d, i) => <option key={d.name} value={i}>{d.name} · {d.category} · {d.seconds} s</option>)}
+          </select>
+        </div>
+        <div className="field full">
+          <label className="label" htmlFor="sfx-prompt">Description</label>
+          <textarea id="sfx-prompt" className="textarea" rows={2} value={form.prompt} onChange={(e) => set({ prompt: e.target.value })} maxLength={300} disabled={busy}
+            placeholder="e.g. A fast, airy cinematic whoosh passing from left to right" aria-describedby="sfx-prompt-hint" />
+          <span className="hint" id="sfx-prompt-hint">One sound, in plain words: what makes it, how it moves, how it feels. It becomes the item's description.</span>
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="sfx-seconds">Length (seconds)</label>
+          <input id="sfx-seconds" className="input" type="number" inputMode="decimal" min={MADE_SECONDS.min} max={MADE_SECONDS.max} step={0.5} value={form.seconds}
+            onChange={(e) => set({ seconds: e.target.value })} disabled={busy} />
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="sfx-category">{categoryLabel("sfx")}</label>
+          <CategoryField kind="sfx" id="sfx-category" value={form.category} onChange={(category) => set({ category })} disabled={busy} />
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="sfx-name">Name</label>
+          <input id="sfx-name" className="input" value={form.name} onChange={(e) => set({ name: e.target.value })} maxLength={120} placeholder="e.g. Airy Whoosh" disabled={busy} />
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="sfx-tags">Tags</label>
+          <input id="sfx-tags" className="input" value={form.tags} onChange={(e) => set({ tags: e.target.value })} maxLength={280} placeholder="e.g. whoosh, fast" disabled={busy} />
+        </div>
+        {problem && <div className="notice bad full" role="alert">{problem}</div>}
+        <div className="full row wrap">
+          <button type="submit" className="btn primary" disabled={busy || form.prompt.trim().length < 3}>
+            {busy ? <Spinner label="Making the sound" /> : <WandSparkles size={16} aria-hidden="true" />}{takes.length ? "Make another take" : "Make with ElevenLabs"}
+          </button>
+          {busy && <span className="small muted" role="status">Making the sound… (up to a minute)</span>}
+        </div>
+      </form>
+      {takes.length > 0 && (
+        <div className="stack" style={{ gap: 8, marginTop: 16 }}>
+          <span className="label">Takes <span className="muted small">· nothing is in the library until you save it; takes you don't save are gone when you leave the page</span></span>
+          <ul className="pick-rows list-plain">
+            {takes.map((t) => (
+              <li key={t.id} className="pick-row">
+                <PlayButton playing={audio.playing === t.id} onClick={() => audio.toggle(t.id, t.url)} label={t.name} />
+                <span className="grow" style={{ minWidth: 0 }}>
+                  <span className="name" style={{ display: "block" }}>{t.name} <span className="muted small">· take {t.n}</span></span>
+                  <span className="small muted clip" title={t.prompt}>{[t.category, `${t.duration.toFixed(1)} s`, t.prompt].filter(Boolean).join(" · ")}</span>
+                </span>
+                {t.saved ? <span className="chip">In the library</span> : (
+                  <button type="button" className="btn sm primary" disabled={t.saving} onClick={() => void save(t)}>
+                    {t.saving ? <Spinner label="Saving" /> : <Plus size={14} aria-hidden="true" />}Save to library
+                  </button>
+                )}
+                <button type="button" className="btn icon ghost" onClick={() => discard(t)} aria-label={`Discard the take of ${t.name}`} title={t.saved ? "Remove from this list" : "Discard"}>
+                  <Trash2 size={16} aria-hidden="true" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   );
 }
@@ -564,7 +748,7 @@ function FromMediaModal({ onClose, onAdded }: { onClose: () => void; onAdded: (i
           AI mark; you can change them right after.
         </p>
         <div className="seg small-seg" role="group" aria-label="Kind">
-          {kinds.map((k) => <button key={k} type="button" aria-pressed={kind === k} onClick={() => { setKind(k); setProblem(null); }}>{kindPlural[k]}</button>)}
+          {mediaKinds.map((k) => <button key={k} type="button" aria-pressed={kind === k} onClick={() => { setKind(k); setProblem(null); }}>{kindPlural[k]}</button>)}
         </div>
         {problem && <p className="notice bad small" role="alert">{problem}</p>}
         {loading ? <Spinner label="Loading your media" /> : error ? (
@@ -609,12 +793,12 @@ function PreviewModal({ item, onClose }: { item: AdminItem; onClose: () => void 
     <Modal title={item.name} onClose={close} wide>
       <div className="adm-preview stack">
         {!item.active && <div className="notice warn">This item is switched off, so its file isn't served. Switch it on to preview it.</div>}
-        {item.kind === "music" ? <audio controls autoPlay={false} src={item.url} />
+        {heard(item.kind) ? <audio controls autoPlay={false} src={item.url} />
           : item.kind === "image" ? <img src={item.url} alt={item.description || item.name} />
             : <video controls playsInline src={item.url} poster={item.thumb || undefined} />}
         {item.description && <p style={{ margin: 0 }}>{item.description}</p>}
         <div className="row wrap small muted">
-          <span>{kindNames[item.kind]}</span>{item.kind !== "image" && <>·<span>{seconds(item.duration)}</span></>}{item.width > 0 && <>·<span>{item.width} × {item.height}</span></>}
+          <span>{kindNames[item.kind]}</span>{item.kind !== "image" && <>·<span>{itemLength(item)}</span></>}{item.width > 0 && <>·<span>{item.width} × {item.height}</span></>}
           {item.tags.length > 0 && <>·<span>{item.tags.join(", ")}</span></>}{item.ai && <>·<span>Made with AI</span></>}
           <a className="btn sm" href={item.url} download style={{ marginLeft: "auto" }}><Download size={14} aria-hidden="true" />Download</a>
         </div>
@@ -674,10 +858,10 @@ function EditItemModal({ item, suggestion, onClose, onSaved }: { item: AdminItem
         <div className="row wrap" style={{ gap: 12, alignItems: "flex-start" }}>
           {item.thumb && <img src={item.thumb} alt="" style={{ maxHeight: 160, maxWidth: "100%", objectFit: "contain", borderRadius: 10 }} />}
           <button type="button" className="btn sm" onClick={() => void fillIn()} disabled={suggesting || busy}>
-            {suggesting ? <Spinner label="Filling in" /> : <Sparkles size={14} aria-hidden="true" />}{suggesting ? (item.kind === "music" ? "Listening…" : "Looking…") : "Fill in with AI"}
+            {suggesting ? <Spinner label="Filling in" /> : <Sparkles size={14} aria-hidden="true" />}{suggesting ? (heard(item.kind) ? "Listening…" : "Looking…") : "Fill in with AI"}
           </button>
         </div>
-        {suggested && <p className="notice small" role="status" style={{ margin: 0 }}>Filled in by AI from the {item.kind === "music" ? "track" : item.kind === "clip" ? "clip" : "picture"}. Check it before saving: nothing is saved until you do.</p>}
+        {suggested && <p className="notice small" role="status" style={{ margin: 0 }}>Filled in by AI from the {item.kind === "music" ? "track" : item.kind === "sfx" ? "sound" : item.kind === "clip" ? "clip" : "picture"}. Check it before saving: nothing is saved until you do.</p>}
         <label className="field"><span>Name</span><input className="input" value={form.name} onChange={(e) => set({ name: e.target.value })} maxLength={120} required />
           {aiName && aiName !== form.name.trim() && (
             <span className="hint">AI suggests “{aiName}”. <button type="button" className="link" onClick={() => set({ name: aiName })}>Use it</button></span>
@@ -695,7 +879,10 @@ function EditItemModal({ item, suggestion, onClose, onSaved }: { item: AdminItem
         <label className="field">
           <span>Tags</span>
           <input className="input" value={form.tags} onChange={(e) => set({ tags: e.target.value })} maxLength={300} />
-          <span className="hint">Comma-separated.{item.kind === "music" ? " Music moods: calm, upbeat, inspiring, dark, epic, mysterious, playful, ambient." : ""}</span>
+          <span className="hint">
+            Comma-separated.{item.kind === "music" ? " Music moods: calm, upbeat, inspiring, dark, epic, mysterious, playful, ambient." : ""}
+            {item.kind === "sfx" ? ` The “${TRANSITION_CATEGORY}” category makes it a whoosh for scene changes.` : ""}
+          </span>
         </label>
         <div className="row wrap" style={{ gap: 6 }}>
           <span className="hint">Add:</span>

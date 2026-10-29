@@ -4,7 +4,8 @@ import { overlayItems, revealSeconds, type TextLook } from "../shared/overlay";
 import { motionFor } from "../shared/layers";
 import { FPS, storySegments, storyTiming, type StoryScene } from "../shared/story";
 import { FRAME, type ComposePayload, type ComposeSegment } from "../shared/render";
-import { presenterCurrent, showsPresenter, trackKey, type HighlightSpec, type Spec, type StorySpec } from "../shared/formats";
+import { playedSounds, presenterCurrent, showsPresenter, trackKey, type HighlightSpec, type Spec, type StorySpec } from "../shared/formats";
+import { MAX_SOUNDS, SCENE_SOUND_TAIL, SOUND_MAX_SECONDS, WHOOSH_LEAD, WHOOSH_MAX_SECONDS } from "../shared/sounds";
 import { cutWords, keptDuration, windowCuts } from "../shared/cuts";
 import { clipWords } from "../shared/speech";
 import { trackWindow } from "../shared/track";
@@ -75,9 +76,38 @@ function sceneSegment(ctx: PlanContext, inputs: Inputs, scene: StoryScene, secon
 }
 
 /**
+ * Sound effects (shared/sounds.ts) on the output clock, for scenes shown from `start` to `end`: the whoosh starting just
+ * before every scene change the picture shows (`changes`; not under one background clip), and each scene's own sound
+ * from its start until a moment after its end (or its own end).
+ */
+function soundEffects(spec: StorySpec, ctx: PlanContext, inputs: Inputs, shown: { scene: number; start: number; end: number }[], changes: boolean, d: number) {
+  const played = playedSounds(spec);
+  const volume = spec.sounds?.volume ?? 0;
+  if (!volume) return [];
+  const audio = (id: string) => {
+    const m = need(ctx, id);
+    if (m.kind !== "audio") throw new Error("MEDIA_INPUT");
+    return m;
+  };
+  const whoosh = changes && played.transitionId ? audio(played.transitionId) : null;
+  const out: NonNullable<ComposePayload["sounds"]> = [];
+  const place = (m: Media, start: number, seconds: number) => {
+    const duration = round(Math.min(seconds, m.duration > 0 ? m.duration : seconds, SOUND_MAX_SECONDS, d - start));
+    if (duration >= 0.05) out.push({ input: inputs.add(m.key), start: round(start), duration, volume });
+  };
+  for (const [k, s] of shown.entries()) {
+    if (whoosh && k > 0) place(whoosh, Math.max(0, s.start - WHOOSH_LEAD), WHOOSH_MAX_SECONDS);
+    const id = played.scenes[s.scene];
+    if (id) place(audio(id), s.start, s.end - s.start + SCENE_SOUND_TAIL);
+  }
+  return out.slice(0, MAX_SOUNDS);
+}
+
+/**
  * A narrated video: a picture per scene (or its presenter speaking) on the voiceover's clock with a transition centred
  * on every scene edge (the segments overlap by them, so they add up to the voice exactly) — or one background clip
- * looping under the whole voice — the voice as one track, subtitles over it all, music under it, and the headline on top.
+ * looping under the whole voice — the voice as one track, subtitles over it all, music and sound effects under it, and
+ * the headline on top.
  */
 export function planRender(spec: Spec, ctx: PlanContext): Plan {
   return spec.format === "highlight" ? planHighlight(spec, ctx) : planStory(spec, ctx);
@@ -90,13 +120,18 @@ function planStory(spec: StorySpec, ctx: PlanContext): Plan {
   const timing = storyTiming(spec.scenes, narration.words, Math.min(MAX_SECONDS, narration.duration));
   const d = timing.frames / FPS;
   let segments: ComposeSegment[];
+  // Where each scene is shown on the output clock (a scene squeezed out of the pictures is left out).
+  let onScreen: { scene: number; start: number; end: number }[];
   if (spec.backdrop) {
+    onScreen = timing.scenes.map((s) => ({ scene: s.index, start: s.startFrame / FPS, end: s.endFrame / FPS }));
     const clip = need(ctx, spec.backdrop.assetId || spec.backdrop.libraryId);
     if (clip.kind === "image") segments = [{ kind: "image", input: inputs.add(clip.key), duration: round(d), motion: motionFor(0) }];
     else if (clip.kind === "video") segments = fillWithClip(inputs.add(clip.key), clip.duration, round(d));
     else throw new Error("MEDIA_INPUT");
   } else {
     const parts = storySegments(timing, spec.scenes.map((s) => s.transition));
+    const starts = parts.map((part) => (part.from + (part.transition?.frames ?? 0) / 2) / FPS);
+    onScreen = parts.map((part, k) => ({ scene: part.scene, start: starts[k], end: starts[k + 1] ?? d }));
     // The presenter's scenes show its video at the same moment of the voice it speaks (a segment starts on the output
     // clock where it starts in the voice), so the lips stay in time; it is cropped to the frame.
     const shown = parts.filter((part) => showsPresenter(spec, part.scene));
@@ -125,11 +160,12 @@ function planStory(spec: StorySpec, ctx: PlanContext): Plan {
   if (length > MAX_SECONDS + 0.5) throw new Error("MEDIA_TOO_LONG");
   const track = spec.music, id = track?.trackId || track?.assetId;
   const music = track && id ? { input: inputs.add(need(ctx, id).key), volume: track.volume, duck: [[0, d]] as [number, number][] } : null;
-  // Marked as AI-made when its voice, or any picture, clip or track in it, is (EU AI Act Art. 50, platform AI labels).
+  const sounds = soundEffects(spec, ctx, inputs, onScreen, !spec.backdrop, length);
+  // Marked as AI-made when its voice, or any picture, clip, track or sound in it, is (EU AI Act Art. 50, platform AI labels).
   const synthetic = spec.narration.kind === "voice" || Object.values(ctx.media).some((m) => m.ai && inputs.keys.includes(m.key));
   return {
     compose: {
-      operation: "compose", width: W, height: H, segments, voice, music, overlay: null,
+      operation: "compose", width: W, height: H, segments, voice, music, ...(sounds.length && { sounds }), overlay: null,
       ass: ctx.watermark ? withWatermark(ass, ctx.watermark, W, H) : ass, coverAt: Math.min(coverAt, Math.max(0, length - 0.1)), synthetic, keys: inputs.keys,
     },
   };

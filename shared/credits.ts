@@ -1,5 +1,5 @@
 // What videos cost in credits. The server charges by these rules and the pricing page shows them, so the two cannot
-// drift. Rendering (subtitles, music, transitions, timing) never costs credits.
+// drift. Rendering (subtitles, music, sound effects, transitions, timing) never costs credits.
 
 /**
  * A new video: one credit per started 20 seconds, its narration and every AI picture included (a 30-second video is

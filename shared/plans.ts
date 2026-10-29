@@ -137,6 +137,6 @@ export const tariffs: readonly { name: string; text: string }[] = [
   { name: "New narration", text: `1 credit per started ${NARRATION_SECONDS_PER_CREDIT} seconds when you change the words of a made video. Your own recording is free.` },
   { name: "Clips from your videos", text: `1 credit per started ${HIGHLIGHT_SECONDS_PER_CREDIT} seconds of each clip: cut, framed on the speaker and captioned.` },
   { name: "Long videos", text: `Videos up to 10 minutes are transcribed for free; longer ones (up to 2 hours, on paid plans) cost 1 credit per started ${SPEECH_CREDIT_SECONDS / 60} minutes.` },
-  { name: "Editing", text: "Subtitles, music, transitions, timing, layouts and text changes are free." },
+  { name: "Editing", text: "Subtitles, music, sound effects, transitions, timing, layouts and text changes are free." },
 ];
 export const PRICE_NOTE = "Prices in US dollars. Taxes may apply at checkout.";

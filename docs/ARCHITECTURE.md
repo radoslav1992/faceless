@@ -59,8 +59,9 @@ handler runs `maintenance()` every minute.
 `migrations/0001_initial.sql`, `0002_clips.sql` (runs of kind `speech`), `0003_voices.sql` (narration voices) and
 `0004_library.sql` (library pictures, descriptions and the AI mark), `0005_style_examples.sql` (each style's example
 video), `0006_example_previews.sql` (the examples' short previews), `0007_library_categories.sql` (library items'
-genre or category), `0008_avatars.sql` (the presenters' avatars) and `0009_growth.sql` (affiliates, commissions,
-payouts and calls for credits); D1 always enforces foreign keys.
+genre or category), `0008_avatars.sql` (the presenters' avatars), `0009_growth.sql` (affiliates, commissions,
+payouts and calls for credits), `0010_tiktok_drafts.sql`, `0011_youtube_data.sql` (YouTube channel details' age, the
+"made for kids" answer) and `0012_sound_effects.sql` (library sound effects); D1 always enforces foreign keys.
 
 | Area | Tables |
 | --- | --- |
@@ -101,7 +102,8 @@ words, the picture's source, the transition in and the AI voice's tone), one art
 recurring subject, one look (the video's world: place and era, time of day, light, colours), captions (on/off, one
 of 21 styles), an optional on-screen headline (`shared/headline.ts`), an
 optional background clip that replaces the pictures (storytime), music (a library track or an upload, with a volume),
-and the post text (caption, hashtags, title, topic). `generated` (the recorded AI voice and its word timings) is owned
+sound effects (`sounds`: on or off, a volume and the whoosh of scene changes; a scene's own sound is its `soundId`;
+a video without `sounds` has none), and the post text (caption, hashtags, title, topic). `generated` (the recorded AI voice and its word timings) is owned
 by the server: the browser never sets it.
 
 A scene's picture is an **AI image** (made once, then shown with a slow zoom or pan), an **AI clip** made from that
@@ -123,7 +125,7 @@ a clip credit costs at most ~$0.21 to make, below a credit's value on every plan
 edit of a made video costs only what it asks for again: new narration when the words or voice changed (1 credit per
 started 30 seconds), 1 credit per 5 new pictures, and new clips. A video never made (its first run failed and was
 refunded) costs what a new one does when it is made again, whatever its failed run made. Changes to the caption, hashtags or title need no new render; other free changes
-(subtitles, music, transitions, timing) re-render for 0 credits.
+(subtitles, music, sound effects, transitions, timing) re-render for 0 credits.
 
 **Voices** (`server/voices.ts`, `voices` table, Admin → Voices in `src/app/AdminVoices.tsx`). Administrators import a
 voice of the ElevenLabs account (`GET /api/admin/voices/elevenlabs` lists it: `/v2/voices`, 100 at a time; `POST
@@ -184,18 +186,23 @@ or quality make it again. It costs 1 credit per started 5 seconds of the voice i
 API yet.
 
 **Library** (`server/library.ts`, `library_items`, Admin → Library in `src/app/AdminLibrary.tsx` and
-`server/routes/admin-library.ts`). Music, clips and pictures shared by everyone, with a name, a description, a genre
-(music) or category (clips and pictures; `shared/library.ts` suggests a list, administrators may write their own) and
-tags.
+`server/routes/admin-library.ts`). Music, clips, pictures and sound effects (`sfx`) shared by everyone, with a name,
+a description, a genre (music) or category (the others; `shared/library.ts` suggests a list, administrators may write
+their own) and tags.
 Administrators upload them (a picture's size is read from its header on the server; a clip's or track's length and a
 thumbnail come from the browser) or copy one of their own media files (`POST /api/admin/library/from-media`: an upload,
 or an AI picture or clip made for one of their videos, with its name, its prompt as the description and the AI mark;
-`source_asset` keeps it from being added twice), then rename, describe, tag, mark as AI-made, switch off or delete
-them; the list shows how many videos and series use each item. `GET /api/library?kind=clip,image&q=&tag=` searches
+`source_asset` keeps it from being added twice; the administrator's own audio becomes music), or, for sound effects
+(0.2–30 s), have ElevenLabs make one from a description (`POST /api/admin/library/generate`: `/v1/sound-generation`,
+0.5–30 s, 60 an hour; the answer is the MP3 take itself and nothing is saved: Admin → Library plays each take and
+uploads the ones kept through `PUT /file` as made with AI, the description what it was made from; `shared/sounds.ts`
+`soundIdeas` fill in the form), then rename, describe,
+tag, mark as AI-made, switch off or delete them; the list shows how many videos and series use each item. `GET /api/library?kind=clip,image&q=&tag=` searches
 the active items (all of them, folded to lowercase without accents, a plural matching its singular): every word must
 be in the name, genre or category, description or tags, name matches first, then the genre or category, then tags,
 then descriptions; `?ids=` returns particular
-items (the editor's scenes). Music is a track, a background a clip, a scene a clip or a picture (`checkReferences`).
+items (the editor's scenes). Music is a track, a background a clip, a scene a clip or a picture, the whoosh and a
+scene's sound sound effects (`checkReferences`; sound effects only while they are on).
 An item marked as AI-made makes the video that shows it AI-made (`compose.synthetic`), like the owner's AI pictures.
 **Filled in by AI** (✨ in the upload form, on every item and in its editor): the administrator's browser makes small
 samples of the file (the picture or 6 frames spread over a clip as JPEGs of at most 720 to 1024 pixels, or a minute of a
@@ -210,6 +217,12 @@ People hear tracks before choosing them: `MusicChoice` (Create, a series) offers
 (`musicCatalog`) or a track chosen in `LibraryPicker`, where every track has a play button, and shows the chosen one
 with its own; the draft then gets `musicTrackId`, the writer's only music, which plays whatever the mood says. The
 editor's music section plays the video's track.
+**Sound effects** (`shared/sounds.ts`, `src/app/sound-ui.tsx`): a new video (Create's switch, on by default; a series'
+`sounds` setting, on for new series and off for those made before) gets one of the library's `Transition` sounds at
+random for its scene changes (`soundChoices`), and the writer gives scenes you would hear a sound from the list of the
+others (`soundN` codes: at most one scene in three by its rule; `acceptSounds` keeps at most half and never the same
+one twice in a row). In the editor people switch them off (the choices are kept), set their volume, change or remove
+the whoosh, and add, change or remove each scene's sound; adding one switches them on. The preview plays the voice only.
 
 **Style examples** (`server/examples.ts`, `style_examples`, Admin → Examples in `src/app/AdminExamples.tsx`). One real
 video per faceless style, played on the style's card in Create, the app's home, the home page's gallery and coverflow,
@@ -238,7 +251,8 @@ once, at most two, each with a label every picture uses), the look of the whole 
 in (`places`: at most four, each a label and a description of its layout, furniture, light and colours; each scene's
 `place` names one, or none), a tone for the scenes where the narrator's feeling changes (about one in three), a
 headline, a
-title, a caption, hashtags, a topic and a music code from the library list. Each video type adds rules (POV in the
+title, a caption, hashtags, a topic, a music code from the library list and, for scenes you would hear, a sound code
+from the sound effects list. Each video type adds rules (POV in the
 second person, the mashup's chanted name, storytime's title question read out first). `acceptStory` cleans and checks
 the answer; fewer than two usable scenes means failure.
 
@@ -360,8 +374,11 @@ the voice exactly. A storytime loops its background clip under the whole voice i
 video at the same second of the voice (`trim` = where the segment starts on the output clock), so its lips stay in
 time across cuts and transitions; it is cropped to fill the frame. The voice is one track from 0;
 subtitles are burned in as ASS from real word timings only (never estimates); the headline is drawn on top for its
-seconds; music loops, fades and is lowered under the voice; free-trial videos get a small watermark with the product
-name. The cover is taken once the first words (and the headline) are on screen. Output is 1080×1920 at 30 fps, at most
+seconds; music loops, fades and is lowered under the voice; sound effects (`compose.sounds`, while they are on) play
+the whoosh from 0.3 s before every scene change the picture shows (at most 2 s; none over one background clip) and a
+scene's own sound from its start until half a second after its end (or its own end), all at the video's sound volume,
+mixed over the voice and music in the container with their peaks held under clipping (`alimiter`), each file read once
+however often it plays; free-trial videos get a small watermark with the product name. The cover is taken once the first words (and the headline) are on screen. Output is 1080×1920 at 30 fps, at most
 180 seconds.
 
 **The container** (`renderer/`, Python 3.12 with FFmpeg, libass and the bundled Noto fonts): three render instances
@@ -441,8 +458,8 @@ handling daylight saving time. Plans limit how many series a person has; text to
   within `MAKE_AHEAD` (6 hours on autopilot, 24 hours in review mode), at most 10 a minute. Each is **claimed** for
   15 minutes (`attempted_at`) and handed to the workflow as an `episode` job.
 - **Attempt.** The workflow's `episode` step (`runEpisode`) reuses the video already made for that slot, or writes
-  the episode (avoiding the series' 40 latest titles, picking a library track of its mood and, for storytime, a
-  background clip), builds the spec and creates the video with the idempotency key `episode:<series>:<slot>`. Autopilot
+  the episode (avoiding the series' 40 latest titles, picking a library track of its mood, sound effects when the
+  series has them on and, for storytime, a background clip), builds the spec and creates the video with the idempotency key `episode:<series>:<slot>`. Autopilot
   episodes are approved when they are made; review-mode episodes wait. The series then moves on to the slot after.
 - **Retries and blocked reasons.** A slot that cannot be made is skipped with a reason kept in `series.blocked`:
   `trial` (the free trial ended), `credits` (not enough credits), `busy` (20 runs active) or `failed` (the writer

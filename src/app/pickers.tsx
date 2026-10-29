@@ -735,9 +735,14 @@ function PickTile({ asset, selected, onSelect, onPick }: { asset: Asset; selecte
 
 /** "scene": a clip or a picture, for a scene. */
 export type LibraryPickerKind = LibraryKind | "scene";
-export type LibraryPickerProps = { kind: LibraryPickerKind; title?: string; onPick: (item: LibraryItem) => void; onClose: () => void };
-const libraryTitles: Record<LibraryPickerKind, string> = { clip: "Choose a clip", music: "Choose music", image: "Choose a picture", scene: "Choose a clip or picture" };
-const libraryWords: Record<LibraryPickerKind, string> = { clip: "clips", music: "tracks", image: "pictures", scene: "clips and pictures" };
+/** `query`: the search it opens with (the whoosh picker looks for "Transition" sounds first). */
+export type LibraryPickerProps = { kind: LibraryPickerKind; title?: string; query?: string; onPick: (item: LibraryItem) => void; onClose: () => void };
+const libraryTitles: Record<LibraryPickerKind, string> = {
+  clip: "Choose a clip", music: "Choose music", image: "Choose a picture", scene: "Choose a clip or picture", sfx: "Choose a sound effect",
+};
+const libraryWords: Record<LibraryPickerKind, string> = { clip: "clips", music: "tracks", image: "pictures", scene: "clips and pictures", sfx: "sound effects" };
+/** How long a library item plays: sound effects to a tenth of a second. */
+export const itemLength = (i: Pick<LibraryItem, "kind" | "duration">) => (i.kind === "sfx" ? `${i.duration.toFixed(1)} s` : seconds(i.duration));
 const PAGE = 12;
 /** A value that follows `value` once it has stopped changing for `ms`. */
 export function useSettled<T>(value: T, ms: number) {
@@ -749,8 +754,8 @@ export function useSettled<T>(value: T, ms: number) {
   return settled;
 }
 
-export function LibraryPicker({ kind, title, onPick, onClose }: LibraryPickerProps) {
-  const [query, setQuery] = useState("");
+export function LibraryPicker({ kind, title, query: initialQuery = "", onPick, onClose }: LibraryPickerProps) {
+  const [query, setQuery] = useState(initialQuery);
   const [only, setOnly] = useState<"all" | "clip" | "image">("all");
   const search = useSettled(query.trim(), 300);
   const kinds = kind === "scene" ? (only === "all" ? "clip,image" : only) : kind;
@@ -772,10 +777,11 @@ export function LibraryPicker({ kind, title, onPick, onClose }: LibraryPickerPro
     setPage(0);
   };
   const pick = (item: LibraryItem) => { audio.stop(); onPick(item); };
-  const music = kind === "music";
+  // Music and sound effects are listed to play; clips and pictures shown.
+  const music = kind === "music" || kind === "sfx";
   const filtered = !!search || only !== "all";
-  const useLabel = !chosen ? (music ? "Use this track" : kind === "image" ? "Use this picture" : "Use this clip")
-    : chosen.kind === "music" ? "Use this track" : chosen.kind === "image" ? "Use this picture" : "Use this clip";
+  const labels: Record<LibraryKind, string> = { music: "Use this track", image: "Use this picture", clip: "Use this clip", sfx: "Use this sound" };
+  const useLabel = chosen ? labels[chosen.kind] : kind === "scene" ? labels.clip : labels[kind];
   return (
     <Modal title={title || libraryTitles[kind]} onClose={close} wide footer={
       <>
@@ -789,7 +795,7 @@ export function LibraryPicker({ kind, title, onPick, onClose }: LibraryPickerPro
         <label className="search">
           <Search size={16} aria-hidden="true" />
           <span className="sr-only">Search the library</span>
-          <input className="input" type="search" placeholder={music ? "Search tracks: calm, upbeat, piano…" : "Search: ocean, city at night, cat…"} value={query}
+          <input className="input" type="search" placeholder={kind === "sfx" ? "Search sounds: whoosh, fire, crowd…" : music ? "Search tracks: calm, upbeat, piano…" : "Search: ocean, city at night, cat…"} value={query}
             onChange={(e) => setQuery(e.target.value)} maxLength={100} />
         </label>
         {loading && data && <Spinner label="Searching" />}
@@ -840,7 +846,7 @@ export function LibraryPicker({ kind, title, onPick, onClose }: LibraryPickerPro
                 <span className="grow" style={{ minWidth: 0 }}>
                   <span className="name" style={{ display: "block" }}>{t.name}{t.ai && <span className="chip pick-ai">AI</span>}</span>
                   {t.description && <span className="small pick-description">{t.description}</span>}
-                  <span className="small muted">{[t.category, seconds(t.duration), t.tags.join(", ")].filter(Boolean).join(" · ")}</span>
+                  <span className="small muted">{[t.category, itemLength(t), t.tags.join(", ")].filter(Boolean).join(" · ")}</span>
                 </span>
                 {t.id === chosen?.id && <Check size={18} aria-hidden="true" />}
               </button>

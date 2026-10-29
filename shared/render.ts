@@ -66,6 +66,12 @@ export type ComposePayload = {
   voice?: { input: number; start: number; volume: number } | null;
   /** Background music: loops if shorter than the video, fades in/out, lowered under speech during `duck` ranges. */
   music?: { input: number; volume: number; duck: [number, number][] } | null;
+  /**
+   * Sound effects (shared/sounds.ts), at most 80, mixed over the voice and the music (the mix's peaks held under
+   * clipping): each plays its file from the beginning for `duration` seconds (0.05–30, fading out where it is cut,
+   * and by the end of the video) from `start` on the output clock, at `volume` (0–1). A file used often is read once.
+   */
+  sounds?: { input: number; start: number; duration: number; volume: number }[];
   /** A green-screen clip keyed over the segments (below the text), shown from `start` to `end` (looped if shorter). */
   overlay?: {
     input: number; start: number; end: number; chroma: string; similarity: number; blend: number;

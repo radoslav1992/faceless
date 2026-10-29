@@ -89,6 +89,20 @@ describe("starting a series", () => {
 });
 
 describe("episodes", () => {
+  it("play sound effects when the series has them on: new series start with them, older ones keep none", async () => {
+    const { env, sqlite, create, videos } = setup();
+    const whoosh = crypto.randomUUID();
+    sqlite.prepare("INSERT INTO library_items(id,kind,name,category,tags,object_key,mime,bytes,duration,active,created_at) VALUES (?,'sfx','Whoosh','Transition','',?,'audio/mpeg',10,1,1,1)")
+      .run(whoosh, `library/${whoosh}/file.mp3`);
+    expect(seriesSettingsSchema.parse({}).sounds).toBe(false);
+    const on = (await create({ settings: { schedule: { timezone: "UTC", times: ["09:00"], days: [1] }, sounds: true } })).data.series.id;
+    await runEpisode(env, on, (sqlite.prepare("SELECT next_slot FROM series WHERE id=?").get(on) as any).next_slot);
+    expect(JSON.parse(videos(on)[0].spec).sounds).toEqual({ enabled: true, volume: 0.6, transitionId: whoosh });
+    const off = (await create({ name: "Quiet" })).data.series.id;
+    await runEpisode(env, off, (sqlite.prepare("SELECT next_slot FROM series WHERE id=?").get(off) as any).next_slot);
+    expect(JSON.parse(videos(off)[0].spec).sounds).toBeUndefined();
+  });
+
   it("writes and creates one video per slot, charges its credits once and moves on to the next slot", async () => {
     const { env, sqlite, user, create, row, videos } = setup();
     const id = (await create()).data.series.id;

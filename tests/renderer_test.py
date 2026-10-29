@@ -1125,6 +1125,81 @@ class TransitionTest(RendererTest):
         clip = {'kind': 'video', 'input': 0, 'duration': 1, 'loop': True, 'keep': [[0, 1]]}
         self.assert_fails({**good, 'segments': [clip]}, 'MEDIA_INVALID')
 
+class SoundEffectsTest(RendererTest):
+    """Sound effects (shared/sounds.ts): short sounds placed on the output clock over the voice and the music (a whoosh
+    on each scene change, a scene's own sound), each file read once however often it plays, peaks held under clipping."""
+    @classmethod
+    def setUpClass(cls):
+        for name, c in (('t-red.png', 'red'), ('t-blue.png', 'blue'), ('t-green.png', 'green')):
+            make(name, '-f','lavfi','-i',f'color=c={c}:s=360x640','-frames:v','1')
+        make('tone4.wav', '-f','lavfi','-i','sine=frequency=330:duration=4')
+        make('whoosh.wav', '-f','lavfi','-i','sine=frequency=1000:duration=1')
+        make('pop.wav', '-f','lavfi','-i','sine=frequency=700:duration=0.3')
+        # At full scale (lavfi's sine is at an eighth of it): with the voice, the mix would clip.
+        make('loud.wav', '-f','lavfi','-i','sine=frequency=500:duration=1','-af','volume=8')
+
+    def video(self, sounds, voice=False):
+        """Three pictures on a 4 s clock with fades on 1.5 s and 3.0 s; urls 3–6 are the voice and the sounds."""
+        urls = [FIXTURES.url(n) for n in ('t-red.png', 't-blue.png', 't-green.png', 'tone4.wav', 'whoosh.wav', 'pop.wav', 'loud.wav')]
+        segments = [{'kind': 'image', 'input': i, 'duration': f / 30} for i, f in enumerate((51, 57, 36))]
+        for s in segments[1:]: s['transition'] = {'kind': 'fade', 'duration': 0.4}
+        return {'operation': 'compose', 'urls': urls, 'width': 720, 'height': 1280, 'synthetic': False, 'ass': '', 'segments': segments,
+                'voice': {'input': 3, 'start': 0, 'volume': 1} if voice else None, **({'sounds': sounds} if sounds is not None else {})}
+
+    def graph(self, payload):
+        calls, real = [], server.command
+        def spy(args, timeout=90):
+            calls.append(args)
+            return real(args, timeout)
+        with patch.object(server, 'command', spy):
+            job = run(payload)
+        render = next(args for args in calls if '-filter_complex' in args)
+        return job, render[render.index('-filter_complex') + 1]
+
+    def test_sounds_play_at_their_times_and_a_repeated_one_is_read_once(self):
+        # A whoosh before each scene change, a pop at the start of the first scene.
+        job, graph = self.graph(self.video([
+            {'input': 4, 'start': 1.2, 'duration': 0.6, 'volume': 1}, {'input': 4, 'start': 2.7, 'duration': 0.6, 'volume': 1},
+            {'input': 5, 'start': 0.1, 'duration': 2, 'volume': 0.5}]))
+        self.assertEqual((job['status'], job.get('duration')), ('completed', 4.0), job)
+        mp4 = job['outputs'][0]
+        audio = next(s for s in ffprobe(mp4)['streams'] if s['codec_type'] == 'audio')
+        self.assertAlmostEqual(float(audio['duration']), 4.0, delta=0.03)
+        for t in (0.15, 1.3, 2.8): self.assertGreater(loudness(mp4, t, 0.2), -35, t)
+        # The pop ends with its file (0.3 s), the whooshes where they are cut (0.6 s).
+        for t in (0.6, 2.0, 3.5): self.assertLess(loudness(mp4, t, 0.3), -70, t)
+        whoosh = FIXTURES.url('whoosh.wav').split(FIXTURES.origin, 1)[1]
+        self.assertEqual(FIXTURES.requests[self.requests:].count(whoosh), 1, 'the same sound is downloaded once')
+        self.assertIn('asplit=2', graph)
+        self.assertIn('alimiter=limit=0.95:level=false', graph)
+
+    def test_sounds_are_cut_by_the_end_and_mixes_without_them_are_unchanged(self):
+        # One starts before the end and plays to it; one starts after it and is left out.
+        job = run(self.video([{'input': 4, 'start': 3.8, 'duration': 1, 'volume': 1}, {'input': 5, 'start': 10, 'duration': 0.3, 'volume': 1}], voice=True))
+        self.assertEqual((job['status'], job.get('duration')), ('completed', 4.0), job)
+        audio = next(s for s in ffprobe(job['outputs'][0])['streams'] if s['codec_type'] == 'audio')
+        self.assertAlmostEqual(float(audio['duration']), 4.0, delta=0.03)
+        for sounds in (None, []):
+            job, graph = self.graph(self.video(sounds, voice=True))
+            self.assertEqual(job['status'], 'completed', job)
+            self.assertNotIn('[sfx]', graph)
+            self.assertNotIn('alimiter', graph)
+
+    def test_a_loud_sound_on_the_voice_does_not_clip(self):
+        job = run(self.video([{'input': 6, 'start': 1, 'duration': 1, 'volume': 1}], voice=True))
+        self.assertEqual(job['status'], 'completed', job)
+        out = subprocess.run(['ffmpeg','-nostdin','-i',job['outputs'][0],'-map','0:a:0','-af','volumedetect','-f','null','-'],
+                             capture_output=True, text=True).stderr
+        self.assertLess(float(re.search(r'max_volume: (-?[0-9.]+) dB', out).group(1)), 0)
+        self.assertGreater(loudness(job['outputs'][0], 1.2, 0.5), -10)
+
+    def test_invalid_sounds_fail_before_any_download(self):
+        good = {'input': 4, 'start': 1, 'duration': 0.5, 'volume': 0.6}
+        for sounds in ('whoosh', [good] * (server.MAX_SOUNDS + 1), [{**good, 'input': 7}], [{**good, 'duration': 0}], [{**good, 'duration': 31}],
+                       [{**good, 'volume': 2}], [{**good, 'start': 'x'}], [{**good, 'start': -1}], [{'input': 4}], ['whoosh']):
+            with self.subTest(sounds=str(sounds)[:60]):
+                self.assert_fails(self.video(sounds), 'MEDIA_INVALID')
+
 class CarouselStillsTest(RendererTest):
     """Carousel slides (shared/carousel.ts): 4:5 and 1:1 frames, a picture cover-cropped into a rounded box on the page
     colour, the words over it, and a logo fitted in its box over everything."""

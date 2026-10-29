@@ -57,7 +57,7 @@ export type Source = Asset & {
   transcribeCredits: number;
   clips: number;
 };
-export type LibraryKind = "music" | "clip" | "image";
+export type LibraryKind = "music" | "clip" | "image" | "sfx";
 /** An item of the shared library (server/library.ts); `ai`: made with AI (videos using it are disclosed as AI-made). */
 export type LibraryItem = {
   id: string; kind: LibraryKind; name: string; description: string; category: string; tags: string[]; duration: number; width: number; height: number; ai: boolean;

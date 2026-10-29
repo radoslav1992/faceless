@@ -57,9 +57,11 @@ under `/api/admin` answers 404 to anyone else.
   Avatar IV; High: Avatar V); the refresh button reads them again. Rename, order or hide them; one a video has can only
   be hidden. Every presenter video is billed to the HeyGen account's API credits (about $0.04 a second in regular
   quality, $0.12 in high), while people pay 1 or 3 credits per 5 seconds.
-- **Library**: the shared music, clips and pictures people search and pick from. Upload (kind, file up to 50 MB or
-  a 20 MB picture, name, genre for music or category for clips and pictures, description, tags with suggestions, the
-  AI mark; **Fill in with AI** suggests the details from the chosen file before you upload) or **Add from my media** (your uploads and
+- **Library**: the shared music, clips, pictures and sound effects people search and pick from. **Make a sound
+  effect** has ElevenLabs make takes from a description or an idea, to listen to and **Save to library** (each take is
+  billed by ElevenLabs; "isn't set up" means the key lacks the Sound Effects permission or credits). Upload (kind, file up
+  to 50 MB, a 20 MB picture or a 10 MB sound effect of 0.2 to 30 seconds, name, genre for music or category for the
+  others, description, tags with suggestions, the AI mark; **Fill in with AI** suggests the details from the chosen file before you upload) or **Add from my media** (your uploads and
   the AI pictures and clips made for your videos, with their name, prompt as the description and the AI mark; the
   details open right after to check). Preview, edit the name, genre or category, description, tags and AI mark (✨ on
   an item has AI fill them in: it looks at the picture or frames of the clip, or listens to a minute of the track, and

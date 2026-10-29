@@ -27,18 +27,22 @@ const what: Record<LibraryKind, string> = {
   music: "a background music track (you hear a part of it)",
   clip: "a short video clip (you see frames taken across it, in order)",
   image: "a picture",
+  sfx: "a short sound effect (you hear all of it)",
 };
 function instructions(kind: LibraryKind) {
+  const heard = kind === "music" || kind === "sfx";
   const tags = kind === "music"
     ? `tags: 1 to 3 moods from this list that fit (${musicMoods.filter((m) => m !== "auto" && m !== "none").join(", ")}), then up to 3 words for what is heard (lead instruments, tempo), lowercase. The moods mean: ${Object.entries(moodMeanings).map(([m, d]) => `${m} = ${d}`).join("; ")}.`
-    : "tags: 3 to 6 lowercase search words for what is shown (subjects, setting, colours, motion).";
+    : kind === "sfx"
+      ? "tags: 3 to 6 lowercase search words for what is heard (what makes the sound, the action, how it feels)."
+      : "tags: 3 to 6 lowercase search words for what is shown (subjects, setting, colours, motion).";
   return [
-    `You describe ${what[kind]} in a library of background music, clips and pictures that people choose for short vertical videos (TikTok, Reels, Shorts).`,
+    `You describe ${what[kind]} in a library of background music, clips, pictures and sound effects that people choose for short vertical videos (TikTok, Reels, Shorts).`,
     "Describe only what you see or hear. Never name real people, brands, songs, artists or places you are not sure of, and never claim who made it or who owns it.",
-    `The JSON input gives its length in seconds. Judge only by what you ${kind === "music" ? "hear" : "see"}.`,
+    `The JSON input gives its length in seconds. Judge only by what you ${heard ? "hear" : "see"}.`,
     "Answer with JSON only, with these fields:",
     `name: 2 to 5 words in Title Case that say what it is${kind === "music" ? " and the feeling it gives" : ""}.`,
-    `description: one or two plain sentences, at most 300 characters, of what it ${kind === "music" ? "sounds like and the feeling it gives" : "shows"}; people search by it.`,
+    `description: one or two plain sentences, at most 300 characters, of what it ${kind === "music" ? "sounds like and the feeling it gives" : kind === "sfx" ? "sounds like" : "shows"}; people search by it.`,
     `category: the ${kind === "music" ? "genre" : "category"} that fits best, exactly one of: ${categoriesFor(kind).join(", ")}.`,
     tags,
   ].join("\n");

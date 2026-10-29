@@ -123,6 +123,8 @@ export const storySceneSchema = z
     tone: z.union([z.literal(""), z.enum(voiceTones)]).default(""),
     /** The label of the video's place (`places`) the scene is set in, or empty: scenes in one place are drawn alike. */
     place: z.string().trim().max(PLACE_LABEL_MAX).default(""),
+    /** A library sound effect played when the scene starts (shared/sounds.ts), while the video's sound effects are on. */
+    soundId: uuid.optional(),
   })
   .refine((s) => s.source !== "own" || !!s.assetId, "Choose a picture or video for each scene with your own media.")
   .refine((s) => s.source !== "library" || !!s.libraryId, "Choose a library clip or picture for each scene that uses one.")

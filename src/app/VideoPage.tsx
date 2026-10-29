@@ -210,7 +210,7 @@ export function VideoPage() {
 
       <section className="stack" style={{ marginTop: 32 }}>
         <div className="row between wrap">
-          <div><h2 style={{ fontSize: 22 }}>Edit</h2><p className="muted small">{making(video) ? "You can edit once it's made." : clip ? "Trim the moment, change the layout, captions, title or music." : "Change the words, pictures, voice, title, subtitles or music."}</p></div>
+          <div><h2 style={{ fontSize: 22 }}>Edit</h2><p className="muted small">{making(video) ? "You can edit once it's made." : clip ? "Trim the moment, change the layout, captions, title or music." : "Change the words, pictures, voice, title, subtitles, music or sound effects."}</p></div>
           <div className="toolbar">
             {changed && <button type="button" className="btn ghost" onClick={() => setSpec(video.spec!)}>Undo changes</button>}
             <button type="button" className="btn primary" disabled={!changed || saving || making(video)} onClick={save}>
