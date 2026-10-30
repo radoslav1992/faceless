@@ -195,7 +195,8 @@ then disclosed as AI-made when they're posted).
 - **Sound effects**: short sounds licensed for commercial use, or made with ElevenLabs in **Make a sound effect**: pick
   an idea or write a description (0.5 to 30 seconds), listen to the take, make another until it's right and **Save to
   library** the ones you keep (each take is billed to the ElevenLabs account, about 20–40 credits a second, and needs
-  the key's Sound Effects permission; unsaved takes are gone when you leave the page). A few of category
+  the key's Sound Effects permission; unsaved takes are gone when you leave the page). Takes are made with Sound
+  Effects v3 when the ElevenLabs account has it (it's in limited access) and with v2 otherwise; each take says which. A few of category
   `Transition` (whooshes, swooshes): new videos get one of them at random on every scene change. The others (fire,
   waves, a crowd, an explosion, a door) are what the writer gives the scenes you would hear, at most one scene in
   three. Without sound effects in the library, videos have none. They are mixed in the container, so videos with them

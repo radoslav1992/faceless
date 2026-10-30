@@ -552,8 +552,10 @@ function LibraryUpload({ onUploaded, onFromMedia }: { onUploaded: (item: AdminIt
 /** A take of a sound effect: the MP3 ElevenLabs made, what it was made from, and the library item once it is kept. */
 type Take = {
   id: string; n: number; file: File; url: string; duration: number; prompt: string; name: string; category: string; tags: string;
-  saving?: boolean; saved?: AdminItem;
+  /** The model that made it: "v3" or "v2" (Sound Effects v3 is in limited access; v2 makes the take without it). */
+  model: string | null; saving?: boolean; saved?: AdminItem;
 };
+const soundModel = (id: string | null) => id?.match(/_v(\d+)$/)?.[0].slice(1) ?? null;
 /** A take made by ElevenLabs from a description (POST /admin/library/generate: an MP3, nothing saved yet). */
 async function makeTake(prompt: string, seconds: number) {
   let r: Response;
@@ -566,7 +568,7 @@ async function makeTake(prompt: string, seconds: number) {
     const data = (await r.json().catch(() => ({}))) as { error?: string };
     throw new ApiError(data.error || "Something went wrong. Please try again.", r.status, data);
   }
-  return new File([await r.blob()], "sound.mp3", { type: "audio/mpeg" });
+  return { file: new File([await r.blob()], "sound.mp3", { type: "audio/mpeg" }), model: soundModel(r.headers.get("X-Sound-Model")) };
 }
 /**
  * Sound effects made with ElevenLabs from a description (billed by ElevenLabs per take): each try is a take to listen
@@ -599,12 +601,13 @@ function SoundMaker({ onSaved }: { onSaved: (item: AdminItem) => void }) {
     if (!(length >= MADE_SECONDS.min && length <= MADE_SECONDS.max)) return setProblem(`ElevenLabs makes sounds of ${MADE_SECONDS.min} to ${MADE_SECONDS.max} seconds.`);
     setBusy(true);
     try {
-      const file = await makeTake(prompt, length);
+      const { file, model } = await makeTake(prompt, length);
       const duration = await measure(file, "sfx").then((m) => m.duration).catch(() => length);
       const url = URL.createObjectURL(file);
       urls.current.add(url);
       const take: Take = {
         id: crypto.randomUUID(), n: ++made.current, file, url, duration, prompt, name: form.name.trim() || prompt.slice(0, 60), category: form.category.trim(), tags: splitTags(form.tags).join(", "),
+        model,
       };
       setTakes((list) => [take, ...list]);
       audio.toggle(take.id, url);
@@ -693,7 +696,7 @@ function SoundMaker({ onSaved }: { onSaved: (item: AdminItem) => void }) {
               <li key={t.id} className="pick-row">
                 <PlayButton playing={audio.playing === t.id} onClick={() => audio.toggle(t.id, t.url)} label={t.name} />
                 <span className="grow" style={{ minWidth: 0 }}>
-                  <span className="name" style={{ display: "block" }}>{t.name} <span className="muted small">· take {t.n}</span></span>
+                  <span className="name" style={{ display: "block" }}>{t.name} <span className="muted small">· take {t.n}{t.model && ` · Sound Effects ${t.model}`}</span></span>
                   <span className="small muted clip" title={t.prompt}>{[t.category, `${t.duration.toFixed(1)} s`, t.prompt].filter(Boolean).join(" · ")}</span>
                 </span>
                 {t.saved ? <span className="chip">In the library</span> : (

@@ -194,7 +194,9 @@ thumbnail come from the browser) or copy one of their own media files (`POST /ap
 or an AI picture or clip made for one of their videos, with its name, its prompt as the description and the AI mark;
 `source_asset` keeps it from being added twice; the administrator's own audio becomes music), or, for sound effects
 (0.2–30 s), have ElevenLabs make one from a description (`POST /api/admin/library/generate`: `/v1/sound-generation`,
-0.5–30 s, 60 an hour; the answer is the MP3 take itself and nothing is saved: Admin → Library plays each take and
+0.5–30 s, 60 an hour; Sound Effects v3 `eleven_text_to_sound_v3`, which is in limited access: an account without it is
+refused (a 4xx, which makes and costs nothing) and v2 makes the take, v2 asked straight away for the next hour; the
+model is in `X-Sound-Model` and shown with the take; the answer is the MP3 take itself and nothing is saved: Admin → Library plays each take and
 uploads the ones kept through `PUT /file` as made with AI, the description what it was made from; `shared/sounds.ts`
 `soundIdeas` fill in the form), then rename, describe,
 tag, mark as AI-made, switch off or delete them; the list shows how many videos and series use each item. `GET /api/library?kind=clip,image&q=&tag=` searches

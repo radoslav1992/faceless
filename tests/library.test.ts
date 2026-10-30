@@ -7,7 +7,7 @@ import { fitSuggestion } from "../server/describe";
 import { mediaName } from "../server/routes/admin-library";
 import { planRender } from "../server/render-plan";
 import { call, signedIn, SITE, subscribe, testEnv } from "./helpers";
-import { SOUND_URL } from "../server/providers/elevenlabs";
+import { resetSoundModels, SOUND_URL } from "../server/providers/elevenlabs";
 
 // The shared library: music, clips and pictures administrators add (uploads, or their own uploads and AI media with its
 // details), describe, give a genre or category and tag in Admin → Library (by hand, or filled in by a multimodal model),
@@ -269,6 +269,7 @@ describe("library", () => {
 
   it("takes sound effects uploaded or made with ElevenLabs (listened to first), of their own lengths, and counts the videos that play them", async () => {
     const { admin, user, upload, own, sqlite } = await setup({ ELEVENLABS_API_KEY: "el" });
+    resetSoundModels();
     // Uploaded: 0.2 to 30 seconds, an audio file of up to 10 MB.
     const whoosh = await upload({ kind: "sfx", name: "Whoosh", category: "Transition", tags: "whoosh", duration: "1.2" }, new Uint8Array(200), "audio/mpeg");
     expect(whoosh.status).toBe(201);
@@ -293,9 +294,26 @@ describe("library", () => {
     const make = (body: object) => admin("POST", "/api/admin/library/generate", { prompt: "A deep cinematic boom", seconds: 2, ...body });
     const take = await make({});
     expect(take.status).toBe(200);
-    expect([take.headers.get("Content-Type"), take.headers.get("Cache-Control"), take.data.length]).toEqual(["audio/mpeg", "no-store", 2003]);
-    expect(sent).toEqual([{ url: `${SOUND_URL}?output_format=mp3_44100_128`, headers: expect.objectContaining({ "xi-api-key": "el" }), body: { text: "A deep cinematic boom", duration_seconds: 2, prompt_influence: 0.5 } }]);
+    expect([take.headers.get("Content-Type"), take.headers.get("Cache-Control"), take.headers.get("X-Sound-Model"), take.data.length])
+      .toEqual(["audio/mpeg", "no-store", "eleven_text_to_sound_v3", 2003]);
+    const asked = (model: string) => ({
+      url: `${SOUND_URL}?output_format=mp3_44100_128`, headers: expect.objectContaining({ "xi-api-key": "el" }),
+      body: { text: "A deep cinematic boom", model_id: model, duration_seconds: 2, prompt_influence: 0.5 },
+    });
+    expect(sent).toEqual([asked("eleven_text_to_sound_v3")]);
     expect(count()).toBe(before);
+    // An account without Sound Effects v3 (limited access): refused, then v2 makes the take, and v2 is asked straight
+    // away for the next hour.
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const mp3 = reply;
+    reply = () => (sent.at(-1)!.body.model_id === "eleven_text_to_sound_v3" ? new Response('{"detail":{"status":"model_not_found"}}', { status: 400 }) : mp3());
+    sent.length = 0;
+    const older = await make({});
+    expect([older.status, older.headers.get("X-Sound-Model")]).toEqual([200, "eleven_text_to_sound_v2"]);
+    expect((await make({})).headers.get("X-Sound-Model")).toBe("eleven_text_to_sound_v2");
+    expect(sent).toEqual([asked("eleven_text_to_sound_v3"), asked("eleven_text_to_sound_v2"), asked("eleven_text_to_sound_v2")]);
+    reply = mp3;
+    resetSoundModels();
     // Kept: uploaded as made with AI, the description what it was made from (Admin → Library does this on Save).
     const boom = await upload({ kind: "sfx", name: "Boom", description: "A deep cinematic boom", category: "Impact", tags: "boom, hit", ai: "1", duration: "2.04" },
       new Uint8Array([0x49, 0x44, 0x33, ...new Array(2000).fill(1)]), "audio/mpeg");
@@ -306,7 +324,6 @@ describe("library", () => {
     for (const body of [{ seconds: 0.2 }, { seconds: 31 }, { prompt: "x" }]) expect((await make(body)).status).toBe(400);
     expect((await user("POST", "/api/admin/library/generate", { prompt: "A boom", seconds: 2 })).status).toBe(404);
     // ElevenLabs refusing, busy or answering something that isn't an MP3: a message, no take.
-    vi.spyOn(console, "warn").mockImplementation(() => {});
     for (const [status, code, message] of [[401, 503, /isn't set up/], [429, 502, /busy/], [500, 502, /couldn't make this sound/], [200, 502, /couldn't make this sound/]] as const) {
       reply = () => (status === 200 ? new Response("<html>error</html>") : new Response("{}", { status }));
       const r = await make({});

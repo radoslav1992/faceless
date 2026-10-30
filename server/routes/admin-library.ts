@@ -225,8 +225,8 @@ adminLibrary.post("/describe", async (c) => {
   return c.json({ suggestion });
 });
 /**
- * A take of a sound effect made with ElevenLabs from a description (billed by ElevenLabs per take), as an MP3 to listen
- * to: nothing is saved. The administrator keeps the takes they like by uploading them (PUT /file, made with AI, the
+ * A take of a sound effect made with ElevenLabs from a description (billed by ElevenLabs per take; Sound Effects v3, or
+ * v2 for an account without it), as an MP3 to listen to: nothing is saved. The administrator keeps the takes they like by uploading them (PUT /file, made with AI, the
  * description they were made from). 60 an hour.
  */
 adminLibrary.post("/generate", async (c) => {
@@ -234,9 +234,9 @@ adminLibrary.post("/generate", async (c) => {
     prompt: z.string().trim().min(3).max(300), seconds: z.number().min(SOUND_EFFECT_SECONDS.min).max(SOUND_EFFECT_SECONDS.max),
   }).parse(await c.req.json());
   await rate(c, "sound-generate", 60, 3600, c.get("user").id);
-  let bytes: Uint8Array;
+  let made: Awaited<ReturnType<typeof soundEffect>>;
   try {
-    bytes = await soundEffect(c.env, d.prompt, d.seconds);
+    made = await soundEffect(c.env, d.prompt, d.seconds);
   } catch (e) {
     const code = e instanceof ProviderError ? e.code : "SOUND_FAILED";
     console.warn("Sound effect not made", { code });
@@ -245,7 +245,8 @@ adminLibrary.post("/generate", async (c) => {
         : code === "SOUND_BUSY" ? "ElevenLabs is busy. Try again in a minute." : "ElevenLabs couldn't make this sound. Try again, or describe it differently.",
     });
   }
-  return new Response(bytes.slice().buffer, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" } });
+  // The model that made it (Sound Effects v3, or v2 for an account without v3), shown with the take.
+  return new Response(made.audio.slice().buffer, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store", "X-Sound-Model": made.model } });
 });
 /** An item's file whether it is offered or switched off (people only get offered ones), to preview or describe it. */
 adminLibrary.get("/:id/file", async (c) => {
