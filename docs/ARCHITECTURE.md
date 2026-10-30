@@ -262,6 +262,10 @@ the answer; fewer than two usable scenes means failure.
   editor. Text to video splits the owner's script into scenes (`scriptScenes`) and only describes their pictures
   (`planScenes`); a storytime with the owner's own story is split the same way.
 - `POST /api/story/plan` (free, 30 an hour) describes pictures for scenes that already have words.
+- `POST /api/story/sounds` (free, 30 an hour; `pickSounds`) chooses sound effects for scenes that are already made: one
+  of the library's whooshes at random and the writer's scene sounds (the same rule and list as a new video's), as
+  library IDs; without the model's answer, the whoosh alone. The editor calls it when sound effects are switched on
+  with none chosen (or with **Choose sounds for me**), and fills only the empty ones.
 - `POST /api/story/timing` times an owner's voiceover: its transcript, or with an exact script ElevenLabs forced
   alignment (made once per file and script, kept in `media_assets.meta.alignment`, within the daily free speech
   allowance of 20 files or 30 minutes).
