@@ -43,7 +43,14 @@ MAX_KEEP = 300                      # parts kept of one video segment (instant c
 MAX_SOUNDS = 80                     # sound effects placed in one video (shared/sounds.ts)
 MAX_SOUND = 30                      # seconds one sound effect plays
 SOUND_FADE = 0.15                   # seconds a sound effect fades out where it is cut
-SOUND_LIMIT = 0.95                  # peak of a mix with sound effects (they land on the voice and the music)
+SOUND_LIMIT = 0.95                  # peak of a mix with music or sound effects (they land on the voice)
+# Levels (dB against the speech, EBU R128 loudness): music and sound effects are set against the voice whatever loudness
+# their files were made at. Music at full volume is as loud as the speech while it is lowered under it (12 dB under at
+# the default 25%); a sound effect at full volume is 3.5 dB under it (8 dB under at the default 60%).
+SPEECH_LUFS = -18.0                 # the speech they are set against without a voice to measure (a clip's own sound)
+MUSIC_UNDER_SPEECH = 0.0
+SOUND_UNDER_SPEECH = -3.5
+MAX_LEVELING = 24.0                 # dB a file is raised or lowered by at most (a nearly silent one stays nearly silent)
 # Transitions between segments (FFmpeg xfade, in FFmpeg since 4.3; zoomin since 5.0), as shared/story.ts lists them.
 TRANSITIONS = ('fade', 'fadeblack', 'dissolve', 'slideleft', 'slideup', 'wipeleft', 'smoothleft', 'circleopen', 'zoomin')
 MAX_TRANSITION = 2.0                # seconds
@@ -529,14 +536,40 @@ def sounds_plan(sounds, count, total_frames):
         plan.append({'input': index(s['input'], count), 'start': start, 'samples': samples, 'volume': number(s['volume'], 0, 1)})
     return plan
 
-def sound_effects(graph, add_input, files, media, sounds, total_samples):
+def loudness(path, seconds):
+    """Integrated loudness (LUFS, EBU R128) of a file's first `seconds` of sound, or None when it is (nearly) silent.
+    Half a second of silence follows it, so a sound shorter than the 400 ms blocks the measure needs still counts."""
+    out = command(['ffmpeg','-nostdin','-v','error','-threads','1','-protocol_whitelist','file,pipe','-t',f'{seconds:.3f}','-i',path,
+                   '-map','0:a:0','-af',f'aresample={RATE},apad=pad_len={RATE // 2},asetnsamples=n={RATE // 2},ebur128=metadata=1,'
+                   'ametadata=mode=print:key=lavfi.r128.I:file=-','-f','null','-'], timeout=120)
+    found = re.findall(rb'lavfi\.r128\.I=(-?[0-9.]+)', out)
+    return float(found[-1]) if found and float(found[-1]) > -60 else None
+
+def mix_levels(files, voice, music, sounds, total):
+    """Gains that set the music and each sound effect against the speech (the voice's loudness, or SPEECH_LUFS): each
+    file is measured (the music over the part that plays) and brought to it, then lowered to its place under it
+    (MUSIC_UNDER_SPEECH, SOUND_UNDER_SPEECH) and set to its volume. A file that can't be measured keeps its level."""
+    speech = loudness(files[voice['input']], MAX_OUTPUT) if voice and voice['volume'] > 0 else None
+    speech = SPEECH_LUFS if speech is None else speech + 20 * math.log10(voice['volume'])
+    measured = {}
+    def gain(i, seconds, under):
+        level = measured[i] = loudness(files[i], seconds)
+        lift = 0.0 if level is None else max(-MAX_LEVELING, min(MAX_LEVELING, speech - level))
+        return 10 ** ((lift + under) / 20)
+    # The music's volume counts while it is lowered under speech: its gain between sentences is higher by 1/(1-DUCK).
+    levels = {'music': music['volume'] * gain(music['input'], total, MUSIC_UNDER_SPEECH) / (1 - DUCK) if music else None,
+              'sounds': {i: gain(i, MAX_SOUND, SOUND_UNDER_SPEECH) for i in sorted({s['input'] for s in sounds})}}
+    log(f'levels: speech {speech:.1f} LUFS, ' + ', '.join(f'input{i} {"silent" if v is None else f"{v:.1f}"}' for i, v in measured.items()))
+    return levels
+
+def sound_effects(graph, add_input, files, sounds, total_samples, gains):
     """The sound effects as one track [sfx] of the video's length: each file is read once and split for every time it
-    plays (a whoosh on each scene change), cut to its length with a short fade, at its volume, moved to its start."""
+    plays (a whoosh on each scene change), cut to its length with a short fade, at its volume (`gains`: its file's level
+    against the speech), moved to its start."""
     uses = {}
     for s in sounds: uses.setdefault(s['input'], []).append(s)
     labels = []
     for i, placed in uses.items():
-        if not media[i]['hasAudio']: raise ValueError('Sound has no audio')
         k = add_input('-i', files[i])
         branches = [f'[sx{k}_{j}]' for j in range(len(placed))]
         graph.append(f'[{k}:a:0]aresample={RATE}:async=1:first_pts=0,aformat=sample_rates={RATE}:channel_layouts=stereo,'
@@ -546,7 +579,7 @@ def sound_effects(graph, add_input, files, media, sounds, total_samples):
             fade = min(SOUND_FADE, seconds / 3)
             label = f'[sfx{len(labels)}]'
             graph.append(f'{branch}atrim=end_sample={s["samples"]},afade=t=out:st={seconds - fade:.4f}:d={fade:.4f},'
-                         f'volume={s["volume"]:.4f},adelay=delays={s["start"]}S:all=1{label}')
+                         f'volume={s["volume"] * gains[i]:.4f},adelay=delays={s["start"]}S:all=1{label}')
             labels.append(label)
     mixed = f'amix=inputs={len(labels)}:duration=longest:normalize=0,' if len(labels) > 1 else ''
     graph.append(f'{"".join(labels)}{mixed}apad,atrim=end_sample={total_samples}[sfx]')
@@ -700,27 +733,30 @@ def compose(job, payload, origin):
         graph.append(f'{video}{burn(ass)},format=yuv420p[vout]')
         video = '[vout]'
     voice, music = plan['voice'], plan['music']
+    # Every sound is checked before any is measured.
+    if voice and not media[voice['input']]['hasAudio']: raise ValueError('Voice has no audio')
+    if music and not media[music['input']]['hasAudio']: raise ValueError('Music has no audio')
+    if any(not media[s['input']]['hasAudio'] for s in plan['sounds']): raise ValueError('Sound has no audio')
+    levels = mix_levels(files, voice, music, plan['sounds'], total) if music or plan['sounds'] else None
     if voice:
-        if not media[voice['input']]['hasAudio']: raise ValueError('Voice has no audio')
         k = add_input('-i', files[voice['input']])
         graph.append(f'[{k}:a:0]aresample={RATE}:async=1:first_pts=0,aformat=sample_rates={RATE}:channel_layouts=stereo,'
                      f'volume={voice["volume"]:.4f},adelay=delays={int(round(voice["start"] * 1000))}:all=1,'
                      f'apad,atrim=end_sample={total_samples}[voice]')
         sounds.append('[voice]')
     if music:
-        if not media[music['input']]['hasAudio']: raise ValueError('Music has no audio')
         # Looped to the whole video by the demuxer; timestamps then count samples, so `t` is the output clock.
         k = add_input('-stream_loop', '-1', '-i', files[music['input']])
         graph.append(f'[{k}:a:0]aformat=sample_rates={RATE}:channel_layouts=stereo,asetpts=N/SR/TB,atrim=end_sample={total_samples},'
-                     f"volume='{music_gain(music['volume'], music['duck'], total)}':eval=frame[music]")
+                     f"volume='{music_gain(levels['music'], music['duck'], total)}':eval=frame[music]")
         sounds.append('[music]')
     if plan['sounds']:
-        sound_effects(graph, add_input, files, media, plan['sounds'], total_samples)
+        sound_effects(graph, add_input, files, plan['sounds'], total_samples, levels['sounds'])
         sounds.append('[sfx]')
     audio = '[acat]'
     if len(sounds) > 1:
-        # Sound effects land on the voice and the music: their peaks are held under clipping.
-        limit = f',alimiter=limit={SOUND_LIMIT}:level=false' if plan['sounds'] else ''
+        # Music and sound effects land on the voice: the peaks of the mix are held under clipping.
+        limit = f',alimiter=limit={SOUND_LIMIT}:level=false' if levels else ''
         graph.append(f'{"".join(sounds)}amix=inputs={len(sounds)}:duration=first:normalize=0{limit}[aout]')
         audio = '[aout]'
     output = os.path.join(job['dir'], 'output0.mp4')

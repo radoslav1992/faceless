@@ -150,6 +150,11 @@ video is attached to it); its failure refunds the credits and the Clips page say
 | `PROVIDER_REDIRECT`, `PROVIDER_URL`, `PROVIDER_DOWNLOAD` | a provider answered with a redirect or an output on an unexpected host |
 | `INTERNAL` | anything else; the workflow log (`Run failed`) has the run ID |
 
+**Music or sound effects too quiet (or too loud)** in a made video: the editor's preview plays the voice only, so
+check the made video first. The container logs each mix's levels (`levels: speech -19.2 LUFS, input11 -31.0, …`: the
+voice and each music or sound file as measured, `silent` for one with nothing to measure); the music and sounds are set
+against the voice from those (docs/ARCHITECTURE.md, the narrated video), then by the video's volumes.
+
 **Imports from links** fail the imported file (it shows "Can't be used" with the reason), never a run, and charge
 nothing; the workflow logs `Import failed` with the code.
 

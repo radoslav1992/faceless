@@ -362,7 +362,12 @@ the whoosh from 0.3 s before every scene change the picture shows (at most 2 s; 
 scene's own sound from its start until half a second after its end (or its own end), all at the video's sound volume,
 mixed over the voice and music in the container with their peaks held under clipping (`alimiter`), each file read once
 however often it plays (the renderer reports how many it mixed, and the Worker fails and refunds a video that asked
-for some and got none, `RENDERER_OUTDATED`: a renderer image older than the Worker); free-trial videos get a small watermark with the product name. The cover is taken once the first words (and the headline) are on screen. Output is 1080×1920 at 30 fps, at most
+for some and got none, `RENDERER_OUTDATED`: a renderer image older than the Worker). Music and sound effects are set
+against the voice whatever loudness their files were made at: the container measures each file (EBU R128; the music
+over the part that plays, the voice whole, or −18 LUFS for a clip's own sound), brings it to the voice and lowers it to
+its place (music at 100% as loud as the voice under it, 12 dB under at the default 25%; a sound at 100% 3.5 dB under
+the voice, 8 dB under at the default 60%; at most ±24 dB of correction; a silent file keeps its level), so a soft song
+or whoosh is not lost and a loud one does not drown the words. Free-trial videos get a small watermark with the product name. The cover is taken once the first words (and the headline) are on screen. Output is 1080×1920 at 30 fps, at most
 180 seconds.
 
 **The container** (`renderer/`, Python 3.12 with FFmpeg, libass and the bundled Noto fonts): three render instances
