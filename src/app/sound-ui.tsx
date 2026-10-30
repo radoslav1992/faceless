@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { AudioLines, Plus, Trash2 } from "lucide-react";
-import { useApi, type LibraryItem } from "../lib";
-import { Switch } from "../ui";
+import { useRef, useState } from "react";
+import { AudioLines, Plus, Trash2, WandSparkles } from "lucide-react";
+import { errorText, post, useApi, type LibraryItem } from "../lib";
+import { Spinner, Switch } from "../ui";
 import { EditorSection } from "./CaptionPickers";
 import { LibraryPicker, PlayButton, itemLength, usePreviewAudio } from "./pickers";
 import { SOUND_VOLUME, TRANSITION_CATEGORY } from "../../shared/sounds";
@@ -9,8 +9,9 @@ import type { StorySpec } from "../../shared/formats";
 import type { StoryScene } from "../../shared/story";
 
 // Sound effects in the editor (shared/sounds.ts): switched on or off for the whole video, at one volume, with the
-// whoosh played on every scene change and each scene's own sound, added, changed or removed scene by scene. Changing
-// them only renders the video again (free).
+// whoosh played on every scene change and each scene's own sound, added, changed or removed scene by scene. Switched on
+// with none chosen, they are chosen for the scenes as they are (POST /story/sounds: a whoosh and the writer's picks).
+// Changing them only renders the video again (free).
 
 /** The library's sound effects by ID: their names, lengths and files. */
 export function useSoundLibrary() {
@@ -41,18 +42,60 @@ function SoundRow({ id, library, label, onChange, onRemove }: {
   );
 }
 
+/** The sounds chosen for the scenes as they are: a whoosh and the writer's picks (null: none). */
+type SoundPicks = { transitionId: string | null; scenes: (string | null)[] };
+
 /** The video's sound effects: on or off, their volume, the whoosh of scene changes and how many scenes have a sound. */
 export function SoundSection({ spec, onChange, library }: { spec: StorySpec; onChange: (spec: StorySpec) => void; library: Map<string, LibraryItem> }) {
   const [picking, setPicking] = useState(false);
+  const [choosing, setChoosing] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  // The spec as it is when the choice comes back (the owner may have edited meanwhile): only empty sounds are filled.
+  const latest = useRef(spec);
+  latest.current = spec;
   const on = !!spec.sounds?.enabled;
   const sounds = soundsOn(spec);
   const withSound = spec.scenes.filter((s) => s.soundId).length;
+  const empty = !sounds.transitionId && !withSound;
+  const choose = async () => {
+    const asked = spec.scenes.length;
+    setChoosing(true);
+    setProblem(null);
+    try {
+      const r = await post<SoundPicks>("/story/sounds", { scenes: spec.scenes.map((s) => ({ text: s.text, picture: s.description })) });
+      const now = latest.current;
+      if (!now.sounds?.enabled) return;
+      const same = now.scenes.length === asked;
+      onChange({
+        ...now, sounds: { ...soundsOn(now), transitionId: now.sounds.transitionId || r.transitionId || undefined },
+        scenes: now.scenes.map((s, i) => ({ ...s, soundId: s.soundId || (same && r.scenes[i]) || undefined })),
+      });
+      if (!r.transitionId && !r.scenes.some(Boolean)) setProblem("The library has no sound effects yet.");
+    } catch (e) {
+      setProblem(errorText(e));
+    } finally {
+      setChoosing(false);
+    }
+  };
+  const toggle = (enabled: boolean) => {
+    onChange({ ...spec, sounds: { ...sounds, enabled } });
+    if (enabled && empty && !choosing) void choose();
+  };
   return (
     <EditorSection title="Sound effects"
       hint="A whoosh on every scene change and sounds for the scenes that have one, under the voice. You hear them in the made video; changing them is free."
-      action={<Switch checked={on} onChange={(enabled) => onChange({ ...spec, sounds: { ...sounds, enabled } })} label="Play sound effects" />}>
+      action={<Switch checked={on} onChange={toggle} label="Play sound effects" />}>
       {on && (
         <div className="stack" style={{ gap: 10 }}>
+          {choosing ? (
+            <span className="row small muted" style={{ gap: 8 }}><Spinner label="Choosing sounds" /> Choosing a whoosh and sounds for the scenes…</span>
+          ) : empty && (
+            <div className="row wrap" style={{ gap: 8 }}>
+              <span className="small">Nothing plays yet.</span>
+              <button type="button" className="btn sm" onClick={() => void choose()}><WandSparkles size={14} aria-hidden="true" /> Choose sounds for me</button>
+            </div>
+          )}
+          {problem && <span className="hint" role="alert">{problem}</span>}
           <div className="field">
             <span className="small">Scene changes</span>
             {sounds.transitionId ? (

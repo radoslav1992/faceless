@@ -41,7 +41,7 @@ and the maintenance cron.
   draggable scene edges, split and merge), each scene's picture (a new AI picture, an AI clip made from it, the owner's
   own image or video, or a clip or picture searched in the shared library), transitions, the on-screen title,
   subtitles, music, sound effects (on or off, their volume, the whoosh, and a sound added, changed or removed per
-  scene), an optional AI presenter on camera (HeyGen, lip-synced to the AI voice) and the post text. The
+  scene; switched on for a video without any, the writer chooses them for its scenes), an optional AI presenter on camera (HeyGen, lip-synced to the AI voice) and the post text. The
   voice can be an AI voice or the owner's own recording, timed by its transcript or by forced alignment of its script.
   The editor shows the exact credit price before anything is made.
 - **Clips from long videos** (`shared/highlights.ts`, `server/highlights.ts`). The owner uploads a podcast, interview,

@@ -1225,4 +1225,46 @@ describe("planning and writing through the API", () => {
     await run();
     expect((await call(worker, env, "GET", `/api/videos/${quietVideo.data.id}`, undefined, user.cookie)).data.video.renderStatus).toBe("ready");
   });
+
+  it("chooses sound effects for a made video's scenes: a whoosh and the writer's picks, free", async () => {
+    const { env, sqlite, user } = await setup();
+    const sound = (name: string, category: string) => {
+      const id = crypto.randomUUID();
+      sqlite.prepare("INSERT INTO library_items(id,kind,name,category,tags,object_key,mime,bytes,duration,ai,active,created_at) VALUES (?,'sfx',?,?,'',?,'audio/mpeg',1000,1.5,1,1,1)")
+        .run(id, name, category, `library/${id}/file.mp3`);
+      return id;
+    };
+    const choose = (scenes: object[]) => call(worker, env, "POST", "/api/story/sounds", { scenes }, user.cookie);
+    const scenes = [
+      { text: "The crowd roared.", picture: "A packed arena" }, { text: "Then silence.", picture: "An empty seat" },
+      { text: "A fire started.", picture: "Flames in a hall" }, { text: "It spread.", picture: "Smoke" },
+    ];
+    // An empty library: nothing to choose, and the writer isn't asked.
+    let asked = 0;
+    env.AI.run = async () => { asked++; return answer({ scenes: [] }); };
+    expect((await choose(scenes)).data).toEqual({ transitionId: null, scenes: [null, null, null, null] });
+    expect(asked).toBe(0);
+    const whoosh = sound("Airy whoosh", "Transition"), crowd = sound("Crowd cheer", "Crowd"), fire = sound("Crackling fire", "Fire");
+    const inputs: any[] = [];
+    // The writer gets the scenes and the scene sounds (no whooshes) by code; unknown codes and repeats are dropped.
+    env.AI.run = async (_model: string, input: any) => {
+      inputs.push(input);
+      const code = (name: string) => JSON.parse(input.input).sounds.find((x: any) => x.name === name)?.code;
+      return answer({ scenes: [{ id: "s1", sound: code("Crowd cheer") }, { id: "s2", sound: code("Crowd cheer") }, { id: "s3", sound: code("Crackling fire") }, { id: "s4", sound: "sound9" }] });
+    };
+    const r = await choose(scenes);
+    expect(r.status).toBe(200);
+    expect(r.data).toEqual({ transitionId: whoosh, scenes: [crowd, null, fire, null] });
+    const sent = JSON.parse(inputs[0].input);
+    expect(sent.scenes[0]).toEqual({ id: "s1", text: "The crowd roared.", picture: "A packed arena" });
+    expect(sent.sounds.map((x: any) => x.name).sort()).toEqual(["Crackling fire", "Crowd cheer"]);
+    expect(inputs[0].instructions).toMatch(/sound: a soundN from the sound list/);
+    // Without an answer from the model: the whoosh alone.
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    env.AI.run = async () => { throw new Error("down"); };
+    expect((await choose(scenes)).data).toEqual({ transitionId: whoosh, scenes: [null, null, null, null] });
+    // Scenes as the editor has them, signed in only.
+    expect((await choose([])).status).toBe(400);
+    expect((await call(worker, env, "POST", "/api/story/sounds", { scenes }, "")).status).toBe(401);
+  });
 });
