@@ -204,7 +204,9 @@ the active items (all of them, folded to lowercase without accents, a plural mat
 be in the name, genre or category, description or tags, name matches first, then the genre or category, then tags,
 then descriptions; `?ids=` returns particular
 items (the editor's scenes). Music is a track, a background a clip, a scene a clip or a picture, the whoosh and a
-scene's sound sound effects (`checkReferences`; sound effects only while they are on).
+scene's sound sound effects (`checkReferences`; sound effects only while they are on). A sound effect made with a video
+that waits for review (`review` 1) is offered, searched, served and accepted only for the person it was made for
+(`OFFERED` in `server/sounds.ts`).
 An item marked as AI-made makes the video that shows it AI-made (`compose.synthetic`), like the owner's AI pictures.
 **Filled in by AI** (✨ in the upload form, on every item and in its editor): the administrator's browser makes small
 samples of the file (the picture or 6 frames spread over a clip as JPEGs of at most 720 to 1024 pixels, or a minute of a
@@ -253,19 +255,30 @@ once, at most two, each with a label every picture uses), the look of the whole 
 in (`places`: at most four, each a label and a description of its layout, furniture, light and colours; each scene's
 `place` names one, or none), a tone for the scenes where the narrator's feeling changes (about one in three), a
 headline, a
-title, a caption, hashtags, a topic, a music code from the library list and, for scenes you would hear, a sound code
-from the sound effects list. Each video type adds rules (POV in the
+title, a caption, hashtags, a topic and a music code from the library list. Each video type adds rules (POV in the
 second person, the mashup's chanted name, storytime's title question read out first). `acceptStory` cleans and checks
 the answer; fewer than two usable scenes means failure.
+
+**Sound effects** are chosen once the scenes are written (`chooseSounds`, `server/sounds.ts`; for Create's drafts with
+sound effects on, series episodes with them on, and the editor): one of the library's whooshes at random for the scene
+changes, and a second text-model call that gives the scenes you would hear a sound (at most one in three, never the same
+twice in a row) from the 40 library sounds that match the scenes best (`rankSounds`: words of the scenes' text and
+pictures in a sound's name, category and tags count most, then its description; "cheered" finds "cheering"; the list is
+filled up with some of every category). When a scene clearly needs a sound none of them fits, the model may describe up
+to two new ones (`newSounds`: a name, a generic description of the sound itself, never names or the video's words, a
+scene category and 1–8 s); the ones a scene plays are made with ElevenLabs (Sound Effects v3, else v2) unless one of the
+same name is already offered to the person, at most 6 per person and `SOUND_AUTO_DAILY` (default 40) for everyone a
+day, and kept in the library for review (`review` 1, `made_for` the person, migrations/0013): offered only to them until
+an administrator approves it for everyone (Admin → Library, **Waiting for review**) or switches it off. A sound that
+can't be made leaves its scene without one; without the model's answer, the whoosh alone.
 
 - `POST /api/story/draft` (free; 40 an hour and 200 a day per person) turns a template and a brief into a spec for the
   editor. Text to video splits the owner's script into scenes (`scriptScenes`) and only describes their pictures
   (`planScenes`); a storytime with the owner's own story is split the same way.
 - `POST /api/story/plan` (free, 30 an hour) describes pictures for scenes that already have words.
-- `POST /api/story/sounds` (free, 30 an hour; `pickSounds`) chooses sound effects for scenes that are already made: one
-  of the library's whooshes at random and the writer's scene sounds (the same rule and list as a new video's), as
-  library IDs; without the model's answer, the whoosh alone. The editor calls it when sound effects are switched on
-  with none chosen (or with **Choose sounds for me**), and fills only the empty ones.
+- `POST /api/story/sounds` (free, 30 an hour) chooses sound effects for scenes that are already made (`chooseSounds`,
+  as above, new sounds included), as library IDs. The editor calls it when sound effects are switched on with none
+  chosen (or with **Choose sounds for me**), and fills only the empty ones.
 - `POST /api/story/timing` times an owner's voiceover: its transcript, or with an exact script ElevenLabs forced
   alignment (made once per file and script, kept in `media_assets.meta.alignment`, within the daily free speech
   allowance of 20 files or 30 minutes).

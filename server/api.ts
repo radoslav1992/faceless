@@ -107,7 +107,7 @@ async function makeVideo(env: Env, user: DbUser, input: unknown) {
   const d = createSchema.parse(input);
   if ((await hit(env, "api-videos", 3600, user.id)) > 30) throw new HTTPException(429, { message: "That's a lot of videos for one hour. Try again later." });
   const recent = (await env.DB.prepare("SELECT title FROM videos WHERE user_id=? AND title<>'' ORDER BY created_at DESC LIMIT 20").bind(user.id).all<{ title: string }>()).results.map((r) => r.title);
-  const spec = await draftVideo(env, {
+  const spec = await draftVideo(env, user.id, {
     template: d.type, prompt: d.prompt, script: d.script, title: d.title, mashup: { animal: d.animal, object: d.object },
     seconds: d.seconds, language: d.language, voiceId: d.voice, style: d.style,
   } as DraftRequest, recent);

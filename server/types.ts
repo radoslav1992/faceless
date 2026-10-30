@@ -57,6 +57,8 @@ export interface Env {
   /** Later pictures of a video drawn from its first as a reference (server/providers/fal.ts); "off" to stop it. */
   FAL_REFERENCE_MODEL?: string;
   ELEVENLABS_API_KEY?: string;
+  /** Sound effects made with videos for everyone per day (server/sounds.ts; default 40, 0 switches it off). */
+  SOUND_AUTO_DAILY?: string;
   /** 32 random bytes, base64: encrypts social OAuth tokens at rest. */
   TOKEN_ENCRYPTION_KEY?: string;
   TIKTOK_CLIENT_KEY?: string;

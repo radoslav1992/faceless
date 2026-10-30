@@ -89,7 +89,8 @@ and the maintenance cron.
   pause or resume series, with the same credits and limits as the app.
 - **Administration.** Administrators (`ADMIN_EMAILS`) fill the shared library people search (music tagged by mood,
   clips, pictures and sound effects, each with a description; uploaded, copied from their own AI pictures and clips,
-  or, for sound effects, made with ElevenLabs), choose the
+  or, for sound effects, made with ElevenLabs; a sound a video needed that the library lacked is made with ElevenLabs
+  too and waits for their review, offered only to that video's owner until approved), choose the
   narration voices, see operations and failures, handle withdrawals within 14 days and give a paid plan for free (1 to 12 months, found by
   email).
 

@@ -352,9 +352,11 @@ function terms(op: Operator): Section[] {
       title: "Library content",
       body: (
         <p>
-          {name} includes a library of background music and background video clips. You may use library items in videos made with the service and publish
-          those videos on social networks and elsewhere, including for commercial purposes. You may not extract, download, sell or share library items on
-          their own, or use them outside videos made with {name}. Videos you published while your account was active may stay online after you stop using{" "}
+          {name} includes a library of background music, background video clips, pictures and sound effects. You may use library items in videos made with
+          the service and publish those videos on social networks and elsewhere, including for commercial purposes. You may not extract, download, sell or
+          share library items on their own, or use them outside videos made with {name}. When a video needs a sound effect the library doesn't have, our AI
+          describes the sound in a few generic words and ElevenLabs makes it; it then becomes a library item, offered only to you until we review it and
+          afterwards possibly to everyone. Videos you published while your account was active may stay online after you stop using{" "}
           {name}.
         </p>
       ),
@@ -595,8 +597,9 @@ function privacy(op: Operator): Section[] {
                 </tr>
                 <tr>
                   <th scope="row">ElevenLabs</th>
-                  <td>AI narration, word timings for subtitles, and transcription</td>
-                  <td>The narration text, and audio whose words are timed or transcribed — the AI narration, or a recording or video with sound that you upload</td>
+                  <td>AI narration, word timings for subtitles, transcription, and sound effects</td>
+                  <td>The narration text, and audio whose words are timed or transcribed — the AI narration, or a recording or video with sound that you upload; for a
+                    sound effect, a few generic words describing the sound (written by our AI, never your words)</td>
                 </tr>
                 <tr>
                   <th scope="row">HeyGen</th>

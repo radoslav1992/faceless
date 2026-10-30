@@ -59,7 +59,10 @@ under `/api/admin` answers 404 to anyone else.
   quality, $0.12 in high), while people pay 1 or 3 credits per 5 seconds.
 - **Library**: the shared music, clips, pictures and sound effects people search and pick from. **Make a sound
   effect** has ElevenLabs make takes from a description or an idea, to listen to and **Save to library** (each take is
-  billed by ElevenLabs; "isn't set up" means the key lacks the Sound Effects permission or credits). Upload (kind, file up
+  billed by ElevenLabs; "isn't set up" means the key lacks the Sound Effects permission or credits). Sound effects made
+  with videos (when a scene needed one the library lacked) **wait for review**: only the person whose video needed one
+  is offered it. Filter **Waiting for review**, listen, **Approve for everyone** the good ones and switch off the others
+  (`SOUND_AUTO_DAILY` sets how many are made a day; the logs say `Sound effect made for a video`). Upload (kind, file up
   to 50 MB, a 20 MB picture or a 10 MB sound effect of 0.2 to 30 seconds, name, genre for music or category for the
   others, description, tags with suggestions, the AI mark; **Fill in with AI** suggests the details from the chosen file before you upload) or **Add from my media** (your uploads and
   the AI pictures and clips made for your videos, with their name, prompt as the description and the AI mark; the
