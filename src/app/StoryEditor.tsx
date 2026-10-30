@@ -146,7 +146,7 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
             label={`Preview of the narrated video, ${spec.scenes.length} scenes, ${clockText(clock.duration)}`} />
           <p className="muted small story-note">{clock.source === "estimate"
             ? "Until the voice is made, the preview times the words from the script."
-            : clock.source === "recording" && !clock.said.length ? "No word timings yet: scenes are spread over the recording and no subtitles are shown." : "The preview plays the voice with the scenes, transitions and subtitles in sync."}</p>
+            : clock.source === "recording" && !clock.said.length ? "No word timings yet: scenes are spread over the recording and no subtitles are shown." : "The preview plays the voice with the scenes, transitions and subtitles in sync; the music and sound effects play in the made video."}</p>
         </div>
         <SceneInspector spec={spec} index={selected} scene={scene} seconds={timed[selected] ? timed[selected].end - timed[selected].start : 0}
           known={media.known} onChange={setScene} pick={setPicker} initial={initial} allClips={allClips} presenter={avatar?.name ?? "The presenter"}
@@ -194,7 +194,7 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
         {spec.captions.enabled && <CaptionStylePicker label="Subtitle style" value={spec.captions.style} onChange={(style) => onChange({ ...spec, captions: { ...spec.captions, style } })} />}
       </EditorSection>
       {spec.music && (
-        <EditorSection title="Music" hint="Plays under the whole voice, lowered so every word stays clear."
+        <EditorSection title="Music" hint="Plays under the whole voice, lowered so every word stays clear. You hear it in the made video, not in the preview."
           action={<button type="button" className="btn sm ghost" onClick={() => onChange({ ...spec, music: null })}>Remove</button>}>
           <div className="music-track">
             <PlayButton playing={audio.playing === "music"} onClick={() => audio.toggle("music", `/api/library/${spec.music!.trackId}/file`)} label={music || "the music"} />

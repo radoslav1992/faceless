@@ -14,6 +14,16 @@ const SPEECH_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 export const SOUND_URL = "https://api.elevenlabs.io/v1/sound-generation";
 /** Lengths ElevenLabs makes sound effects of (seconds). */
 export const SOUND_EFFECT_SECONDS = { min: 0.5, max: 30 } as const;
+/**
+ * Sound Effects models, best first. v3 is in limited access: ElevenLabs refuses it to accounts without it (a 4xx), and v2
+ * makes the take instead; v3 is asked again an hour later, in case the account got it.
+ */
+export const SOUND_MODELS = ["eleven_text_to_sound_v3", "eleven_text_to_sound_v2"] as const;
+export type SoundModel = (typeof SOUND_MODELS)[number];
+const SOUND_MODEL_RETRY = 3600_000;
+let bestRefusedAt = -Infinity;
+/** Forgets that v3 was refused (tests). */
+export const resetSoundModels = () => { bestRefusedAt = -Infinity; };
 // The text-to-speech-with-timestamps answer: the audio and the timing of each character, as written and as spoken.
 const timings = z.object({ characters: z.array(z.string()), character_start_times_seconds: z.array(z.number()), character_end_times_seconds: z.array(z.number()) });
 const speechAnswer = z.object({ audio_base64: z.string().min(1), alignment: timings.nullish(), normalized_alignment: timings.nullish() });
@@ -83,23 +93,33 @@ export async function speakSample(e: Env, providerVoice: string, text: string) {
 const isMp3 = (b: Uint8Array) => (b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) || (b[0] === 0xff && (b[1] & 0xe0) === 0xe0);
 
 /**
- * A sound effect made from `text` (ElevenLabs Sound Effects), `seconds` long, as an MP3. Once: no automatic retries,
- * each call is billed.
+ * A sound effect made from `text` (ElevenLabs Sound Effects), `seconds` long, as an MP3, and the model that made it:
+ * v3, or v2 when the account can't use v3 (a refused request makes nothing and costs nothing). Once: no automatic
+ * retries of a take that failed, each take made is billed.
  */
-export async function soundEffect(e: Env, text: string, seconds: number) {
+export async function soundEffect(e: Env, text: string, seconds: number): Promise<{ audio: Uint8Array; model: SoundModel }> {
   const key = e.ELEVENLABS_API_KEY?.trim();
   if (!key) throw new ProviderError("SOUND_UNAVAILABLE");
-  const r = await providerFetch(`${SOUND_URL}?output_format=mp3_44100_128`, {
+  const [best, fallback] = SOUND_MODELS;
+  const ask = (model: SoundModel) => providerFetch(`${SOUND_URL}?output_format=mp3_44100_128`, {
     method: "POST", headers: { "xi-api-key": key, "Content-Type": "application/json", Accept: "audio/mpeg" },
-    body: JSON.stringify({ text, duration_seconds: seconds, prompt_influence: 0.5 }), signal: AbortSignal.timeout(120000),
+    body: JSON.stringify({ text, model_id: model, duration_seconds: seconds, prompt_influence: 0.5 }), signal: AbortSignal.timeout(120000),
   }).catch((error) => { throw error instanceof ProviderError ? error : new ProviderError("SOUND_FAILED"); });
+  let model: SoundModel = Date.now() - bestRefusedAt < SOUND_MODEL_RETRY ? fallback : best;
+  let r = await ask(model);
+  if (model === best && [400, 403, 404, 422].includes(r.status)) {
+    await r.body?.cancel();
+    bestRefusedAt = Date.now();
+    console.warn("Sound Effects v3 refused, making the take with v2", { status: r.status });
+    r = await ask(model = fallback);
+  }
   if (!r.ok) {
     await r.body?.cancel();
     throw new ProviderError(r.status === 401 || r.status === 402 ? "SOUND_UNAVAILABLE" : r.status === 429 ? "SOUND_BUSY" : "SOUND_FAILED");
   }
   const audio = new Uint8Array(await r.arrayBuffer());
   if (audio.length < 500 || audio.length > 5 * 1024 * 1024 || !isMp3(audio)) throw new ProviderError("SOUND_FAILED");
-  return audio;
+  return { audio, model };
 }
 
 // The forced-alignment answer (ElevenLabs ForcedAlignmentResponseModel): characters and words, each {text, start, end}.

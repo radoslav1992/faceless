@@ -37,3 +37,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build --file renderer/Dockerfile --tag faceless-renderer:ci renderer
+      # The sound mix on the container's own FFmpeg (Debian bookworm, 5.1), which renders every video: the voice, the
+      # looped and ducked music and the sound effects, at their levels.
+      - run: >-
+          docker run --rm --volume "$PWD:/src:ro" --workdir /src faceless-renderer:ci python tests/renderer_test.py
+          SoundEffectsTest ComposeTest.test_music_loops_fades_in_and_out_and_ducks_under_speech
+          ComposeTest.test_slideshow_with_video_voice_ducked_music_captions_and_cover

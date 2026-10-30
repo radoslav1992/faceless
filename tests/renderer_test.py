@@ -172,6 +172,12 @@ def loudness(path, start, length):
                           '-af','volumedetect','-f','null','-'], capture_output=True, text=True).stderr
     return float(re.search(r'mean_volume: (-?[0-9.]+) dB', out).group(1))
 
+def band(path, frequency, start, length):
+    """Mean volume (dB) of one tone of the sound (a narrow band around `frequency`), from `start` for `length` seconds."""
+    out = subprocess.run(['ffmpeg','-nostdin','-ss',str(start),'-t',str(length),'-i',str(path),'-map','0:a:0',
+                          '-af',f'bandpass=f={frequency}:width_type=q:w=20,volumedetect','-f','null','-'], capture_output=True, text=True).stderr
+    return float(re.search(r'mean_volume: (-?[0-9.]+) dB', out).group(1))
+
 def jpeg_segments(data):
     """(marker, body) of each JPEG segment before the image data."""
     assert data[:2] == b'\xff\xd8', 'SOI'
@@ -1190,12 +1196,38 @@ class SoundEffectsTest(RendererTest):
             self.assertNotIn('alimiter', graph)
 
     def test_a_loud_sound_on_the_voice_does_not_clip(self):
-        job = run(self.video([{'input': 6, 'start': 1, 'duration': 1, 'volume': 1}], voice=True))
+        # A voice at full scale and the same file as a sound at full volume (3.5 dB under it): together over 0 dBFS.
+        payload = self.video([{'input': 6, 'start': 1, 'duration': 1, 'volume': 1}], voice=True)
+        job = run({**payload, 'voice': {'input': 6, 'start': 1, 'volume': 1}})
         self.assertEqual(job['status'], 'completed', job)
         out = subprocess.run(['ffmpeg','-nostdin','-i',job['outputs'][0],'-map','0:a:0','-af','volumedetect','-f','null','-'],
                              capture_output=True, text=True).stderr
         self.assertLess(float(re.search(r'max_volume: (-?[0-9.]+) dB', out).group(1)), 0)
         self.assertGreater(loudness(job['outputs'][0], 1.2, 0.5), -10)
+
+    def test_music_and_sounds_are_set_against_the_voice_whatever_their_files_loudness(self):
+        # The same music and sounds made 20 dB quieter (or louder) come out at the same level, set against the voice:
+        # music at 25% 12 dB under it, a sound at 60% 8 dB under it (each told apart by its frequency); a silent one stays silent.
+        make('quiet-music.wav', '-f','lavfi','-i','sine=frequency=220:duration=1','-af','volume=0.1')
+        make('loud-pop.wav', '-f','lavfi','-i','sine=frequency=700:duration=0.3','-af','volume=8')
+        make('hush.wav', '-f','lavfi','-i','anullsrc=r=44100:cl=mono','-t','1')
+        quiet, loud, hush, music = (FIXTURES.url(n) for n in ('quiet-music.wav', 'loud-pop.wav', 'hush.wav', 'music.wav'))
+        made = []
+        for song, pop in ((music, 5), (quiet, 7)):
+            payload = self.video([{'input': 4, 'start': 1.2, 'duration': 1, 'volume': 0.6}, {'input': pop, 'start': 2.5, 'duration': 0.3, 'volume': 0.6},
+                                  {'input': 9, 'start': 3, 'duration': 0.5, 'volume': 1}], voice=True)
+            payload['urls'] += [loud, song, hush]
+            job = run({**payload, 'music': {'input': 8, 'volume': 0.25, 'duck': [[0, 4]]}})
+            self.assertEqual((job['status'], job.get('sounds')), ('completed', 3), job)
+            mp4 = job['outputs'][0]
+            voice = band(mp4, 330, 1.0, 2.0)
+            made.append((band(mp4, 220, 1.0, 2.0) - voice, band(mp4, 1000, 1.3, 0.6) - voice, band(mp4, 700, 2.5, 0.25) - voice))
+        for music_under, sound_under, pop_under in made:
+            self.assertAlmostEqual(music_under, -12, delta=1.5)
+            self.assertAlmostEqual(sound_under, -8, delta=1.5)
+            self.assertAlmostEqual(pop_under, -8, delta=2.5)  # 0.3 s: measured over the blocks around it
+        self.assertAlmostEqual(made[0][0], made[1][0], delta=0.5)
+        self.assertAlmostEqual(made[0][2], made[1][2], delta=0.5)
 
     def test_invalid_sounds_fail_before_any_download(self):
         good = {'input': 4, 'start': 1, 'duration': 0.5, 'volume': 0.6}
