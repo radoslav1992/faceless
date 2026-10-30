@@ -97,13 +97,13 @@ const isMp3 = (b: Uint8Array) => (b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x3
  * v3, or v2 when the account can't use v3 (a refused request makes nothing and costs nothing). Once: no automatic
  * retries of a take that failed, each take made is billed.
  */
-export async function soundEffect(e: Env, text: string, seconds: number): Promise<{ audio: Uint8Array; model: SoundModel }> {
+export async function soundEffect(e: Env, text: string, seconds: number, ms = 120000): Promise<{ audio: Uint8Array; model: SoundModel }> {
   const key = e.ELEVENLABS_API_KEY?.trim();
   if (!key) throw new ProviderError("SOUND_UNAVAILABLE");
   const [best, fallback] = SOUND_MODELS;
   const ask = (model: SoundModel) => providerFetch(`${SOUND_URL}?output_format=mp3_44100_128`, {
     method: "POST", headers: { "xi-api-key": key, "Content-Type": "application/json", Accept: "audio/mpeg" },
-    body: JSON.stringify({ text, model_id: model, duration_seconds: seconds, prompt_influence: 0.5 }), signal: AbortSignal.timeout(120000),
+    body: JSON.stringify({ text, model_id: model, duration_seconds: seconds, prompt_influence: 0.5 }), signal: AbortSignal.timeout(ms),
   }).catch((error) => { throw error instanceof ProviderError ? error : new ProviderError("SOUND_FAILED"); });
   let model: SoundModel = Date.now() - bestRefusedAt < SOUND_MODEL_RETRY ? fallback : best;
   let r = await ask(model);

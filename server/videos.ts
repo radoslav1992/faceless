@@ -15,6 +15,7 @@ import {
 } from "../shared/formats";
 import { storyScript, STORY_MAX_CHARS, STORY_MAX_SECONDS } from "../shared/story";
 import { creditsLabel } from "../shared/credits";
+import { OFFERED } from "./sounds";
 
 // Videos: made from a spec by a run (AI pictures and clips, the voice, the render; for a clip of a long video, where
 // its people are and the render). A series makes them for its posting slots (server/series.ts); people also make
@@ -35,8 +36,9 @@ export async function checkReferences(env: Env, userId: string, spec: Spec, kept
   }
   const items = referencedLibrary(spec);
   if (items.length) {
-    const found = new Map((await env.DB.prepare(`SELECT id,kind FROM library_items WHERE active=1 AND id IN (${items.map(() => "?").join(",")})`)
-      .bind(...items).all<{ id: string; kind: string }>()).results.map((r) => [r.id, r.kind]));
+    // A sound made with one of the owner's videos counts while it waits for review (server/sounds.ts).
+    const found = new Map((await env.DB.prepare(`SELECT id,kind FROM library_items WHERE active=1 AND ${OFFERED} AND id IN (${items.map(() => "?").join(",")})`)
+      .bind(userId, ...items).all<{ id: string; kind: string }>()).results.map((r) => [r.id, r.kind]));
     if (found.size !== items.length) throw new HTTPException(400, { message: "A clip, picture, track or sound in this video is no longer in the library. Choose another one." });
     // Music is a track, the background a clip, a scene a clip or a picture.
     const wrong = (id: string | undefined, kinds: string[]) => !!id && !kinds.includes(found.get(id)!);

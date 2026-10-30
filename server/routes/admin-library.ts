@@ -55,8 +55,10 @@ function tidyTags(tags: string) {
   for (const t of splitTags(tags)) if (!kept.has(t.toLowerCase())) kept.set(t.toLowerCase(), t.slice(0, 40));
   return [...kept.values()].join(", ");
 }
+// `review`: a sound effect made with a video that only its owner is offered until it is approved (server/sounds.ts).
 const adminView = (r: LibraryRow, usage?: number) => ({
   ...libraryView(r), active: !!r.active, rawTags: r.tags, bytes: r.bytes, createdAt: r.created_at, fromMedia: !!r.source_asset, usage: usage ?? 0,
+  review: !!r.review,
 });
 async function row(env: Env, id: string) {
   const r = await env.DB.prepare("SELECT * FROM library_items WHERE id=?").bind(id).first<LibraryRow>();
@@ -269,8 +271,11 @@ adminLibrary.patch("/:id", async (c) => {
   const d = z.object({
     name: fields.name.optional(), description: fields.description.optional(), category: fields.category.optional(), tags: fields.tags.optional(),
     active: z.boolean().optional(), ai: z.boolean().optional(),
+    /** false: approved for everyone (a sound made with a video). */
+    review: z.literal(false).optional(),
   }).parse(await c.req.json());
   await row(c.env, c.req.param("id"));
+  if (d.review === false) await c.env.DB.prepare("UPDATE library_items SET review=0,made_for=NULL WHERE id=?").bind(c.req.param("id")).run();
   await c.env.DB.prepare(
     "UPDATE library_items SET name=COALESCE(?,name),description=COALESCE(?,description),category=COALESCE(?,category),tags=COALESCE(?,tags),active=COALESCE(?,active),ai=COALESCE(?,ai) WHERE id=?",
   ).bind(d.name ?? null, d.description ?? null, d.category ?? null, d.tags === undefined ? null : tidyTags(d.tags), d.active === undefined ? null : Number(d.active),

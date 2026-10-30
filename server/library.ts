@@ -3,16 +3,20 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { App, Env } from "./types";
 import { serveObject } from "./storage";
+import { OFFERED } from "./sounds";
 
 // The shared library people pick from and search: background music (tagged with moods), clips (storytime backgrounds,
 // scenes), pictures (scenes) and sound effects (shared/sounds.ts). Administrators fill it in Admin → Library (server/routes/admin.ts) with a name, a
 // description and tags people search by; items made with AI say so, and videos that use them are disclosed as AI-made.
+// A sound effect made with someone's video waits for review: until it is approved, only they are offered it
+// (server/sounds.ts OFFERED).
 export const library = new Hono<App>();
 export const libraryKinds = ["music", "clip", "image", "sfx"] as const;
 export type LibraryKind = (typeof libraryKinds)[number];
 export type LibraryRow = {
   id: string; kind: LibraryKind; name: string; description: string; category: string; tags: string; object_key: string; thumb_key: string | null; mime: string;
   bytes: number; duration: number; width: number; height: number; ai: number; source_asset: string | null; active: number; created_at: number;
+  review: number; made_for: string | null;
 };
 export const splitTags = (tags: string) => String(tags || "").split(",").map((t) => t.trim()).filter(Boolean);
 export function libraryView(r: LibraryRow) {
@@ -48,12 +52,12 @@ export function searchScore(r: Pick<LibraryRow, "name" | "description" | "tags">
 /** Library items read per search: the library is curated, so it is searched whole. */
 const SEARCHED = 2000;
 /**
- * Active items of these kinds matching a search (best first, else newest first) and one tag, up to `limit`; `tags`
- * lists the tags of the items matching the search (before the tag), for filters.
+ * Active items of these kinds offered to `userId` matching a search (best first, else newest first) and one tag, up to
+ * `limit`; `tags` lists the tags of the items matching the search (before the tag), for filters.
  */
-export async function searchLibrary(env: Env, o: { kinds: readonly LibraryKind[]; q?: string; tag?: string; limit?: number }) {
-  const rows = (await env.DB.prepare(`SELECT * FROM library_items WHERE active=1 AND kind IN (${o.kinds.map(() => "?").join(",")}) ORDER BY created_at DESC LIMIT ?`)
-    .bind(...o.kinds, SEARCHED).all<LibraryRow>()).results;
+export async function searchLibrary(env: Env, userId: string, o: { kinds: readonly LibraryKind[]; q?: string; tag?: string; limit?: number }) {
+  const rows = (await env.DB.prepare(`SELECT * FROM library_items WHERE active=1 AND ${OFFERED} AND kind IN (${o.kinds.map(() => "?").join(",")}) ORDER BY created_at DESC LIMIT ?`)
+    .bind(userId, ...o.kinds, SEARCHED).all<LibraryRow>()).results;
   const terms = searchTerms(o.q || "");
   const found = terms.length
     ? rows.map((r) => ({ r, score: searchScore(r, terms) })).filter((x) => x.score > 0).sort((a, b) => b.score - a.score).map((x) => x.r)
@@ -76,19 +80,20 @@ library.get("/", async (c) => {
   if (q.ids !== undefined) {
     const ids = [...new Set(q.ids.split(",").filter((id) => /^[\w-]{1,40}$/.test(id)))].slice(0, 50);
     const rows = ids.length
-      ? (await c.env.DB.prepare(`SELECT * FROM library_items WHERE active=1 AND id IN (${ids.map(() => "?").join(",")})`).bind(...ids).all<LibraryRow>()).results
+      ? (await c.env.DB.prepare(`SELECT * FROM library_items WHERE active=1 AND ${OFFERED} AND id IN (${ids.map(() => "?").join(",")})`)
+        .bind(c.get("user").id, ...ids).all<LibraryRow>()).results
       : [];
     return c.json({ items: rows.map(libraryView), tags: [] });
   }
-  return c.json(await searchLibrary(c.env, { kinds: q.kind ?? libraryKinds, q: q.q, tag: q.tag, limit: q.limit }));
+  return c.json(await searchLibrary(c.env, c.get("user").id, { kinds: q.kind ?? libraryKinds, q: q.q, tag: q.tag, limit: q.limit }));
 });
 library.get("/:id/file", async (c) => {
-  const r = await c.env.DB.prepare("SELECT object_key FROM library_items WHERE id=? AND active=1").bind(c.req.param("id")).first<{ object_key: string }>();
+  const r = await c.env.DB.prepare(`SELECT object_key FROM library_items WHERE id=? AND active=1 AND ${OFFERED}`).bind(c.req.param("id"), c.get("user").id).first<{ object_key: string }>();
   if (!r) throw new HTTPException(404, { message: "Not found." });
   return serveObject(c.env, r.object_key, c.req.header("Range"), "private, max-age=86400");
 });
 library.get("/:id/thumb", async (c) => {
-  const r = await c.env.DB.prepare("SELECT thumb_key FROM library_items WHERE id=? AND active=1").bind(c.req.param("id")).first<{ thumb_key: string | null }>();
+  const r = await c.env.DB.prepare(`SELECT thumb_key FROM library_items WHERE id=? AND active=1 AND ${OFFERED}`).bind(c.req.param("id"), c.get("user").id).first<{ thumb_key: string | null }>();
   if (!r?.thumb_key) throw new HTTPException(404, { message: "Not found." });
   return serveObject(c.env, r.thumb_key, null, "private, max-age=86400");
 });

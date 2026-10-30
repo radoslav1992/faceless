@@ -358,4 +358,87 @@ describe("library", () => {
     expect(planRender(spec(id(2)), ctx(true)).compose.synthetic).toBe(true);
     expect(planRender(spec(id(2)), ctx(false)).compose.synthetic).toBe(false);
   });
+
+  it("makes a sound the library lacks with ElevenLabs, offered to its owner only until an administrator approves it", async () => {
+    const { env, sqlite, admin, user, upload, userId } = await setup({ ELEVENLABS_API_KEY: "el" });
+    resetSoundModels();
+    const mp3 = new Uint8Array([0x49, 0x44, 0x33, ...new Array(2000).fill(1)]);
+    const whoosh = (await upload({ kind: "sfx", name: "Whoosh", category: "Transition", duration: "1" }, mp3, "audio/mpeg")).data.id;
+    const fire = (await upload({ kind: "sfx", name: "Campfire", category: "Fire", tags: "fire, crackle", duration: "5" }, mp3, "audio/mpeg")).data.id;
+    const made: any[] = [];
+    vi.stubGlobal("fetch", async (input: any, init: any = {}) => {
+      made.push(JSON.parse(init.body));
+      return new Response(mp3, { headers: { "Content-Type": "audio/mpeg" } });
+    });
+    const bells = { code: "new1", name: "Camel Caravan Bells", description: "Brass bells on camels swaying as a caravan walks slowly past", category: "Animals", seconds: 4 };
+    let reply: object = {
+      scenes: [{ id: "s1", sound: "new1" }, { id: "s2", sound: "" }, { id: "s3", sound: "sound1" }],
+      newSounds: [bells, { code: "new2", name: "Unused Drone", description: "A low drone no scene asked for at all", category: "Machines", seconds: 2 }],
+    };
+    const prompts: any[] = [];
+    env.AI.run = async (_model: string, input: any) => {
+      prompts.push(input);
+      return { status: "completed", output_text: JSON.stringify(reply) };
+    };
+    const scenes = [{ text: "The caravan crossed the desert.", picture: "Camels in a line" }, { text: "Nobody spoke.", picture: "A rider" }, { text: "They lit a fire.", picture: "A campfire" }];
+    const choose = (as = user) => as("POST", "/api/story/sounds", { scenes });
+    // The model may describe sounds the list lacks; only the ones a scene plays are made, kept for review.
+    const r = await choose();
+    expect(prompts[0].instructions).toMatch(/newSounds: only when a scene clearly needs a sound/);
+    expect(JSON.parse(prompts[0].input).sounds.map((x: any) => x.name)).toEqual(["Campfire"]);
+    expect(made).toEqual([{ text: bells.description, model_id: "eleven_text_to_sound_v3", duration_seconds: 4, prompt_influence: 0.5 }]);
+    const [newId] = r.data.scenes;
+    expect(r.data).toEqual({ transitionId: whoosh, scenes: [expect.any(String), null, fire] });
+    expect(sqlite.prepare("SELECT kind,name,description,category,tags,ai,review,made_for,active FROM library_items WHERE id=?").get(newId)).toEqual({
+      kind: "sfx", name: "Camel Caravan Bells", description: bells.description, category: "Animals", tags: "camel, caravan, bells", ai: 1, review: 1, made_for: userId, active: 1,
+    });
+    expect(await env.MEDIA.get(`library/${newId}/file.mp3`)).toBeTruthy();
+    // Its owner is offered it (and can play it); nobody else is, until it is approved.
+    const names = async (as: typeof user) => (await as("GET", "/api/library?kind=sfx")).data.items.map((i: any) => i.name).sort();
+    expect(await names(user)).toEqual(["Camel Caravan Bells", "Campfire", "Whoosh"]);
+    expect((await user("GET", `/api/library/${newId}/file`)).status).toBe(200);
+    expect(await names(admin)).toEqual(["Campfire", "Whoosh"]);
+    expect((await admin("GET", `/api/library/${newId}/file`)).status).toBe(404);
+    expect((await admin("GET", `/api/library?ids=${newId}`)).data.items).toEqual([]);
+    // Asked for again by its name, the one made is used: nothing more is made.
+    reply = { scenes: [{ id: "s1", sound: "new1" }], newSounds: [bells] };
+    expect((await choose()).data.scenes[0]).toBe(newId);
+    expect(made).toHaveLength(1);
+    // Administrators see it waiting and approve it for everyone.
+    const listed = (await admin("GET", "/api/admin/library")).data.items.find((i: any) => i.id === newId);
+    expect(listed).toMatchObject({ review: true, ai: true, active: true });
+    expect((await admin("PATCH", `/api/admin/library/${newId}`, { review: false })).data.item.review).toBe(false);
+    expect(await names(admin)).toEqual(["Camel Caravan Bells", "Campfire", "Whoosh"]);
+    expect(sqlite.prepare("SELECT review,made_for FROM library_items WHERE id=?").get(newId)).toEqual({ review: 0, made_for: null });
+    expect((await admin("PATCH", `/api/admin/library/${newId}`, { review: true })).status).toBe(400);
+    // Switched off (SOUND_AUTO_DAILY=0), or ElevenLabs failing: no sound is made and the scene plays none.
+    reply = { scenes: [{ id: "s1", sound: "new1" }], newSounds: [{ ...bells, name: "Desert Wind Howl", description: "Strong desert wind howling over sand dunes at night" }] };
+    env.SOUND_AUTO_DAILY = "0";
+    expect((await choose()).data.scenes[0]).toBeNull();
+    expect(prompts.at(-1).instructions).toMatch(/newSounds: always an empty list/);
+    delete env.SOUND_AUTO_DAILY;
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal("fetch", async () => new Response("{}", { status: 500 }));
+    expect((await choose()).data.scenes[0]).toBeNull();
+    expect((sqlite.prepare("SELECT COUNT(*) AS n FROM library_items WHERE kind='sfx'").get() as any).n).toBe(3);
+  });
+
+  it("makes at most six sounds a day for one person", async () => {
+    const { env, user } = await setup({ ELEVENLABS_API_KEY: "el" });
+    resetSoundModels();
+    let n = 0;
+    const names = ["Camel Bells", "Desert Wind", "Sword Draw", "Horse Gallop", "Ship Bell", "Cannon Blast", "Wolf Howl", "Owl Hoot"];
+    vi.stubGlobal("fetch", async () => new Response(new Uint8Array([0x49, 0x44, 0x33, ...new Array(2000).fill(1)])));
+    env.AI.run = async () => {
+      n++;
+      return { status: "completed", output_text: JSON.stringify({
+        scenes: [{ id: "s1", sound: "new1" }, { id: "s2", sound: "" }, { id: "s3", sound: "new2" }],
+        newSounds: [1, 2].map((k) => ({ code: `new${k}`, name: names[n * 2 + k - 3], description: `${names[n * 2 + k - 3]} heard up close, then fading away`, category: "Animals", seconds: 2 })),
+      }) };
+    };
+    const scenes = [{ text: "One." }, { text: "Two." }, { text: "Three." }];
+    const made = [];
+    for (let i = 0; i < 4; i++) made.push(...(await user("POST", "/api/story/sounds", { scenes })).data.scenes.filter(Boolean));
+    expect(made).toHaveLength(6);
+  });
 });

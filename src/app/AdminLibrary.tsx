@@ -14,7 +14,8 @@ import { soundIdeas, SOUND_MAX_SECONDS, SOUND_MIN_SECONDS, TRANSITION_CATEGORY }
 // the browser makes small samples of the file and a multimodal model suggests them; nothing is saved until Save or
 // Upload. Descriptions, genres, categories and tags are what people search by.
 
-type AdminItem = LibraryItem & { active: boolean; rawTags: string; bytes: number; createdAt: number; fromMedia: boolean; usage: number };
+/** `review`: a sound effect made with a video, offered only to its owner until it is approved for everyone. */
+type AdminItem = LibraryItem & { active: boolean; rawTags: string; bytes: number; createdAt: number; fromMedia: boolean; usage: number; review: boolean };
 type MediaFile = {
   id: string; name: string; ai: boolean; prompt: string; mime: string; bytes: number; duration: number; width: number; height: number; createdAt: number; url: string;
   added: string | null; problem: string | null;
@@ -55,9 +56,12 @@ export function LibraryTab() {
   const [editing, setEditing] = useState<{ item: AdminItem; suggestion?: Suggestion } | null>(null);
   const [deleting, setDeleting] = useState<AdminItem | null>(null);
   const [describing, setDescribing] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState(false);
   const items = data?.items || [];
+  const waiting = items.filter((i) => i.review && i.active).length;
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const shown = items.filter((i) => (kind === "all" || i.kind === kind) && words.every((w) => `${i.name} ${i.description} ${i.category} ${i.rawTags}`.toLowerCase().includes(w)));
+  const shown = items.filter((i) => (kind === "all" || i.kind === kind) && (!reviewing || (i.review && i.active))
+    && words.every((w) => `${i.name} ${i.description} ${i.category} ${i.rawTags}`.toLowerCase().includes(w)));
   /** AI suggestions for an item's details, opened in its editor to check and save. */
   const describe = async (item: AdminItem) => {
     setDescribing(item.id);
@@ -79,6 +83,17 @@ export function LibraryTab() {
       toast(errorText(e), "bad");
     }
   };
+  /** A sound made with a video, approved: offered to everyone. */
+  const approve = async (item: AdminItem) => {
+    change({ ...item, review: false });
+    try {
+      await patch(`/admin/library/${item.id}`, { review: false });
+      toast(`${item.name} is offered to everyone.`, "good");
+    } catch (e) {
+      change(item);
+      toast(errorText(e), "bad");
+    }
+  };
   /** A new item: listed first, then its details opened for checking. */
   const added = (item: AdminItem) => {
     setData((d) => ({ items: [item, ...(d?.items || []).filter((i) => i.id !== item.id)] }));
@@ -91,6 +106,13 @@ export function LibraryTab() {
       <LibraryUpload onUploaded={added} onFromMedia={() => setAdding(true)} />
       <SoundMaker onSaved={(item) => setData((d) => ({ items: [item, ...(d?.items || []).filter((i) => i.id !== item.id)] }))} />
       <section aria-labelledby="library-list-title">
+        {waiting > 0 && (
+          <div className="notice" role="status" style={{ marginBottom: 12 }}>
+            {waiting === 1 ? "A sound effect made with a video waits" : `${waiting} sound effects made with videos wait`} for review: only the person whose
+            video needed it is offered it. Listen, approve the good ones for everyone and switch off the others.{" "}
+            {!reviewing && <button type="button" className="link" onClick={() => setReviewing(true)}>Show them</button>}
+          </div>
+        )}
         <div className="section-head">
           <h2 id="library-list-title">Library items</h2>
           <div className="toolbar">
@@ -105,6 +127,9 @@ export function LibraryTab() {
                   {k === "all" ? "All" : kindPlural[k]} · {counts[k]}
                 </button>
               ))}
+              {(waiting > 0 || reviewing) && (
+                <button type="button" className="chip button" aria-pressed={reviewing} onClick={() => setReviewing((r) => !r)}>Waiting for review · {waiting}</button>
+              )}
             </div>
           </div>
         </div>
@@ -147,7 +172,15 @@ export function LibraryTab() {
                       <td><span className="clip small" title={i.rawTags}>{i.rawTags || <span className="muted">No tags</span>}</span></td>
                       <td className="small">{i.kind === "image" ? "—" : itemLength(i)}</td>
                       <td className="small">{i.usage ? `${i.usage} video${i.usage === 1 ? "" : "s"} or series` : <span className="muted">Not used</span>}</td>
-                      <td><Switch checked={i.active} onChange={(v) => void setActive(i, v)} label={`${i.name} is offered`} /></td>
+                      <td>
+                        <Switch checked={i.active} onChange={(v) => void setActive(i, v)} label={`${i.name} is offered`} />
+                        {i.review && i.active && (
+                          <span className="stack" style={{ gap: 4, marginTop: 6 }}>
+                            <span className="small muted">Made with a video: only its owner, until approved</span>
+                            <button type="button" className="btn sm" onClick={() => void approve(i)}>Approve for everyone</button>
+                          </span>
+                        )}
+                      </td>
                       <td>
                         <div className="icon-actions">
                           <button type="button" className="btn icon ghost" onClick={() => setPreview(i)} aria-label={`Preview ${i.name}`} title="Preview"><Eye size={16} /></button>

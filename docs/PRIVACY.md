@@ -38,6 +38,11 @@ the file is downloaded (then the file is kept like an upload). Videos are never 
 video's transcript is sent to the text model (Cloudflare Workers AI) when the owner finds clips in it; the moments
 found are kept with the video until it is deleted. Transcripts also hold who spoke when (speakers numbered by
 ElevenLabs Scribe, never identified) and the sounds it tagged, such as laughter or applause, for as long as the file.
+When a video needs a sound effect the library lacks, the text model writes a short generic description of the sound
+(instructed never to use names or the video's words) and ElevenLabs makes it from that description alone. The sound
+becomes a library item made for that person (`library_items.made_for`), offered only to them until an administrator
+approves it for everyone or switches it off; deleting the account clears `made_for` (the item is then offered to
+nobody until reviewed).
 To frame a clip the renderer finds the faces in its moment and compares how their lips move while someone talks: it
 only locates people (no face recognition, nothing kept per face), and only the crop's path and the two people's
 positions are stored with the clip.
