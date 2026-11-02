@@ -9,5 +9,5 @@ export const PRODUCT = {
   slug: "hookstreak-shorts",
   tagline: "Faceless videos on autopilot",
   pitch:
-    "Pick a niche, a voice and an art style once. Hookstreak Shorts writes, narrates, illustrates and subtitles a new short video for every slot in your schedule, ready for TikTok, YouTube Shorts and Instagram Reels. Posting straight to them is coming soon.",
+    "Pick a niche, a voice and an art style once. Hookstreak Shorts writes, narrates, illustrates and subtitles a new short video for every slot in your schedule, ready for TikTok, YouTube Shorts and Instagram Reels, and posts it straight to YouTube. Posting to TikTok and Instagram is coming soon.",
 } as const;

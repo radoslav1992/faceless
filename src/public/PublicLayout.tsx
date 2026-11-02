@@ -174,12 +174,18 @@ export function PublicLayout() {
               <ul>
                 <li><Link to="/terms">Terms of Use</Link></li>
                 <li><Link to="/privacy">Privacy Policy</Link></li>
+                <li><a href="https://www.youtube.com/t/terms" target="_blank" rel="noreferrer">YouTube Terms of Service</a></li>
+                <li><a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer">Google Privacy Policy</a></li>
                 {config?.company.email && <li><a href={`mailto:${config.company.email}`}>{config.company.email}</a></li>}
               </ul>
             </nav>
           </div>
           <div className="foot-base">
             <p>© {new Date().getFullYear()} {owner}</p>
+            {/* YouTube API Services: the branding and links YouTube's developer policies ask for, next to our own policies. */}
+            <p>{PRODUCT.name} uses YouTube API Services to post to the YouTube channels you connect. By connecting one, you agree to the{" "}
+              <a href="https://www.youtube.com/t/terms" target="_blank" rel="noreferrer">YouTube Terms of Service</a>; see also the{" "}
+              <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer">Google Privacy Policy</a>.</p>
             <p>TikTok, YouTube and Instagram are trademarks of their owners. {PRODUCT.name} is not affiliated with them.</p>
           </div>
         </div>

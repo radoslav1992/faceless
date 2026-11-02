@@ -123,7 +123,7 @@ export function StyleGallery({ to }: { to: (id: string) => string }) {
 export const homeFaq: [string, string][] = [
   ["Do I have to make the videos myself?", `No. Pick a style and a topic once and ${PRODUCT.name} writes the script, records the voice, draws a picture for every sentence, adds subtitles and music, and renders the video. You can also make single videos whenever you like.`],
   ["Can I edit a video before it goes out?", "Yes. Every video opens in the editor: change the words, redo a picture, swap the voice, music or subtitle style, or move scenes on the timeline. Edits to text and timing are free."],
-  ["Does it post to my accounts?", "Posting straight to TikTok, YouTube Shorts and Instagram Reels is coming soon. Until then, every video is ready to download (with an e-mail when it's made), so you can upload it yourself."],
+  ["Does it post to my accounts?", "Yes, to YouTube: connect your channel and your Shorts post straight to it, now or on your schedule, with the title, description, privacy and \"made for kids\" answer you choose. Posting to TikTok and Instagram Reels is coming soon; until then, download those videos (you get an e-mail when each one is made) and upload them yourself."],
   ["Can I choose when my videos are made?", "Yes. Each series has its own days, times and time zone. Every episode is made several hours ahead of its slot."],
   ["Can I see upcoming videos before their slot?", "Yes. The series page lists the coming slots and the episodes already made for them, with their status. You get an e-mail when each one is ready, and you can turn on review to approve each one."],
   ["Can I download my videos?", "Always. Every video downloads as a 1080 × 1920 MP4, on every plan, including the free trial."],
@@ -225,7 +225,7 @@ const included: [typeof Mic, string, string][] = [
   [Mic, "Natural AI voices", "Narrators that sound human, or your own recording, timed word by word."],
   [ImageIcon, "A picture for every sentence", "Drawn in one style from start to finish (cinematic, anime, watercolor, comic and more), or your own clips."],
   [Captions, "Subtitles that pop", "Word-by-word captions with the key words in colour, in the style you choose."],
-  [Send, "Ready on schedule", "Made ahead of your days and times, ready to approve and download. Posting straight to TikTok, YouTube Shorts and Instagram Reels is coming soon."],
+  [Send, "Ready on schedule", "Made ahead of your days and times, ready to approve, then posted to your YouTube channel or downloaded. Posting to TikTok and Instagram Reels is coming soon."],
   [Download, "Yours to keep", "Every video downloads as a 1080 × 1920 MP4, on every plan."],
 ];
 
@@ -298,7 +298,7 @@ export function Landing() {
             </div>
             <div className="compare-card yes">
               <div className="compare-top"><h3>{PRODUCT.name}</h3><Check size={20} aria-label="Fast" /></div>
-              <p>Original faceless videos written and made on autopilot for TikTok, YouTube and Instagram, with your review whenever you want it. Auto-posting is coming soon.</p>
+              <p>Original faceless videos written and made on autopilot for TikTok, YouTube and Instagram, with your review whenever you want it. They post straight to YouTube Shorts; TikTok and Instagram are coming soon.</p>
             </div>
           </div>
         </div>
@@ -334,7 +334,7 @@ export function Landing() {
             <ul className="system-steps">
               <li><span className="pub-icon"><Compass size={20} aria-hidden="true" /></span><div><h3>Pick a style</h3><p>Start from a proven faceless format, or describe your own topic.</p></div></li>
               <li><span className="pub-icon"><Wand2 size={20} aria-hidden="true" /></span><div><h3>Shape the draft</h3><p>The AI writes the script and draws every scene. Change any word, picture, voice or subtitle before it goes out.</p></div></li>
-              <li><span className="pub-icon"><CalendarClock size={20} aria-hidden="true" /></span><div><h3>Stay consistent</h3><p>Set the days and times. Each episode is made ahead of its slot, or waits for your OK. Auto-posting is coming soon.</p></div></li>
+              <li><span className="pub-icon"><CalendarClock size={20} aria-hidden="true" /></span><div><h3>Stay consistent</h3><p>Set the days and times. Each episode is made ahead of its slot, or waits for your OK, then posts to your YouTube channel. Posting to TikTok and Instagram is coming soon.</p></div></li>
             </ul>
           </div>
           <AppMock />
@@ -375,7 +375,7 @@ export function Landing() {
             <div className="feature"><Sparkles size={22} className="accent-text" aria-hidden="true" /><h3>A virality score for every moment</h3><p>Each moment is scored on its hook, payoff, clarity and energy, and on the laughs and applause it gets, with a reason it works. An estimate, never a promise of views. Ask for a topic if you like.</p></div>
             <div className="feature"><ScanFace size={22} className="accent-text" aria-hidden="true" /><h3>Framed on the speaker</h3><p>The vertical crop cuts to whoever is talking: we hear who speaks and watch whose lips move. Or stack two speakers, put your camera over your screen, or place the crop yourself.</p></div>
             <div className="feature"><Columns2 size={22} className="accent-text" aria-hidden="true" /><h3>Captions and cuts</h3><p>Word-by-word captions in twenty-one styles, a hook title, and long pauses and filler words cut out.</p></div>
-            <div className="feature"><Scissors size={22} className="accent-text" aria-hidden="true" /><h3>Edit and download</h3><p>Trim any clip on its words, then download the batch. Posting them to your channels one a day, or whenever you choose, is coming soon.</p></div>
+            <div className="feature"><Scissors size={22} className="accent-text" aria-hidden="true" /><h3>Edit and download</h3><p>Trim any clip on its words, then post the batch to your YouTube channel, one a day or whenever you choose, or download it. Posting to TikTok and Instagram is coming soon.</p></div>
           </div>
           <p className="price-note"><Link className="text-link" to={user ? "/app/clips" : `/register?next=${encodeURIComponent("/app/clips")}`}>Clip a video <ArrowRight size={15} aria-hidden="true" /></Link></p>
         </div>
