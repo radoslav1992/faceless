@@ -156,8 +156,10 @@ What each step lifts, for reference:
   **private**, whatever `privacyStatus` we send, until the project passes the YouTube compliance audit. Ours has not
   been: uploads since October 2026 went out public.
 - Quota: uploads have their own allowance, by default 100 `videos.insert` calls a day per project for all customers
-  together (Google's quota calculator, checked October 2026); reading channels and stats comes out of the separate
-  10,000 units a day. Ask for more in the audit form before customers get near it.
+  together (Google's quota calculator, checked October 2026), restarting at midnight Pacific time; reading channels and
+  stats comes out of the separate 10,000 units a day. We count the uploads and e-mail `ADMIN_EMAILS` at 80% of
+  `YOUTUBE_UPLOADS_DAILY` and when YouTube refuses one for quota (OPERATIONS.md, "YouTube upload limit"): ask for
+  more in the audit form then, and set `YOUTUBE_UPLOADS_DAILY` to the new limit once Google raises it.
 
 What the audit checks on our side, already in place: the Terms say that connecting YouTube means agreeing to the
 YouTube Terms of Service (`/terms#social-accounts`); the privacy policy's "YouTube API Services" section

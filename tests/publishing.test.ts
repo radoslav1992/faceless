@@ -7,6 +7,7 @@ import { videoReady } from "../server/series";
 import { tiktokChunks } from "../server/social/tiktok";
 import { dueForStats } from "../server/metrics";
 import { keepYouTubeData } from "../server/youtube-data";
+import { uploadsToday } from "../server/youtube-quota";
 import { specSchema } from "../shared/formats";
 import { seriesSettingsSchema } from "../shared/series";
 import type { Tokens } from "../server/social";
@@ -767,6 +768,22 @@ describe("publishing", () => {
     expect(await open<Tokens>(s.env, stored.credentials)).toMatchObject({ accessToken: "youtube-access-2", refreshToken: "youtube-refresh" });
     // Google refresh tokens do not expire on a schedule.
     expect(stored).toMatchObject({ expires_at: null, status: "active" });
+    // One videos.insert call against the project's daily upload allowance.
+    expect(await uploadsToday(s.env)).toEqual({ count: 1, limit: 100, refused: false });
+  });
+
+  it("notes when YouTube refuses an upload because the project's daily allowance is used up", async () => {
+    const s = setup();
+    const account = await addAccount(s, "youtube");
+    const pubId = addPublication(s, await addVideo(s), account, "youtube");
+    const calls = mockFetch([["POST", "https://www.googleapis.com/upload/youtube/v3/videos", () =>
+      ok({ error: { code: 403, message: "quota", errors: [{ domain: "youtube.quota", reason: "quotaExceeded" }] } }, { status: 403 })]]);
+    const p = await publish(s, pubId);
+    // Tried again after 1, 5 and 15 minutes, then given up.
+    expect(calls).toHaveLength(4);
+    expect(p).toMatchObject({ status: "failed", ticket: null });
+    // Nothing was uploaded, so nothing is counted, but administrators are told (youtube-quota.ts).
+    expect(await uploadsToday(s.env)).toEqual({ count: 0, limit: 100, refused: true });
   });
 
   it("resumes an interrupted YouTube upload instead of uploading a second video (and posts privately when asked)", async () => {

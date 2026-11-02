@@ -9,6 +9,7 @@ when a provider fails, and how to handle withdrawals and free plans. Setting up 
 | Signal | Where | What it means |
 | --- | --- | --- |
 | E-mail "Hookstreak Shorts: maintenance needs a look" | inboxes in `ADMIN_EMAILS` | The hourly maintenance found something overdue or failing (section 3) |
+| E-mail "Hookstreak Shorts: YouTube uploads at 80% of today's limit" or "…YouTube refused uploads, daily limit reached" | inboxes in `ADMIN_EMAILS` | YouTube uploads are near or at the project's daily limit (section 3, "YouTube upload limit") |
 | Admin → **Operations** | the app (`/app/admin?tab=operations`) | Failures of the last 24 hours by area and code, work still open, accounts to reconnect, cleanup, Stripe, manual checks, the last maintenance run. Same data: `GET /api/admin/operations` |
 | Admin → **Overview** | the app | Users, paying customers (free plans counted apart), videos, active series, runs and publications of the last 24 hours, and which features are configured |
 | `GET /api/health` | an external uptime monitor | `200 {"ok":true}` when the Worker runs and D1 answers, `503 {"ok":false}` otherwise. Uncached |
@@ -116,6 +117,24 @@ as `Operator alert not sent` and tried again next hour; it never stops maintenan
 
 The thresholds are constants at the top of `server/operations.ts` (`FAILURE_BURST`, `RECONNECT_BURST`,
 `METRICS_BURST`).
+
+### YouTube upload limit
+
+Google allows the API project a number of YouTube uploads (`videos.insert` calls) a day for all customers together,
+100 until it raises it through the audit and quota extension form; the day restarts at midnight Pacific time. Each
+upload session YouTube opens is counted in `operations_state` (key `youtube-uploads`, by Pacific day;
+`server/youtube-quota.ts`), and every five minutes maintenance compares the count with `YOUTUBE_UPLOADS_DAILY`. It
+e-mails `ADMIN_EMAILS` (and logs `YouTube upload quota`):
+
+- once a day when uploads reach **80%** of the limit: "YouTube uploads at 80% of today's limit";
+- once a day when YouTube refused an upload with `quotaExceeded`: "YouTube refused uploads, daily limit reached". Those
+  posts fail after three retries (about 20 minutes) with "YouTube is limiting how often this account can post", and
+  people post them again after midnight Pacific time.
+
+What to do: check the exact usage in the Google Cloud console (APIs & Services → YouTube Data API v3 → Quotas), send
+the [audit and quota extension form](https://support.google.com/youtube/contact/yt_api_form) with it, and once Google
+raises the limit set `YOUTUBE_UPLOADS_DAILY` to the new number (no deploy needed). Our count can differ slightly from
+Google's. A failed send is logged as `YouTube quota alert not sent` and tried again five minutes later.
 
 ## 4. Failure codes
 

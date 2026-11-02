@@ -59,6 +59,8 @@ export interface Env {
   ELEVENLABS_API_KEY?: string;
   /** Sound effects made with videos for everyone per day (server/sounds.ts; default 40, 0 switches it off). */
   SOUND_AUTO_DAILY?: string;
+  /** YouTube uploads (videos.insert calls) a day Google allows the project, 100 by default: the quota warning follows it. */
+  YOUTUBE_UPLOADS_DAILY?: string;
   /** 32 random bytes, base64: encrypts social OAuth tokens at rest. */
   TOKEN_ENCRYPTION_KEY?: string;
   TIKTOK_CLIENT_KEY?: string;

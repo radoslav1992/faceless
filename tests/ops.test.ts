@@ -5,6 +5,7 @@ import { maintenance, drainCleanup } from "../server/maintenance";
 import { addMonths, confirmPendingContracts, reconcileStripe, webhook } from "../server/billing";
 import { applyRetention } from "../server/retention";
 import { attention, operationsSnapshot, reviewRuns } from "../server/operations";
+import { countUpload, quotaDay, reportUploads, uploadsToday } from "../server/youtube-quota";
 import { IMMEDIATE_START_TEXT, IMMEDIATE_START_VERSION, withdrawalRefund } from "../shared/withdrawal";
 import { now, DAY, HOUR } from "../server/types";
 import { call, signedIn, testEnv } from "./helpers";
@@ -511,6 +512,99 @@ describe("retention", () => {
 });
 
 /* ------------------------------------------------------------------------------------------------ operations */
+
+describe("YouTube upload allowance", () => {
+  // Maintenance checks it every five minutes, at minutes ending in 4 or 9.
+  const PASS = Date.UTC(2026, 9, 9, 12, 19);
+  const setCount = (sqlite: any, count: number, refused = 0) =>
+    sqlite.prepare("INSERT INTO operations_state(key,value,updated_at) VALUES ('youtube-uploads',?,0) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .run(JSON.stringify({ day: quotaDay(), count, refused }));
+
+  it("counts days in Pacific time, when Google's quota restarts", () => {
+    expect(quotaDay(Date.UTC(2026, 10, 2, 7, 59))).toBe("2026-11-01");
+    expect(quotaDay(Date.UTC(2026, 10, 2, 8, 0))).toBe("2026-11-02");
+    // Summer time: UTC−7.
+    expect(quotaDay(Date.UTC(2026, 6, 1, 6, 59))).toBe("2026-06-30");
+    expect(quotaDay(Date.UTC(2026, 6, 1, 7, 0))).toBe("2026-07-01");
+  });
+
+  it("counts parallel uploads, a refusal without an upload, and starts again each day", async () => {
+    const { env, sqlite } = testEnv();
+    expect(await uploadsToday(env)).toEqual({ count: 0, limit: 100, refused: false });
+    await Promise.all([countUpload(env), countUpload(env), countUpload(env)]);
+    expect(await uploadsToday(env)).toEqual({ count: 3, limit: 100, refused: false });
+    await countUpload(env, true);
+    expect(await uploadsToday(env)).toEqual({ count: 3, limit: 100, refused: true });
+    sqlite.prepare("UPDATE operations_state SET value=json_set(value,'$.day','2026-01-01') WHERE key='youtube-uploads'").run();
+    expect(await uploadsToday(env)).toEqual({ count: 0, limit: 100, refused: false });
+    await countUpload(env);
+    expect(await uploadsToday(env)).toEqual({ count: 1, limit: 100, refused: false });
+    // The limit Google set, once raised; anything else is the default.
+    expect(await uploadsToday({ ...env, YOUTUBE_UPLOADS_DAILY: "300" })).toMatchObject({ limit: 300 });
+    for (const v of ["lots", "0", "-5", "2.5"]) expect(await uploadsToday({ ...env, YOUTUBE_UPLOADS_DAILY: v })).toMatchObject({ limit: 100 });
+    // A broken database never stops an upload.
+    const broken = { ...env, DB: { prepare: () => { throw new Error("D1 down"); } } };
+    await expect(countUpload(broken)).resolves.toBeUndefined();
+    expect(console.error).toHaveBeenCalledWith("YouTube upload not counted");
+  });
+
+  it("e-mails administrators at 80% of the day's uploads and when YouTube refuses one, each once a day", async () => {
+    const { env, sqlite } = testEnv({ ADMIN_EMAILS: "admin@example.com, ops@example.com" });
+    setCount(sqlite, 79);
+    await maintenance(env, PASS);
+    expect(env.EMAIL.sent).toHaveLength(0);
+    setCount(sqlite, 80);
+    // Not a checking minute.
+    await maintenance(env, Date.UTC(2026, 9, 9, 12, 18));
+    expect(env.EMAIL.sent).toHaveLength(0);
+    await maintenance(env, PASS);
+    expect(env.EMAIL.sent.map((m: any) => m.to).sort()).toEqual(["admin@example.com", "ops@example.com"]);
+    const mail = env.EMAIL.sent[0];
+    expect(mail.subject).toBe("Hookstreak Shorts: YouTube uploads at 80% of today's limit");
+    expect(mail.text).toContain("YouTube uploads today: 80 of the 100 a day Google allows Hookstreak Shorts, for all customers together.");
+    expect(mail.text).toContain("https://support.google.com/youtube/contact/yt_api_form");
+    expect(mail.text).toContain("set YOUTUBE_UPLOADS_DAILY in Cloudflare to the new limit");
+    expect(console.warn).toHaveBeenCalledWith("YouTube upload quota", { count: 80, limit: 100, refused: false });
+    // More uploads the same day: no second warning.
+    setCount(sqlite, 95);
+    await maintenance(env, PASS);
+    expect(env.EMAIL.sent).toHaveLength(2);
+    // YouTube refused one: that is news, once.
+    setCount(sqlite, 100, 1);
+    await maintenance(env, PASS);
+    expect(env.EMAIL.sent).toHaveLength(4);
+    expect(env.EMAIL.sent[2].subject).toBe("Hookstreak Shorts: YouTube refused uploads, daily limit reached");
+    expect(env.EMAIL.sent[2].text).toContain("(100 uploads counted today; YOUTUBE_UPLOADS_DAILY is 100)");
+    await maintenance(env, PASS);
+    expect(env.EMAIL.sent).toHaveLength(4);
+    // The next day starts over.
+    sqlite.prepare("UPDATE operations_state SET value=json_set(value,'$.day','2026-01-01') WHERE key='youtube-uploads-alert'").run();
+    setCount(sqlite, 85);
+    await maintenance(env, PASS);
+    expect(env.EMAIL.sent).toHaveLength(6);
+  });
+
+  it("follows a raised limit, and tries a failed e-mail again on the next pass", async () => {
+    const { env, sqlite } = testEnv({ YOUTUBE_UPLOADS_DAILY: "300" });
+    setCount(sqlite, 200);
+    await reportUploads(env);
+    expect(env.EMAIL.sent).toHaveLength(0);
+    setCount(sqlite, 240);
+    const send = env.EMAIL.send;
+    env.EMAIL.send = async () => { throw new Error("mail down"); };
+    await reportUploads(env);
+    expect(console.error).toHaveBeenCalledWith("YouTube quota alert not sent", { recipients: 1 });
+    env.EMAIL.send = send;
+    await reportUploads(env);
+    expect(env.EMAIL.sent).toHaveLength(1);
+    expect(env.EMAIL.sent[0].text).toContain("YouTube uploads today: 240 of the 300 a day");
+    // Without administrators there is no one to tell.
+    const { env: alone, sqlite: db } = testEnv({ ADMIN_EMAILS: "" });
+    setCount(db, 99);
+    await reportUploads(alone);
+    expect(alone.EMAIL.sent).toHaveLength(0);
+  });
+});
 
 describe("operations summary", () => {
   function ops() {

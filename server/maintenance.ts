@@ -10,15 +10,16 @@ import { makePreviews } from "./examples";
 import { deleteHeyGenCopies } from "./avatars";
 import { refreshMetrics } from "./metrics";
 import { keepYouTubeData } from "./youtube-data";
+import { reportUploads } from "./youtube-quota";
 import { applyRetention } from "./retention";
 import { describeError } from "./error-report";
 import { flagForReview, recordMaintenanceRun, recordStageFailures, reportAttention, reviewRuns } from "./operations";
 
 // Cron (every minute): due videos are published, series whose next slot is near get their episode started and new
-// style examples get their previews; every five minutes stuck work is recovered and a batch of video stats is read
-// from the networks; once an hour (minute 17) the operator summary goes out first, then files are cleaned up, failed
-// provider work is set aside for a check, retention runs, contracts are confirmed and (at 03:17 UTC) Stripe is
-// reconciled, social tokens renewed and YouTube data checked.
+// style examples get their previews; every five minutes stuck work is recovered, a batch of video stats is read from
+// the networks and today's YouTube uploads are checked against the daily limit; once an hour (minute 17) the operator
+// summary goes out first, then files are cleaned up, failed provider work is set aside for a check, retention runs,
+// contracts are confirmed and (at 03:17 UTC) Stripe is reconciled, social tokens renewed and YouTube data checked.
 export async function maintenance(e: Env, at = Date.now()) {
   const d = new Date(at), minute = d.getUTCMinutes(), hourly = minute === 17, startedAt = now();
   // Per pass (passes can overlap): a stage that throws never skips the others, and is reported by the next summary.
@@ -38,6 +39,8 @@ export async function maintenance(e: Env, at = Date.now()) {
   if (minute % 5 === 0) await stage("runs", () => reconcileRuns(e));
   // Offset from the runs stage; each pass reads at most 40 posts (metrics.ts).
   if (minute % 5 === 2) await stage("stats", () => refreshMetrics(e));
+  // Warns administrators when YouTube uploads near the project's daily limit (youtube-quota.ts).
+  if (minute % 5 === 4) await stage("youtube-quota", () => reportUploads(e));
   if (hourly) {
     await stage("cleanup", () => drainCleanup(e));
     await stage("heygen", () => deleteHeyGenCopies(e));
