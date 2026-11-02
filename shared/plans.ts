@@ -29,7 +29,7 @@ export const plans = [
     videoMb: 500,
     popular: false,
     description: "Try every video type and post your first videos. No card needed.",
-    features: ["4 credits (up to 2 thirty-second videos)", "All video types and art styles", "1 series on autopilot", "1 social account (posting soon)", "Download in full HD"],
+    features: ["4 credits (up to 2 thirty-second videos)", "All video types and art styles", "1 series on autopilot", "1 connected channel", "Download in full HD"],
   },
   {
     id: "starter",
@@ -44,7 +44,7 @@ export const plans = [
     videoMb: 2000,
     popular: false,
     description: "A few videos a week for one channel.",
-    features: ["30 credits a month", "Up to 15 thirty-second videos a month", "All video types", "Unused credits roll over", "1 social account (posting soon)"],
+    features: ["30 credits a month", "Up to 15 thirty-second videos a month", "All video types", "Unused credits roll over", "1 connected channel"],
   },
   {
     id: "daily",
@@ -59,7 +59,7 @@ export const plans = [
     videoMb: 2000,
     popular: true,
     description: "A new video every day.",
-    features: ["60 credits a month", "Up to 30 thirty-second videos a month", "All video types", "Unused credits roll over", "Up to 100 social accounts (posting soon)"],
+    features: ["60 credits a month", "Up to 30 thirty-second videos a month", "All video types", "Unused credits roll over", "Up to 100 connected channels"],
   },
   {
     id: "double",
@@ -74,7 +74,7 @@ export const plans = [
     videoMb: 2000,
     popular: false,
     description: "Two videos a day, or several channels.",
-    features: ["120 credits a month", "Up to 60 thirty-second videos a month", "All video types", "Unused credits roll over", "Up to 100 social accounts (posting soon)"],
+    features: ["120 credits a month", "Up to 60 thirty-second videos a month", "All video types", "Unused credits roll over", "Up to 100 connected channels"],
   },
   {
     id: "studio",
@@ -89,7 +89,7 @@ export const plans = [
     videoMb: 2000,
     popular: false,
     description: "Agencies and networks of channels.",
-    features: ["350 credits a month", "Up to 175 thirty-second videos a month", "All video types", "Unused credits roll over", "Up to 100 social accounts (posting soon)", "Priority support"],
+    features: ["350 credits a month", "Up to 175 thirty-second videos a month", "All video types", "Unused credits roll over", "Up to 100 connected channels", "Priority support"],
   },
 ] as const;
 export type Plan = (typeof plans)[number];
