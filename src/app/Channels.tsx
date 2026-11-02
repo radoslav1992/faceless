@@ -12,9 +12,7 @@ import { comingSoon, isPlatform, platformIds, platforms, type PlatformId } from 
 
 const beforeYouConnect: Record<PlatformId, string> = {
   tiktok: "Until our TikTok app passes TikTok's audit, videos may post as private (visible only to you).",
-  youtube:
-    "Videos post as Shorts (vertical, up to 3 minutes). The Google account needs a YouTube channel. Until Google finishes reviewing our app, " +
-    "Google may warn that it hasn't verified it, and videos may post as private (visible only to you).",
+  youtube: "Videos post as Shorts (vertical, up to 3 minutes). The Google account needs a YouTube channel.",
   instagram: "Needs an Instagram professional account (Business or Creator). You can switch for free in the Instagram app's settings.",
 };
 export const callbackErrors: Record<string, string> = {

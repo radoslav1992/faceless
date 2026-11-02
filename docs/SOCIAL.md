@@ -142,13 +142,19 @@ accounts stay connected) and when publishing. Graph API version: `v23.0` (`serve
 4. Publish the app and submit for **verification** (sensitive scopes: demo video, privacy policy).
 5. Fill in the **YouTube API Services audit and quota extension** form.
 
-Limits until then:
+Status: the app is **in production** and **verified** for `youtube.upload` and `youtube.readonly` (Google approved
+it on 2 November 2026), so people no longer see the "Google hasn't verified this app" warning and there is no
+100-user limit. Keep the consent screen and scopes as they are: a new scope or a change to the consent screen needs a
+new verification. The YouTube API Services audit (step 5) is separate and still to pass.
+
+What each step lifts, for reference:
 
 - **Testing** status: only listed test users can connect, and their refresh tokens expire after 7 days.
 - **Unverified** app: people see the "Google hasn't verified this app" warning, and at most 100 users can ever
   connect.
-- **Unaudited API project** (created after 28 July 2020): every video uploaded through the API is locked to
-  **private**, whatever `privacyStatus` we send, until the project passes the YouTube compliance audit.
+- **Unaudited API project** (created after 28 July 2020): Google may lock videos uploaded through the API to
+  **private**, whatever `privacyStatus` we send, until the project passes the YouTube compliance audit. Ours has not
+  been: uploads since October 2026 went out public.
 - Quota: uploads have their own allowance, by default 100 `videos.insert` calls a day per project for all customers
   together (Google's quota calculator, checked October 2026); reading channels and stats comes out of the separate
   10,000 units a day. Ask for more in the audit form before customers get near it.
