@@ -33,8 +33,12 @@ async function call(env: Env, path: string, init: RequestInit & { timeout?: numb
   const { timeout = 45000, prefix = "AVATAR", ...rest } = init;
   const r = await providerFetch(`${API}${path}`, { ...rest, headers: { ...headers(env, prefix), ...(rest.headers as Record<string, string>) }, signal: AbortSignal.timeout(timeout) })
     .catch((e) => { throw e instanceof ProviderError ? e : new ProviderError(`${prefix}_FAILED`); });
-  // A clip's refusal is read like fal's (a content filter, the account's credits: HeyGen answers 400 for those too).
-  if (!r.ok) throw prefix === "GENERATION" ? new ProviderError(await failureCode(r, "GENERATION")) : await failure(r);
+  if (!r.ok && prefix === "GENERATION") {
+    // A clip's refusal is read like fal's (a content filter, the account's credits: HeyGen answers 400 for those too).
+    console.warn("HeyGen clip request failed", { status: r.status });
+    throw new ProviderError(await failureCode(r, "GENERATION"));
+  }
+  if (!r.ok) throw await failure(r);
   return r;
 }
 
@@ -178,6 +182,8 @@ export async function heygenClipStatus(env: Env, jobId: string): Promise<{ done:
   if (body?.error || !data || data.video_id !== jobId) throw new ProviderError("GENERATION_FAILED");
   if (data.status === "pending" || data.status === "processing") return { done: false };
   if (data.status === "completed" && typeof data.video_url === "string" && data.video_url) return { done: true, url: data.video_url };
-  // Failed or cancelled: a content filter's refusal, or anything else.
-  throw new ProviderError(/moderat|policy|safety|nsfw/i.test(`${data.failure_message || ""} ${data.failure_code || ""}`) ? "GENERATION_REJECTED" : "GENERATION_FAILED");
+  // Failed or cancelled: a content filter's refusal, or anything else. HeyGen's short code is logged (never its message).
+  const rejected = /moderat|policy|safety|nsfw/i.test(`${data.failure_message || ""} ${data.failure_code || ""}`);
+  console.warn("HeyGen clip failed", { jobId, status: String(data.status).replace(/[^\w.-]/g, "").slice(0, 20), code: String(data.failure_code ?? "").replace(/[^\w.-]/g, "").slice(0, 60), rejected });
+  throw new ProviderError(rejected ? "GENERATION_REJECTED" : "GENERATION_FAILED");
 }

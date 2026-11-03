@@ -113,8 +113,9 @@ series.get("/:id", async (c) => {
   const user = c.get("user");
   const s = await ownedSeries(c.env, user.id, c.req.param("id"));
   const settings = seriesSettings(s), t = now();
-  // The coming slots (two weeks) beside the episodes already made for them.
-  const upcoming = s.status === "active" ? slots(settings.schedule, t, 14).slice(0, 30) : [];
+  // The coming slots (two weeks) beside the episodes already made for them. A slot before the series' next one that
+  // has no episode is never made (a series started or resumed just before it begins at the slot after).
+  const upcoming = s.status === "active" ? slots(settings.schedule, t, 14) : [];
   const videos = (await c.env.DB.prepare(
     `SELECT v.*,(SELECT phase FROM runs r WHERE r.video_id=v.id AND r.status IN ('queued','running') LIMIT 1) AS phase,
       (SELECT json_group_array(json_object('id',x.id,'platform',x.platform,'accountName',x.account_name,'scheduledAt',x.scheduled_at,'status',x.status,'draft',x.draft,'url',x.url,'error',x.error,'views',x.views,'likes',x.likes)) FROM publications x WHERE x.video_id=v.id AND x.status<>'canceled') AS publications
@@ -124,7 +125,7 @@ series.get("/:id", async (c) => {
   return c.json({
     series: seriesView(s),
     videos: videos.map((v) => videoView(v)),
-    upcoming: upcoming.map((at) => ({ at, made: made.has(at) })),
+    upcoming: upcoming.filter((at) => made.has(at) || s.next_slot == null || at >= s.next_slot).slice(0, 30).map((at) => ({ at, made: made.has(at) })),
   });
 });
 series.patch("/:id", async (c) => {

@@ -86,6 +86,21 @@ describe("starting a series", () => {
     expect(page.upcoming.length).toBeGreaterThan(20);
     expect((await call(worker, env, "GET", `/api/series/${s.id}`, undefined, signedIn(sqlite).cookie)).status).toBe(404);
   });
+
+  it("never lists a slot the series won't make: started minutes before a posting time, it begins at the next", async () => {
+    // 08:55 UTC: the 09:00 slot is too close, so the first episode is for 18:00 (and the page starts there).
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-11-03T08:55:00Z"));
+      const { env, user, create, row } = setup();
+      const s = row((await create()).data.series.id);
+      expect(s.next_slot).toBe(Date.parse("2026-11-03T18:00:00Z") / 1000);
+      const page = (await call(worker, env, "GET", `/api/series/${s.id}`, undefined, user.cookie)).data;
+      expect(page.upcoming[0]).toEqual({ at: s.next_slot, made: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("episodes", () => {

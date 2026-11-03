@@ -284,6 +284,12 @@ again by itself.
   (`HeyGen copy could not be deleted; remove it in HeyGen` after two weeks: delete it in HeyGen by hand). A presenter
   HeyGen stopped supporting can be hidden in Admin → Presenters (its videos then fail with `AVATAR_GONE` only if they
   need a new presenter video).
+- **HeyGen Video 1 clips** (`heygen-video-1`; `GENERATION_*` like fal's): a clip HeyGen fails to make is asked for
+  once more as a new job (`HeyGen clip failed, asking for it again`, after its copy is deleted); a second failure ends
+  the run. `HeyGen clip failed` carries HeyGen's short code (`code`, e.g. `generation_failed`; `rejected: true` for a
+  content filter's refusal, which is not asked for again) and `HeyGen clip request failed` the HTTP status of a refused
+  call. Check the key and the API credits in HeyGen; `FAL_CLIP_MODEL` back to `kling` switches everyone over without a
+  deploy.
 - **Renderer** (`RENDERER_UNAVAILABLE`, `MEDIA_TIMEOUT`, `MEDIA_LOST`): check Containers in the dashboard (instances
   running, the latest image rolled out, errors). Three containers render one job each; more work waits for a free
   one, and runs time out after about 40 minutes of waiting or rendering.
