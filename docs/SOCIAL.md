@@ -168,8 +168,9 @@ is accessed, stored and shared, how long it is kept, and how to revoke access (d
 security settings page); disconnecting revokes the token and deletes the channel's YouTube data (see "YouTube data"
 below). The app never downloads YouTube videos (the YouTube API Services policies don't allow it): YouTube links are
 refused for imports. The privacy policy also states that the use of data received from Google APIs adheres to the
-Google API Services User Data Policy, including the Limited Use requirements. The Channels page warns that videos may post as private
-until Google finishes its review: take that sentence out of `src/app/Channels.tsx` once the audit passes.
+Google API Services User Data Policy, including the Limited Use requirements. Where the app shows a YouTube post's
+view count, it says "views on YouTube" and links "Watch on YouTube" to the video (`PublicationLine` in
+`src/app/video-ui.tsx`), as YouTube's branding guidelines ask of apps that show its data.
 
 ### YouTube data (what the YouTube API Services policies ask)
 
