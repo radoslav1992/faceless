@@ -721,8 +721,9 @@ function alignment() {
  * ElevenLabs (speech, forced alignment) and fal; `refuseClip` makes the clip model refuse, `refuse` the models it
  * names when their result is read (as Nano Banana does); `timings` false drops them.
  */
-function providers({ refuseClip = false, refuseHeyGen = false, timings = true, refuse = (() => false) as (model: string) => boolean } = {}) {
+function providers({ refuseClip = false, refuseHeyGen = false, heygenFails = 0, timings = true, refuse = (() => false) as (model: string) => boolean } = {}) {
   const calls: { method: string; url: string; body?: any }[] = [];
+  const failing = new Set<string>();
   let n = 0;
   vi.stubGlobal("fetch", async (input: any, init: any = {}) => {
     const url = String(input?.url ?? input), method = init.method || input?.method || "GET";
@@ -740,12 +741,18 @@ function providers({ refuseClip = false, refuseHeyGen = false, timings = true, r
     if (fal && refuse(fal[1])) return Response.json({ detail: [{ type: "content_policy_violation" }] }, { status: 422 });
     if (fal) return Response.json(/kling|minimax\/h3|flux-3-max/.test(fal[1]) ? { video: { url: "https://v3.fal.media/files/clip.mp4" } } : { images: [{ url: "https://v3.fal.media/files/shot.jpg" }] });
     // HeyGen Video 1: a job, then "processing" once, then done (or refused when `refuseHeyGen`); its copy deleted.
-    if (url === "https://api.heygen.com/v3/models/videos" && method === "POST") return Response.json({ data: { status: "pending", video_id: `hv${++n}` } }, { status: 202 });
+    if (url === "https://api.heygen.com/v3/models/videos" && method === "POST") {
+      const id = `hv${++n}`;
+      // The first `heygenFails` jobs fail at HeyGen.
+      if (calls.filter((c) => c.url === url).length <= heygenFails) failing.add(id);
+      return Response.json({ data: { status: "pending", video_id: id } }, { status: 202 });
+    }
     const hv = url.match(/^https:\/\/api\.heygen\.com\/v3\/models\/videos\/(hv\d+)$/);
     if (hv) {
       const polls = calls.filter((c) => c.url === url).length;
       if (polls === 1) return Response.json({ data: { video_id: hv[1], status: "processing" } });
       if (refuseHeyGen) return Response.json({ data: { video_id: hv[1], status: "failed", failure_code: "generation_failed", failure_message: "Content moderation" } });
+      if (failing.has(hv[1])) return Response.json({ data: { video_id: hv[1], status: "failed", failure_code: "generation_failed", failure_message: "Internal error" } });
       return Response.json({ data: { video_id: hv[1], status: "completed", video_url: `https://resource2.heygen.ai/videos/${hv[1]}.mp4?sig=${polls}` } });
     }
     if (/^https:\/\/resource2\.heygen\.ai\/videos\/hv\d+\.mp4/.test(url)) return new Response(new Uint8Array(2000).fill(3));
@@ -967,7 +974,38 @@ describe("narrated videos in the content run", () => {
     expect(used()).toBe(0);
     const runRow = sqlite.prepare("SELECT status,error FROM runs ORDER BY created_at DESC LIMIT 1").get() as any;
     expect(runRow).toMatchObject({ status: "failed", error: "GENERATION_REJECTED" });
+    // A refusal is not asked for again.
+    expect(calls.filter((c) => c.method === "POST" && c.url === "https://api.heygen.com/v3/models/videos")).toHaveLength(1);
     expect(calls.filter((c) => c.method === "DELETE" && c.url.startsWith("https://api.heygen.com/v3/videos/hv"))).toHaveLength(1);
+  });
+
+  it("asks HeyGen once more for a clip it failed to make, and fails the video only when that fails too", async () => {
+    const { env, sqlite, user, spec, used, run } = await setup();
+    env.HEYGEN_API_KEY = "hg";
+    env.FAL_CLIP_MODEL = "heygen-video-1";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const jobs = (calls: { method: string; url: string }[]) => calls.filter((c) => c.method === "POST" && c.url === "https://api.heygen.com/v3/models/videos").length;
+    // The jobs whose copies were deleted (a failed run deletes them all again: an already deleted one counts as deleted).
+    const deleted = (calls: { method: string; url: string }[]) => [...new Set(calls.filter((c) => c.method === "DELETE").map((c) => c.url.split("/").at(-1)))];
+    // Failed once: a second job makes it; both of HeyGen's copies are deleted and the video is made.
+    let calls = providers({ heygenFails: 1 });
+    const once = await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    await run();
+    expect(jobs(calls)).toBe(2);
+    expect(deleted(calls)).toHaveLength(2);
+    expect((await call(worker, env, "GET", `/api/videos/${once.data.id}`, undefined, user.cookie)).data.video.renderStatus).not.toBe("failed");
+    expect(warn).toHaveBeenCalledWith("HeyGen clip failed", expect.objectContaining({ status: "failed", code: "generation_failed", rejected: false }));
+    expect(warn).toHaveBeenCalledWith("HeyGen clip failed, asking for it again", expect.objectContaining({ code: "GENERATION_FAILED" }));
+    // Failed twice: the run fails (refunded), after two jobs, both copies deleted.
+    calls = providers({ heygenFails: 2 });
+    const charged = used();
+    await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    await run();
+    expect(jobs(calls)).toBe(2);
+    expect(deleted(calls)).toHaveLength(2);
+    expect(used()).toBe(charged);
+    expect(sqlite.prepare("SELECT status,error FROM runs ORDER BY created_at DESC, rowid DESC LIMIT 1").get()).toMatchObject({ status: "failed", error: "GENERATION_FAILED" });
   });
 
   it("makes a high-quality clip with the finer model, for 2 credits per 5 seconds", async () => {

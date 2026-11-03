@@ -261,7 +261,7 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
     const m = pending[i];
     const assetId = m.kind === "image"
       ? await drawPicture(e, step, run, `ai-${i}`, m, phase, () => referencePictures(e, run, sheets, first.scenes[m.path[1] as number]?.place))
-      : await generateMedia(e, step, run, `ai-${i}`, m, phase, m.from ? () => sourcePicture(e, run, m) : undefined);
+      : await makeClip(e, step, run, `ai-${i}`, m, phase, m.from ? () => sourcePicture(e, run, m) : undefined);
     await step.do(`ai-${i}-apply`, async () => updateSpec(e, videoId, (spec) => {
       let target = spec;
       for (const part of m.path) target = target[part];
@@ -432,6 +432,25 @@ async function drawPicture(e: Env, step: WorkflowStep, run: RunInfo, name: strin
     console.warn("Picture refused, drawing it with the fallback model", { runId: run.id, name });
     return generateMedia(e, step, run, `${name}-again`, m, phase, undefined, references, true);
   });
+}
+/**
+ * A clip, paid once. A HeyGen Video clip HeyGen failed to make (a content filter's refusal, the key or its credits end
+ * the run as they are) is asked for once more as a new job, after HeyGen's copy of the failed one is deleted; a second
+ * failure is thrown.
+ */
+async function makeClip(e: Env, step: WorkflowStep, run: RunInfo, name: string, m: PendingMedia, phase: Phase, from?: () => Promise<string>) {
+  try {
+    return await generateMedia(e, step, run, name, m, phase, from);
+  } catch (error) {
+    const code = (error as Error)?.message;
+    // Only a failure: a busy HeyGen (too many status checks) may still be making the first job, which a new one would bill again.
+    if (code !== "GENERATION_FAILED") throw error;
+    const job = await step.do(`${name}-failed`, async () => heygenJob((await readState(e, run.id)).tickets?.[name]));
+    if (!job) throw error;
+    console.warn("HeyGen clip failed, asking for it again", { runId: run.id, name, code });
+    await step.do(`${name}-forget-failed`, safe, () => forgetHeyGenVideo(e, job));
+    return generateMedia(e, step, run, `${name}-again`, m, phase, from);
+  }
 }
 /**
  * The video's reference sheets (shared/formats.ts pictureSheets), each made once and kept with the video (its
