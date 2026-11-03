@@ -126,7 +126,8 @@ export async function attention(e: Env) {
   return { counts, services, stages };
 }
 
-const recipients = (list?: string) =>
+/** ADMIN_EMAILS as valid, unique, lower-case addresses (at most 10). */
+export const recipients = (list?: string) =>
   [...new Set((list || "").split(",").map((s) => s.trim().toLowerCase()).filter((s) => /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(s)))].slice(0, 10);
 /** The summary's lines, as e-mailed (codes are our own short codes, never provider text). */
 function attentionLines({ counts, services, stages }: Awaited<ReturnType<typeof attention>>) {

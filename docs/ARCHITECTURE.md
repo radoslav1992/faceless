@@ -609,6 +609,7 @@ The cron (`server/maintenance.ts`) runs every minute; a stage that throws never 
 | Every minute | `publish` (`dispatchDue`); `series` (`dispatchSeries`, only with `MEDIA_ENABLED=true`); last, after the stages below, `examples` (previews of new style examples, `makePreviews`, only with `MEDIA_ENABLED=true`; may wait up to a minute for the renderer) |
 | Minutes 0, 5, 10, … | `runs`: re-dispatch runs whose workflow never started, fail runs older than 3 hours, mark videos left "being made" without a run as failed |
 | Minutes 2, 7, 12, … | `stats`: video stats from the networks |
+| Minutes 4, 9, 14, … | `youtube-quota`: today's YouTube uploads against `YOUTUBE_UPLOADS_DAILY`, e-mailing `ADMIN_EMAILS` at 80% and when YouTube refused one for quota (`server/youtube-quota.ts`) |
 | Minute 17 of every hour | `summary` first (the operator summary, `server/operations.ts`), then `cleanup` (R2 deletes, only under `media/`, `library/` and `examples/`), `uploads` (unfinished uploads after a day, stuck checks after an hour, failed uploads after a week), `reviews` (provider work a failed run may have left), `retention`, `contracts` (confirmation e-mails) |
 | 03:17 UTC | also `stripe` (reconciliation) and `social-tokens` (Instagram renewals, ended connections marked expired) |
 

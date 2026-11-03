@@ -3,6 +3,7 @@ import { now } from "../types";
 import type { FailureCode, Platform, PostStats, PublishContext, PublishResult, Tokens } from "./types";
 import { SocialError, failure, oauthFailure, safeCode } from "./errors";
 import { bearer, challenge, checkedUrl, clip, count, form, json, readRange, send } from "./http";
+import { countUpload } from "../youtube-quota";
 
 // YouTube: Google OAuth 2 (web server flow with PKCE) and the YouTube Data API v3 resumable upload.
 const AUTHORIZE = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -204,7 +205,14 @@ export const youtube: Platform = {
         },
       }),
     });
-    if (!r.ok) throw await googleFailure(r);
+    if (!r.ok) {
+      const refused = await googleFailure(r);
+      // The project's daily upload allowance is used up: administrators hear about it (youtube-quota.ts).
+      if (refused.detail === "quotaExceeded") await countUpload(env, true);
+      throw refused;
+    }
+    // Each upload session is one videos.insert call against that allowance.
+    await countUpload(env);
     await r.body?.cancel().catch(() => {});
     const session = checkedUrl("youtube", r.headers.get("Location"), ["googleapis.com"]);
     // One session makes at most one video: an interrupted upload is resumed through it, never started again.

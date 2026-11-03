@@ -114,6 +114,7 @@ the Worker reads (`Env` in `server/types.ts`); `.dev.vars.example` lists them fo
 | `SOCIAL_OPEN` | text | The networks everyone can connect, comma-separated (`tiktok,youtube,instagram`). Unset, only administrators (`ADMIN_EMAILS`) can, and everyone else sees "Coming soon" on the Channels page, in the series wizard and where videos are posted. Add a network once its review is through; no deploy needed |
 | `TIKTOK_DIRECT_POST` | text | `true` once TikTok has audited the app for Direct Post: videos then post straight to people's profiles. Unset (the default), they go to people's TikTok inbox as drafts, which they post in the TikTok app. People connected in one mode reconnect after a switch (the permission differs) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | secret | Google OAuth client for YouTube (section 4) |
+| `YOUTUBE_UPLOADS_DAILY` | text | Optional: the YouTube uploads a day Google allows the API project (default 100). Administrators are e-mailed at 80% of it; set it to the new number whenever Google raises the quota |
 | `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET` | secret | The Instagram app ID and secret of the Meta app (section 4) |
 
 A network without its credentials (or without `TOKEN_ENCRYPTION_KEY`) shows as not available in Channels. Admin →

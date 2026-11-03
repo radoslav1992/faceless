@@ -156,8 +156,10 @@ What each step lifts, for reference:
   **private**, whatever `privacyStatus` we send, until the project passes the YouTube compliance audit. Ours has not
   been: uploads since October 2026 went out public.
 - Quota: uploads have their own allowance, by default 100 `videos.insert` calls a day per project for all customers
-  together (Google's quota calculator, checked October 2026); reading channels and stats comes out of the separate
-  10,000 units a day. Ask for more in the audit form before customers get near it.
+  together (Google's quota calculator, checked October 2026), restarting at midnight Pacific time; reading channels and
+  stats comes out of the separate 10,000 units a day. We count the uploads and e-mail `ADMIN_EMAILS` at 80% of
+  `YOUTUBE_UPLOADS_DAILY` and when YouTube refuses one for quota (OPERATIONS.md, "YouTube upload limit"): ask for
+  more in the audit form then, and set `YOUTUBE_UPLOADS_DAILY` to the new limit once Google raises it.
 
 What the audit checks on our side, already in place: the Terms say that connecting YouTube means agreeing to the
 YouTube Terms of Service (`/terms#social-accounts`); the privacy policy's "YouTube API Services" section
@@ -166,8 +168,9 @@ is accessed, stored and shared, how long it is kept, and how to revoke access (d
 security settings page); disconnecting revokes the token and deletes the channel's YouTube data (see "YouTube data"
 below). The app never downloads YouTube videos (the YouTube API Services policies don't allow it): YouTube links are
 refused for imports. The privacy policy also states that the use of data received from Google APIs adheres to the
-Google API Services User Data Policy, including the Limited Use requirements. The Channels page warns that videos may post as private
-until Google finishes its review: take that sentence out of `src/app/Channels.tsx` once the audit passes.
+Google API Services User Data Policy, including the Limited Use requirements. Where the app shows a YouTube post's
+view count, it says "views on YouTube" and links "Watch on YouTube" to the video (`PublicationLine` in
+`src/app/video-ui.tsx`), as YouTube's branding guidelines ask of apps that show its data.
 
 ### YouTube data (what the YouTube API Services policies ask)
 

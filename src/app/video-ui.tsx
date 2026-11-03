@@ -43,17 +43,21 @@ export function MadeForKids({ value, onChange, episodes = false }: { value: bool
 export function PlatformBadge({ platform }: { platform: PlatformId }) {
   return <span className="platform-dot" style={{ background: platforms[platform].color }} title={platforms[platform].name} aria-label={platforms[platform].name}>{platforms[platform].name[0]}</span>;
 }
-/** One line per post of a video: where, when, how it went. */
+/**
+ * One line per post of a video: where, when, how it went. The link and the counts name the network they come from
+ * (YouTube's branding guidelines ask for that wherever its data is shown).
+ */
 export function PublicationLine({ p }: { p: Publication }) {
   const label = p.status === "published" ? (p.draft ? "Sent to drafts" : "Posted") : p.status === "scheduled" ? "Posts" : p.status === "publishing" ? "Posting now"
     : p.status === "failed" ? "Failed" : "Canceled";
+  const network = platforms[p.platform].name;
   return (
-    <div className="row small" style={{ gap: 8 }}>
+    <div className="row wrap small" style={{ gap: "4px 8px" }}>
       <PlatformBadge platform={p.platform} />
-      <span className="grow truncate" style={{ maxWidth: "none" }}>{p.accountName}{p.private ? " · private" : ""}</span>
+      <span className="grow truncate" style={{ maxWidth: "none", minWidth: "7em" }}>{p.accountName}{p.private ? " · private" : ""}</span>
       <span className={p.status === "failed" ? "error" : "muted"}>{label} {p.status !== "failed" && when(p.scheduledAt)}</span>
-      {p.url && <a className="text-link" href={p.url} target="_blank" rel="noreferrer">Open</a>}
-      {p.views !== null && <span className="muted">{number(p.views)} views</span>}
+      {p.url && <a className="text-link" href={p.url} target="_blank" rel="noreferrer">{p.platform === "youtube" ? "Watch" : "Open"} on {network}</a>}
+      {p.views !== null && <span className="muted">{number(p.views)} views on {network}</span>}
     </div>
   );
 }
