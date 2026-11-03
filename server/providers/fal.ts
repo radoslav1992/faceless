@@ -1,6 +1,7 @@
 import type { Env } from "../types";
 import { CLIP_SECONDS, clipModels, isClipModel, type ClipModel, type ClipQuality } from "../../shared/credits";
 import { failureCode, falQueueUrl, providerFetch, ProviderError } from "./http";
+import { heygenEnabled } from "./heygen";
 
 // AI pictures (a video's scenes) and short AI video clips through fal's queue API. A clip is made from a scene's
 // picture with an image-to-video model (one per clip quality, the same request shape), as rech-bg's "Раздвижи снимка".
@@ -45,15 +46,17 @@ const auth = (e: Env) => {
 // played: the render takes only their picture.
 const H3_CLIP_MODEL = "minimax/h3/image-to-video";
 const FLUX_CLIP_MODEL = "blackforestlabs/flux-3-max/image-to-video";
-/** Everyone's clip model (FAL_CLIP_MODEL), Kling unless set. */
+/** Whether a clip model can be used: HeyGen Video 1 only with the HeyGen key (HEYGEN_API_KEY). */
+const usable = (e: Env, m: ClipModel) => m !== "heygen-video-1" || heygenEnabled(e);
+/** Everyone's clip model (FAL_CLIP_MODEL), Kling unless set (or when it can't be used). */
 const everyoneClipModel = (e: Env): ClipModel => {
   const m = e.FAL_CLIP_MODEL?.trim().toLowerCase();
-  return isClipModel(m) ? m : "kling";
+  return isClipModel(m) && usable(e, m) ? m : "kling";
 };
 /** The models administrators can choose per scene: Kling, everyone's and those FAL_CLIP_MODEL_ADMIN lists (comma-separated). */
 export function adminClipModels(e: Env): ClipModel[] {
   const listed = (e.FAL_CLIP_MODEL_ADMIN || "").toLowerCase().split(",").map((m) => m.trim()).filter(isClipModel);
-  return clipModels.filter((m) => m === "kling" || m === everyoneClipModel(e) || listed.includes(m));
+  return clipModels.filter((m) => m === "kling" || m === everyoneClipModel(e) || (listed.includes(m) && usable(e, m)));
 }
 /** A scene's clip model: the one an administrator chose for it, when it is one they may choose; else everyone's. */
 export function clipModelFor(e: Env, admin: boolean, chosen?: ClipModel): ClipModel {

@@ -6,6 +6,7 @@ import { acceptScenePlan, acceptStory, conceptToSpec, storyShape } from "../serv
 import { acceptNewSounds, acceptSounds, rankSounds } from "../server/sounds";
 import { alignedWords, ALIGNMENT_URL, forcedAlignment, speak, SPEECH_MODEL } from "../server/providers/elevenlabs";
 import { adminClipModels, clipModelFor, falRequest, referenceModel, referencePrompt, submitFal } from "../server/providers/fal";
+import { heygenClipRequest } from "../server/providers/heygen";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 import { estimatedSeconds, narrationCurrent, pendingMedia, pictureSheets, specCredits, specSchema, storySpec, type StorySpec } from "../shared/formats";
 import {
@@ -271,6 +272,16 @@ describe("the format", () => {
     expect(clipModelFor(trial, false, "flux-3-max")).toBe("kling");
     expect(clipModelFor({ FAL_CLIP_MODEL_ADMIN: "minimax-h3" } as any, true, "flux-3-max")).toBe("kling");
     expect(clipModelFor({ FAL_CLIP_MODEL: "minimax-h3" } as any, true, "kling")).toBe("kling");
+    // HeyGen Video 1 (with the HeyGen key only): the scene's picture as the clip's first frame, 768p or 1080p by quality.
+    expect(heygenClipRequest("A wave.", image, undefined)).toEqual({
+      model: "heygen-video-1", mode: "image_to_video", prompt: "A wave. No text, captions, logos or watermarks in the picture.",
+      image: { type: "url", url: image }, duration: 5, resolution: "768p",
+    });
+    expect(heygenClipRequest("A wave.", image, 10, "high")).toMatchObject({ duration: 10, resolution: "1080p" });
+    expect(adminClipModels({ FAL_CLIP_MODEL_ADMIN: "heygen-video-1" } as any)).toEqual(["kling"]);
+    expect(adminClipModels({ FAL_CLIP_MODEL_ADMIN: "heygen-video-1", HEYGEN_API_KEY: "hg" } as any)).toEqual(["kling", "heygen-video-1"]);
+    expect(clipModelFor({ FAL_CLIP_MODEL: "heygen-video-1" } as any, false)).toBe("kling");
+    expect(clipModelFor({ FAL_CLIP_MODEL: "heygen-video-1", HEYGEN_API_KEY: "hg" } as any, false)).toBe("heygen-video-1");
     // Without a picture: the text-to-video model, 5 s, as before.
     expect(falRequest("clip", "A wave.")).toMatchObject({ model: "fal-ai/kling-video/v2.5-turbo/pro/text-to-video", body: { duration: "5", aspect_ratio: "9:16" } });
     // Pictures: GPT Image 2.5 Flare at high quality by default, exactly 9:16 in multiples of 16.
@@ -710,7 +721,7 @@ function alignment() {
  * ElevenLabs (speech, forced alignment) and fal; `refuseClip` makes the clip model refuse, `refuse` the models it
  * names when their result is read (as Nano Banana does); `timings` false drops them.
  */
-function providers({ refuseClip = false, timings = true, refuse = (() => false) as (model: string) => boolean } = {}) {
+function providers({ refuseClip = false, refuseHeyGen = false, timings = true, refuse = (() => false) as (model: string) => boolean } = {}) {
   const calls: { method: string; url: string; body?: any }[] = [];
   let n = 0;
   vi.stubGlobal("fetch", async (input: any, init: any = {}) => {
@@ -728,6 +739,17 @@ function providers({ refuseClip = false, timings = true, refuse = (() => false) 
     if (fal && url.endsWith("/status")) return Response.json({ status: "COMPLETED" });
     if (fal && refuse(fal[1])) return Response.json({ detail: [{ type: "content_policy_violation" }] }, { status: 422 });
     if (fal) return Response.json(/kling|minimax\/h3|flux-3-max/.test(fal[1]) ? { video: { url: "https://v3.fal.media/files/clip.mp4" } } : { images: [{ url: "https://v3.fal.media/files/shot.jpg" }] });
+    // HeyGen Video 1: a job, then "processing" once, then done (or refused when `refuseHeyGen`); its copy deleted.
+    if (url === "https://api.heygen.com/v3/models/videos" && method === "POST") return Response.json({ data: { status: "pending", video_id: `hv${++n}` } }, { status: 202 });
+    const hv = url.match(/^https:\/\/api\.heygen\.com\/v3\/models\/videos\/(hv\d+)$/);
+    if (hv) {
+      const polls = calls.filter((c) => c.url === url).length;
+      if (polls === 1) return Response.json({ data: { video_id: hv[1], status: "processing" } });
+      if (refuseHeyGen) return Response.json({ data: { video_id: hv[1], status: "failed", failure_code: "generation_failed", failure_message: "Content moderation" } });
+      return Response.json({ data: { video_id: hv[1], status: "completed", video_url: `https://resource2.heygen.ai/videos/${hv[1]}.mp4?sig=${polls}` } });
+    }
+    if (/^https:\/\/resource2\.heygen\.ai\/videos\/hv\d+\.mp4/.test(url)) return new Response(new Uint8Array(2000).fill(3));
+    if (/^https:\/\/api\.heygen\.com\/v3\/videos\/hv\d+$/.test(url) && method === "DELETE") return Response.json({ data: {} });
     if (url === "https://v3.fal.media/files/shot.jpg") return new Response(jpeg());
     if (url === "https://v3.fal.media/files/clip.mp4") return new Response(new Uint8Array(3000).fill(2));
     throw new Error("unexpected " + url);
@@ -904,6 +926,48 @@ describe("narrated videos in the content run", () => {
     env.FAL_CLIP_MODEL = "flux-3-max";
     sqlite.prepare("UPDATE users SET email='someone@example.com' WHERE id=?").run(user.id);
     expect(await make()).toBe("blackforestlabs/flux-3-max/image-to-video");
+  });
+
+  it("makes an administrator's HeyGen Video 1 clip from the scene's picture, then deletes HeyGen's copy", async () => {
+    const { env, sqlite, user, spec, run } = await setup();
+    const calls = providers();
+    env.HEYGEN_API_KEY = "hg";
+    env.FAL_CLIP_MODEL_ADMIN = "heygen-video-1";
+    sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
+    expect((await call(worker, env, "GET", "/api/auth/me", undefined, user.cookie)).data.user.clipModels).toEqual(["kling", "heygen-video-1"]);
+    const chosen = { ...spec, scenes: spec.scenes.map((s) => (s.source === "clip" ? { ...s, clipModel: "heygen-video-1" as const, clipQuality: "high" as const } : s)) };
+    const created = await call(worker, env, "POST", "/api/videos", { spec: chosen, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(created.status).toBe(201);
+    await run();
+    // One paid request (with an Idempotency-Key), from the scene's picture, at 1080p; nothing for it at fal.
+    const asked = calls.filter((c) => c.method === "POST" && c.url === "https://api.heygen.com/v3/models/videos");
+    expect(asked).toHaveLength(1);
+    expect(asked[0].body).toMatchObject({ model: "heygen-video-1", mode: "image_to_video", duration: 5, resolution: "1080p", image: { type: "url" } });
+    expect(asked[0].body.image.url).toMatch(/^https:\/\/app\.test\/api\/render-inputs\//);
+    expect(calls.some((c) => c.method === "POST" && /kling-video/.test(c.url))).toBe(false);
+    // Saved from a fresh link, then HeyGen's copy deleted.
+    expect(calls.some((c) => c.url.startsWith("https://resource2.heygen.ai/videos/hv"))).toBe(true);
+    const job = calls.find((c) => /\/models\/videos\/hv\d+$/.test(c.url))!.url.split("/").at(-1);
+    expect(calls.filter((c) => c.method === "DELETE").map((c) => c.url)).toEqual([`https://api.heygen.com/v3/videos/${job}`]);
+    const video = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
+    expect(video.renderStatus).not.toBe("failed");
+    const clip = sqlite.prepare("SELECT kind,mime,bytes FROM media_assets WHERE video_id=? AND kind='ai_clip'").get(created.data.id) as any;
+    expect(clip).toMatchObject({ kind: "ai_clip", mime: "video/mp4", bytes: 2000 });
+    expect(sqlite.prepare("SELECT COUNT(*) n FROM cleanup_tasks WHERE prefix LIKE 'heygen/%'").get()).toEqual({ n: 0 });
+  });
+
+  it("fails a HeyGen Video clip the content filter refused, refunds it and deletes HeyGen's copy", async () => {
+    const { env, sqlite, user, spec, used, run } = await setup();
+    const calls = providers({ refuseHeyGen: true });
+    env.HEYGEN_API_KEY = "hg";
+    env.FAL_CLIP_MODEL = "heygen-video-1";
+    await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await run();
+    expect(used()).toBe(0);
+    const runRow = sqlite.prepare("SELECT status,error FROM runs ORDER BY created_at DESC LIMIT 1").get() as any;
+    expect(runRow).toMatchObject({ status: "failed", error: "GENERATION_REJECTED" });
+    expect(calls.filter((c) => c.method === "DELETE" && c.url.startsWith("https://api.heygen.com/v3/videos/hv"))).toHaveLength(1);
   });
 
   it("makes a high-quality clip with the finer model, for 2 credits per 5 seconds", async () => {
