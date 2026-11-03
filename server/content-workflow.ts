@@ -11,7 +11,7 @@ import { fetchOutput } from "./providers/http";
 import { canFallBack, clipModelFor, falResult, falStatus, referenceModel, submitFal, type FalTicket, type Reference } from "./providers/fal";
 import { isAdmin } from "./auth";
 import { forcedAlignment, speak } from "./providers/elevenlabs";
-import { avatarVideoStatus, submitAvatarVideo } from "./providers/heygen";
+import { avatarVideoStatus, heygenClipRequest, heygenClipStatus, submitAvatarVideo, submitHeyGenClip } from "./providers/heygen";
 import { avatarFor, forgetHeyGenVideo } from "./avatars";
 import { releaseRender, renderFailures, renderFile, renderStatus, submitRender } from "./renderer";
 import { planRender, type Media, type Plan, type PlanContext } from "./render-plan";
@@ -141,10 +141,12 @@ export class ContentGeneration extends WorkflowEntrypoint<Env, Job> {
         const s = await readState(e, id);
         for (const [name, job] of Object.entries(s.jobs || {})) if (s.slots?.[name] !== undefined) await releaseRender(e, s.slots[name], job);
       });
-      // HeyGen's copy of a presenter video this run asked for (made or not) is deleted.
+      // HeyGen's copies of the presenter video and the HeyGen Video clips this run asked for (made or not) are deleted.
       await step.do("stop-presenter", async () => {
-        const job = (await readState(e, id)).tickets?.presenter;
-        if (typeof job === "string") await forgetHeyGenVideo(e, job);
+        for (const [name, ticket] of Object.entries((await readState(e, id)).tickets || {})) {
+          const job = name === "presenter" && typeof ticket === "string" ? ticket : heygenJob(ticket);
+          if (job) await forgetHeyGenVideo(e, job);
+        }
       });
       await step.do("fail", () => failRun(e, id, code));
     }
@@ -153,6 +155,10 @@ export class ContentGeneration extends WorkflowEntrypoint<Env, Job> {
 
 type Phase = (value: string) => Promise<unknown>;
 type RunInfo = { id: string; user_id: string; video_id: string; kind: string; payload: any };
+/** A picture or clip being made: a fal request, or a HeyGen Video job (a clip with that model). */
+type MediaTicket = FalTicket | { heygen: string };
+/** The HeyGen Video job of a stored ticket, if it is one. */
+const heygenJob = (ticket: unknown) => (typeof (ticket as any)?.heygen === "string" ? (ticket as { heygen: string }).heygen : null);
 
 /**
  * One AI picture or clip, paid once; returns the stored asset's ID. A clip `from` a picture gets that picture's
@@ -165,9 +171,9 @@ async function generateMedia(
   fallback = false,
 ) {
   const kind = m.kind;
-  const ticket = await step.do(`${name}-submit`, once, async () => {
+  const ticket: MediaTicket = await step.do(`${name}-submit`, once, async () => {
     const s = await readState(e, run.id);
-    if (s.tickets?.[name]) return s.tickets[name] as FalTicket;
+    if (s.tickets?.[name]) return s.tickets[name] as MediaTicket;
     if (s.claims?.[name]) throw new Error("GENERATION_UNCERTAIN");
     const image = from ? await from() : undefined;
     const refs = references ? await references() : [];
@@ -176,21 +182,29 @@ async function generateMedia(
     const clipModel = kind === "clip" ? clipModelFor(e, m.clipModel ? await ownerIsAdmin(e, run.user_id) : false, m.clipModel) : undefined;
     await patchState(e, run.id, (s) => { (s.claims ||= {})[name] = true; });
     await phase(kind === "clip" ? "clip" : "images");
-    const t = await submitFal(e, kind, m.prompt, { image, seconds: m.seconds, clipQuality: m.quality, clipModel, references: refs.length ? refs : undefined, fallback });
+    // HeyGen Video makes a clip from the scene's picture (the Idempotency-Key finds a resent request's job).
+    const t: MediaTicket = clipModel === "heygen-video-1" && image
+      ? { heygen: await submitHeyGenClip(e, `${run.id}-${name}`, heygenClipRequest(m.prompt, image, m.seconds, m.quality)) }
+      : await submitFal(e, kind, m.prompt, { image, seconds: m.seconds, clipQuality: m.quality, clipModel, references: refs.length ? refs : undefined, fallback });
     await patchState(e, run.id, (s) => { (s.tickets ||= {})[name] = t; });
     return t;
   });
+  const job = heygenJob(ticket);
+  const status = async () => (job ? ((await heygenClipStatus(e, job)).done ? "done" : "pending") : falStatus(e, ticket as FalTicket));
   let done = false;
   for (let i = 0; i < 150 && !done; i++) {
-    done = (await step.do(`${name}-status-${i}`, { retries: { limit: 2, delay: "10 seconds" }, timeout: "1 minute" }, () => falStatus(e, ticket))) === "done";
+    done = (await step.do(`${name}-status-${i}`, { retries: { limit: 2, delay: "10 seconds" }, timeout: "1 minute" }, status)) === "done";
     if (!done) await step.sleep(`${name}-wait-${i}`, kind === "image" ? "4 seconds" : "10 seconds");
   }
   if (!done) throw new Error("GENERATION_TIMEOUT");
-  return step.do(`${name}-save`, safe, async () => {
+  const saved = await step.do(`${name}-save`, safe, async () => {
     const s = await readState(e, run.id);
     const existing = s.assets?.[name] && await e.DB.prepare("SELECT id FROM media_assets WHERE id=? AND status='ready'").bind(s.assets[name]).first();
     if (existing) return s.assets![name];
-    const url = await falResult(e, kind, ticket);
+    // HeyGen's download link is signed: asked for afresh, so a later retry gets one that still works.
+    const fresh = job ? await heygenClipStatus(e, job) : null;
+    if (fresh && !fresh.done) throw new Error("GENERATION_FAILED");
+    const url = fresh?.done ? fresh.url : await falResult(e, kind, ticket as FalTicket);
     const assetId = s.assets?.[name] || uid();
     await patchState(e, run.id, (s) => { (s.assets ||= {})[name] = assetId; });
     const mime = kind === "image" ? "image/jpeg" : "video/mp4";
@@ -211,6 +225,9 @@ async function generateMedia(
       JSON.stringify({ prompt: m.prompt.slice(0, 400), ai: true, ...(m.sheet && { sheet: m.sheet }) }), now(), now()).run();
     return assetId;
   });
+  // Ours is saved: HeyGen's copy goes (retried hourly while HeyGen can't be reached).
+  if (job) await step.do(`${name}-forget`, safe, () => forgetHeyGenVideo(e, job));
+  return saved;
 }
 
 /** Writes a value into the stored spec (the video may have been edited meanwhile only by this run). */

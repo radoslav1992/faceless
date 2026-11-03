@@ -207,7 +207,8 @@ a manual check** with fal's request ID:
 - reason `failed`: the run failed for another reason (`INTERNAL`) while fal work was open.
 
 A presenter video still being made at HeyGen (`AVATAR_TIMEOUT`, `AVATAR_UNCERTAIN`) is set aside the same way, as
-"HeyGen video <id>" (the run already asked HeyGen to delete it).
+"HeyGen video <id>" (the run already asked HeyGen to delete it). So is a HeyGen Video 1 clip the run asked for
+(`heygen-video-1`): once submitted, HeyGen makes it to the end and bills it.
 
 What to do: open fal's (or HeyGen's) dashboard, find the request, and cancel it or note what it billed. Rows are kept 90 days.
 

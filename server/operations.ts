@@ -200,6 +200,8 @@ export async function reviewRuns(e: Env) {
       if (name === "presenter" && typeof ticket === "string") open.push(`HeyGen video ${ticket}`);
       if (typeof ticket !== "object") continue;
       if (typeof ticket.request_id === "string") open.push(`fal request ${ticket.request_id}`);
+      // A HeyGen Video clip: its job runs to the end once submitted, and bills.
+      if (typeof ticket.heygen === "string") open.push(`HeyGen video ${ticket.heygen}`);
     }
     // Claimed but no ticket stored: the provider may have accepted it (the answer was lost).
     const uncertain = Object.keys(s.claims || {}).filter((name) => name !== "voice" && !name.endsWith("-accepted") && !s.tickets?.[name] && !s.assets?.[name]);

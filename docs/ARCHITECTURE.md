@@ -315,7 +315,9 @@ D1 batch, so the credits are reserved by the triggers before any work starts. It
    (GPT Image 2.5 Flare at 864 × 1536, `FAL_IMAGE_QUALITY` high by default; `FAL_IMAGE_MODEL` can choose its Sunburst
    variant, `fal-ai/nano-banana-2`, `google/nano-banana-2.1` or `fal-ai/flux/schnell`), then every clip made from its
    picture (`fal-ai/kling-video/v2.5-turbo/pro/image-to-video`, which reads the picture through a capability link;
-   `FAL_CLIP_MODEL` can choose MiniMax H3 or FLUX 3 Max instead for everyone; administrators can pick one per scene
+   `FAL_CLIP_MODEL` can choose MiniMax H3, FLUX 3 Max or HeyGen Video 1 instead for everyone (HeyGen Video 1 through
+   HeyGen's API, `server/providers/heygen.ts`: `POST /v3/models/videos` in `image_to_video` mode with an
+   Idempotency-Key, polled, saved from a fresh signed link, then HeyGen's copy deleted); administrators can pick one per scene
    (`scene.clipModel`) from `FAL_CLIP_MODEL_ADMIN`'s list, which `clipModelFor` honours only for an administrator's
    video and only while the model is on the list; the render never plays a clip's own sound).
    Every picture's prompt carries the subject, the look and the description of the scene's place. So the scenes look
