@@ -7,6 +7,7 @@ import { acceptNewSounds, acceptSounds, rankSounds } from "../server/sounds";
 import { alignedWords, ALIGNMENT_URL, forcedAlignment, speak, SPEECH_MODEL } from "../server/providers/elevenlabs";
 import { adminClipModels, clipModelFor, falRequest, referenceModel, referencePrompt, submitFal } from "../server/providers/fal";
 import { heygenClipRequest } from "../server/providers/heygen";
+import { attention } from "../server/operations";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 import { estimatedSeconds, narrationCurrent, pendingMedia, pictureSheets, specCredits, specSchema, storySpec, type StorySpec } from "../shared/formats";
 import {
@@ -721,7 +722,7 @@ function alignment() {
  * ElevenLabs (speech, forced alignment) and fal; `refuseClip` makes the clip model refuse, `refuse` the models it
  * names when their result is read (as Nano Banana does); `timings` false drops them.
  */
-function providers({ refuseClip = false, refuseHeyGen = false, heygenFails = 0, timings = true, refuse = (() => false) as (model: string) => boolean } = {}) {
+function providers({ refuseClip = false, refuseHeyGen = false, heygenFails = 0, heygenDown = false, timings = true, refuse = (() => false) as (model: string) => boolean } = {}) {
   const calls: { method: string; url: string; body?: any }[] = [];
   const failing = new Set<string>();
   let n = 0;
@@ -742,6 +743,8 @@ function providers({ refuseClip = false, refuseHeyGen = false, heygenFails = 0, 
     if (fal) return Response.json(/kling|minimax\/h3|flux-3-max/.test(fal[1]) ? { video: { url: "https://v3.fal.media/files/clip.mp4" } } : { images: [{ url: "https://v3.fal.media/files/shot.jpg" }] });
     // HeyGen Video 1: a job, then "processing" once, then done (or refused when `refuseHeyGen`); its copy deleted.
     if (url === "https://api.heygen.com/v3/models/videos" && method === "POST") {
+      // Out of API credits: HeyGen answers 400.
+      if (heygenDown) return Response.json({ error: { code: "insufficient_credits", message: "Insufficient credits" } }, { status: 400 });
       const id = `hv${++n}`;
       // The first `heygenFails` jobs fail at HeyGen.
       if (calls.filter((c) => c.url === url).length <= heygenFails) failing.add(id);
@@ -963,49 +966,70 @@ describe("narrated videos in the content run", () => {
     expect(sqlite.prepare("SELECT COUNT(*) n FROM cleanup_tasks WHERE prefix LIKE 'heygen/%'").get()).toEqual({ n: 0 });
   });
 
-  it("fails a HeyGen Video clip the content filter refused, refunds it and deletes HeyGen's copy", async () => {
+  it("makes a clip HeyGen's filter refused with Kling instead, and fails the video only when Kling refuses it too", async () => {
     const { env, sqlite, user, spec, used, run } = await setup();
-    const calls = providers({ refuseHeyGen: true });
     env.HEYGEN_API_KEY = "hg";
     env.FAL_CLIP_MODEL = "heygen-video-1";
-    await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
+    let calls = providers({ refuseHeyGen: true });
+    const made = await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
     await run();
-    expect(used()).toBe(0);
-    const runRow = sqlite.prepare("SELECT status,error FROM runs ORDER BY created_at DESC LIMIT 1").get() as any;
-    expect(runRow).toMatchObject({ status: "failed", error: "GENERATION_REJECTED" });
-    // A refusal is not asked for again.
+    // A refusal is not asked of HeyGen again: Kling makes the clip from the same picture, and HeyGen's copy goes.
     expect(calls.filter((c) => c.method === "POST" && c.url === "https://api.heygen.com/v3/models/videos")).toHaveLength(1);
+    expect(calls.filter((c) => c.method === "POST" && c.url.endsWith("/kling-video/v2.5-turbo/standard/image-to-video"))).toHaveLength(1);
     expect(calls.filter((c) => c.method === "DELETE" && c.url.startsWith("https://api.heygen.com/v3/videos/hv"))).toHaveLength(1);
+    expect(warn).toHaveBeenCalledWith("HeyGen clip not made, making it with Kling", expect.objectContaining({ code: "GENERATION_REJECTED" }));
+    expect((await call(worker, env, "GET", `/api/videos/${made.data.id}`, undefined, user.cookie)).data.video.renderStatus).not.toBe("failed");
+    const meta = JSON.parse((sqlite.prepare("SELECT meta FROM media_assets WHERE video_id=? AND kind='ai_clip'").get(made.data.id) as any).meta);
+    expect(meta).toMatchObject({ clipModel: "kling", fallback: true });
+    // The operator hears about clips made with Kling instead (the hourly summary).
+    expect((await attention(env)).counts.clipFallback).toBe(1);
+    // Kling refuses it too: the run fails with the refusal, refunded.
+    calls = providers({ refuseHeyGen: true, refuseClip: true });
+    const charged = used();
+    await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    await run();
+    expect(used()).toBe(charged);
+    expect(sqlite.prepare("SELECT status,error FROM runs ORDER BY created_at DESC, rowid DESC LIMIT 1").get()).toMatchObject({ status: "failed", error: "GENERATION_REJECTED" });
   });
 
-  it("asks HeyGen once more for a clip it failed to make, and fails the video only when that fails too", async () => {
+  it("asks HeyGen once more for a clip it failed to make, then makes it with Kling; without credits, with Kling at once", async () => {
     const { env, sqlite, user, spec, used, run } = await setup();
     env.HEYGEN_API_KEY = "hg";
     env.FAL_CLIP_MODEL = "heygen-video-1";
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
     const jobs = (calls: { method: string; url: string }[]) => calls.filter((c) => c.method === "POST" && c.url === "https://api.heygen.com/v3/models/videos").length;
-    // The jobs whose copies were deleted (a failed run deletes them all again: an already deleted one counts as deleted).
+    const kling = (calls: { method: string; url: string }[]) => calls.filter((c) => c.method === "POST" && /kling-video/.test(c.url)).length;
+    // The jobs whose copies were deleted (asked more than once is fine: an already deleted one counts as deleted).
     const deleted = (calls: { method: string; url: string }[]) => [...new Set(calls.filter((c) => c.method === "DELETE").map((c) => c.url.split("/").at(-1)))];
+    const status = async (id: string) => (await call(worker, env, "GET", `/api/videos/${id}`, undefined, user.cookie)).data.video.renderStatus;
     // Failed once: a second job makes it; both of HeyGen's copies are deleted and the video is made.
     let calls = providers({ heygenFails: 1 });
     const once = await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
     await run();
-    expect(jobs(calls)).toBe(2);
-    expect(deleted(calls)).toHaveLength(2);
-    expect((await call(worker, env, "GET", `/api/videos/${once.data.id}`, undefined, user.cookie)).data.video.renderStatus).not.toBe("failed");
+    expect([jobs(calls), kling(calls), deleted(calls).length]).toEqual([2, 0, 2]);
+    expect(await status(once.data.id)).not.toBe("failed");
     expect(warn).toHaveBeenCalledWith("HeyGen clip failed", expect.objectContaining({ status: "failed", code: "generation_failed", rejected: false }));
     expect(warn).toHaveBeenCalledWith("HeyGen clip failed, asking for it again", expect.objectContaining({ code: "GENERATION_FAILED" }));
-    // Failed twice: the run fails (refunded), after two jobs, both copies deleted.
+    // Failed twice: Kling makes it, for the same credits; both of HeyGen's copies are deleted.
     calls = providers({ heygenFails: 2 });
-    const charged = used();
-    await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    const before = used();
+    const twice = await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
     await run();
-    expect(jobs(calls)).toBe(2);
-    expect(deleted(calls)).toHaveLength(2);
-    expect(used()).toBe(charged);
-    expect(sqlite.prepare("SELECT status,error FROM runs ORDER BY created_at DESC, rowid DESC LIMIT 1").get()).toMatchObject({ status: "failed", error: "GENERATION_FAILED" });
+    expect([jobs(calls), kling(calls), deleted(calls).length]).toEqual([2, 1, 2]);
+    expect(await status(twice.data.id)).not.toBe("failed");
+    expect(used()).toBe(before + twice.data.credits);
+    expect(warn).toHaveBeenCalledWith("HeyGen clip not made, making it with Kling", expect.objectContaining({ code: "GENERATION_FAILED" }));
+    // HeyGen out of credits: no job, no second ask, Kling at once.
+    calls = providers({ heygenDown: true });
+    const down = await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    await run();
+    expect([jobs(calls), kling(calls), deleted(calls).length]).toEqual([1, 1, 0]);
+    expect(await status(down.data.id)).not.toBe("failed");
+    expect(warn).toHaveBeenCalledWith("HeyGen clip not made, making it with Kling", expect.objectContaining({ code: "GENERATION_UNAVAILABLE" }));
+    expect(sqlite.prepare("SELECT COUNT(*) n FROM runs WHERE status='failed'").get()).toEqual({ n: 0 });
   });
 
   it("makes a high-quality clip with the finer model, for 2 credits per 5 seconds", async () => {
