@@ -33,7 +33,8 @@ hours rather than in one expensive run.
 | Work set aside for a manual check (run ID, provider request ID, reason) | 90 days | Removed by maintenance |
 
 The scene descriptions and script sent to the AI providers are part of the video itself (its spec): they stay as long
-as the video does. A video imported from a link is fetched from that link by our Worker; the link is kept only until
+as the video does. A clip made with HeyGen Video 1 sends HeyGen its scene description and the picture it starts from;
+HeyGen's copy of the clip is deleted once ours is saved (retried hourly), as for presenter videos. A video imported from a link is fetched from that link by our Worker; the link is kept only until
 the file is downloaded (then the file is kept like an upload). Videos are never downloaded from YouTube. A long
 video's transcript is sent to the text model (Cloudflare Workers AI) when the owner finds clips in it; the moments
 found are kept with the video until it is deleted. Transcripts also hold who spoke when (speakers numbered by

@@ -74,6 +74,7 @@ const labels: Record<string, string> = {
   reconnect: "Social accounts that need reconnecting, marked in the last 24 hours",
   metrics: "Video stats reads that failed in the last hour",
   transcription: "Speech transcriptions that failed in the last hour",
+  clipFallback: "Clips made with Kling in the last 24 hours because HeyGen couldn't make them (check HeyGen's API credits and status, or set FAL_CLIP_MODEL back to kling)",
   cleanup: "Storage cleanup waiting for more than 1 day",
   review: "Work set aside for a manual check in the last 24 hours (provider work that may still bill, or a refused cleanup)",
   stripe: "Stripe: failed reconciliations in the last nightly run, or paid periods overdue for renewal by over 4 days",
@@ -93,6 +94,8 @@ export async function attention(e: Env) {
       (SELECT COUNT(*) FROM publications WHERE status='published' AND published_at>?6 AND metrics_error='failed' AND metrics_checked_at>?4) metrics,
       (SELECT COUNT(*) FROM media_assets WHERE rowid>(SELECT COALESCE(MAX(rowid),0) FROM media_assets)-5000 AND json_valid(meta)
         AND json_extract(meta,'$.speech.status')='failed' AND json_extract(meta,'$.speech.at')>?4) transcription,
+      (SELECT COUNT(*) FROM media_assets WHERE rowid>(SELECT COALESCE(MAX(rowid),0) FROM media_assets)-5000 AND kind='ai_clip' AND created_at>?5
+        AND json_valid(meta) AND json_extract(meta,'$.fallback')=1) clipFallback,
       (SELECT COUNT(*) FROM cleanup_tasks WHERE created_at<?5) cleanup,
       (SELECT COUNT(*) FROM manual_reviews WHERE created_at>?5) review,
       (SELECT COUNT(*) FROM subscriptions WHERE substr(id,1,6)<>?7 AND status='active' AND cancel_at_period_end=0 AND period_end<?8) renewals`,
@@ -118,6 +121,7 @@ export async function attention(e: Env) {
     reconnect: burst(n("reconnect"), RECONNECT_BURST),
     metrics: burst(n("metrics"), METRICS_BURST),
     transcription: burst(n("transcription"), FAILURE_BURST),
+    clipFallback: n("clipFallback"),
     cleanup: n("cleanup"),
     review: n("review"),
     stripe: n("renewals") + (stripe && stripe.at > t - 26 * HOUR ? Number(stripe.failed) || 0 : 0),

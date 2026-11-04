@@ -603,8 +603,9 @@ function privacy(op: Operator): Section[] {
                 </tr>
                 <tr>
                   <th scope="row">HeyGen</th>
-                  <td>AI presenters that speak your video's narration on camera — only when you add a presenter</td>
-                  <td>The AI narration of that video (HeyGen deletes its copy of the presenter video once we have saved it)</td>
+                  <td>AI presenters that speak your video's narration on camera (only when you add a presenter), and AI video clips</td>
+                  <td>For a presenter, the AI narration of that video; for a clip, its scene description (prompt) and the picture it starts from. HeyGen
+                    deletes its copy of each video once we have saved it</td>
                 </tr>
                 <tr>
                   <th scope="row">TikTok, Meta (Instagram), Google (YouTube)</th>

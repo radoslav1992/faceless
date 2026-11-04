@@ -27,6 +27,7 @@ import {
   type HighlightSpec, type PendingMedia, type Spec, type StorySpec,
 } from "../shared/formats";
 import { PRESENTER_ENGINES } from "../shared/presenter";
+import type { ClipModel } from "../shared/credits";
 import { trackSchema, type Track } from "../shared/track";
 import { narrationKey, placeKey, storyScript, textWords, voicedScript } from "../shared/story";
 import { PRODUCT } from "../shared/brand";
@@ -168,7 +169,7 @@ const heygenJob = (ticket: unknown) => (typeof (ticket as any)?.heygen === "stri
  */
 async function generateMedia(
   e: Env, step: WorkflowStep, run: RunInfo, name: string, m: PendingMedia, phase: Phase, from?: () => Promise<string>, references?: () => Promise<Reference[]>,
-  fallback = false,
+  fallback = false, instead?: ClipModel,
 ) {
   const kind = m.kind;
   const ticket: MediaTicket = await step.do(`${name}-submit`, once, async () => {
@@ -179,7 +180,7 @@ async function generateMedia(
     const refs = references ? await references() : [];
     if (fallback && !canFallBack(e, refs.length > 0)) throw new Error("GENERATION_REJECTED");
     // A model chosen for the scene counts only when its owner is an administrator who may choose it.
-    const clipModel = kind === "clip" ? clipModelFor(e, m.clipModel ? await ownerIsAdmin(e, run.user_id) : false, m.clipModel) : undefined;
+    const clipModel = kind === "clip" ? instead ?? await sceneClipModel(e, run, m) : undefined;
     await patchState(e, run.id, (s) => { (s.claims ||= {})[name] = true; });
     await phase(kind === "clip" ? "clip" : "images");
     // HeyGen Video makes a clip from the scene's picture (the Idempotency-Key finds a resent request's job).
@@ -222,7 +223,7 @@ async function generateMedia(
     await e.DB.prepare(
       "INSERT OR REPLACE INTO media_assets(id,user_id,video_id,kind,name,object_key,mime,bytes,duration,width,height,status,meta,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'ready',?,?,?)",
     ).bind(assetId, run.user_id, run.video_id, kind === "clip" ? "ai_clip" : "ai_image", `AI ${kind === "clip" ? "clip" : "picture"}: ${m.prompt}`.slice(0, 160), key, actual, bytes, duration, width, height,
-      JSON.stringify({ prompt: m.prompt.slice(0, 400), ai: true, ...(m.sheet && { sheet: m.sheet }) }), now(), now()).run();
+      JSON.stringify({ prompt: m.prompt.slice(0, 400), ai: true, ...(m.sheet && { sheet: m.sheet }), ...(instead && { clipModel: instead, fallback: true }) }), now(), now()).run();
     return assetId;
   });
   // Ours is saved: HeyGen's copy goes (retried hourly while HeyGen can't be reached).
@@ -433,23 +434,41 @@ async function drawPicture(e: Env, step: WorkflowStep, run: RunInfo, name: strin
     return generateMedia(e, step, run, `${name}-again`, m, phase, undefined, references, true);
   });
 }
+/** A scene's clip model: the one an administrator chose for it (when they may), else everyone's (FAL_CLIP_MODEL). */
+async function sceneClipModel(e: Env, run: RunInfo, m: PendingMedia) {
+  return clipModelFor(e, m.clipModel ? await ownerIsAdmin(e, run.user_id) : false, m.clipModel);
+}
 /**
- * A clip, paid once. A HeyGen Video clip HeyGen failed to make (a content filter's refusal, the key or its credits end
- * the run as they are) is asked for once more as a new job, after HeyGen's copy of the failed one is deleted; a second
- * failure is thrown.
+ * A clip, paid once. A HeyGen Video clip (from the scene's picture) HeyGen failed to make is asked for once more as a
+ * new job, after HeyGen's copy of the failed one is deleted (not when HeyGen is busy: it may still be making the first
+ * job, which a new one would bill again). When HeyGen can't make it after all (failed twice, refused it, the key or its
+ * credits, busy, too slow), it is made with Kling instead, for the same credits, so the video is still made; HeyGen's
+ * copies are deleted, and the clip is marked (meta.fallback) for the operator summary. Kling's own failure is thrown.
  */
 async function makeClip(e: Env, step: WorkflowStep, run: RunInfo, name: string, m: PendingMedia, phase: Phase, from?: () => Promise<string>) {
+  const model = await step.do(`${name}-model`, () => sceneClipModel(e, run, m));
+  if (model !== "heygen-video-1" || !from) return generateMedia(e, step, run, name, m, phase, from);
   try {
-    return await generateMedia(e, step, run, name, m, phase, from);
+    try {
+      return await generateMedia(e, step, run, name, m, phase, from);
+    } catch (error) {
+      if ((error as Error)?.message !== "GENERATION_FAILED") throw error;
+      const job = await step.do(`${name}-failed`, async () => heygenJob((await readState(e, run.id)).tickets?.[name]));
+      if (!job) throw error;
+      console.warn("HeyGen clip failed, asking for it again", { runId: run.id, name, code: "GENERATION_FAILED" });
+      await step.do(`${name}-forget-failed`, safe, () => forgetHeyGenVideo(e, job));
+      return await generateMedia(e, step, run, `${name}-again`, m, phase, from);
+    }
   } catch (error) {
     const code = (error as Error)?.message;
-    // Only a failure: a busy HeyGen (too many status checks) may still be making the first job, which a new one would bill again.
-    if (code !== "GENERATION_FAILED") throw error;
-    const job = await step.do(`${name}-failed`, async () => heygenJob((await readState(e, run.id)).tickets?.[name]));
-    if (!job) throw error;
-    console.warn("HeyGen clip failed, asking for it again", { runId: run.id, name, code });
-    await step.do(`${name}-forget-failed`, safe, () => forgetHeyGenVideo(e, job));
-    return generateMedia(e, step, run, `${name}-again`, m, phase, from);
+    // A request whose answer was lost may have been accepted: never paid for twice.
+    if (code === "GENERATION_UNCERTAIN") throw error;
+    console.warn("HeyGen clip not made, making it with Kling", { runId: run.id, name, code });
+    await step.do(`${name}-forget-heygen`, safe, async () => {
+      const tickets = (await readState(e, run.id)).tickets || {};
+      for (const job of [heygenJob(tickets[name]), heygenJob(tickets[`${name}-again`])]) if (job) await forgetHeyGenVideo(e, job);
+    });
+    return generateMedia(e, step, run, `${name}-kling`, m, phase, from, undefined, false, "kling");
   }
 }
 /**

@@ -110,6 +110,7 @@ as `Operator alert not sent` and tried again next hour; it never stops maintenan
 | Social accounts that need reconnecting, marked in the last 24 hours | from **5** up | Many at once means a network revoked tokens, the app's credentials changed, or `TOKEN_ENCRYPTION_KEY` changed (never change it) |
 | Video stats reads that failed in the last hour | published posts whose last stats read failed, from **5** up | The network's stats API is failing (`Post stats failed`); reads are retried at the next interval |
 | Speech transcriptions that failed in the last hour | uploads whose speech status became failed (among the 5,000 newest files), from **3** up | ElevenLabs Scribe is failing (`Speech not found` with a code): `SPEECH_PERMISSION` means the API key lacks Speech to Text, `SPEECH_CREDITS` the ElevenLabs credits or quota are used up, `SPEECH_UNAVAILABLE` a bad key; the log `Scribe refused` has ElevenLabs' own reason, `SPEECH_BUSY` rate limits, `SPEECH_FILE` an unreadable file; people only lose the transcript |
+| Clips made with Kling in the last 24 hours because HeyGen couldn't make them | AI clips marked `meta.fallback` (among the 5,000 newest files), from **1** up | HeyGen failed, refused or was out of API credits for them (`HeyGen clip not made, making it with Kling` in the logs has the code): top up HeyGen's API credits or check its status, or set `FAL_CLIP_MODEL` back to `kling`. The videos were made |
 | Storage cleanup waiting for more than 1 day | `cleanup_tasks` older than a day | R2 deletes keep failing: look for `Maintenance stage failed` with stage `cleanup` |
 | Work set aside for a manual check in the last 24 hours | rows in `manual_reviews` | Section 5 |
 | Stripe: failed reconciliations, or paid periods overdue for renewal by over 4 days | the last nightly reconciliation's failures, plus active, non-cancelling subscriptions whose period ended over 4 days ago | Webhooks are being missed and the backstop can't read Stripe: check the endpoint, its secret and `STRIPE_SECRET_KEY` |
@@ -285,11 +286,14 @@ again by itself.
   HeyGen stopped supporting can be hidden in Admin → Presenters (its videos then fail with `AVATAR_GONE` only if they
   need a new presenter video).
 - **HeyGen Video 1 clips** (`heygen-video-1`; `GENERATION_*` like fal's): a clip HeyGen fails to make is asked for
-  once more as a new job (`HeyGen clip failed, asking for it again`, after its copy is deleted); a second failure ends
-  the run. `HeyGen clip failed` carries HeyGen's short code (`code`, e.g. `generation_failed`; `rejected: true` for a
-  content filter's refusal, which is not asked for again) and `HeyGen clip request failed` the HTTP status of a refused
-  call. Check the key and the API credits in HeyGen; `FAL_CLIP_MODEL` back to `kling` switches everyone over without a
-  deploy.
+  once more as a new job (`HeyGen clip failed, asking for it again`, after its copy is deleted). When HeyGen can't make
+  it after all (failed twice, refused it, the key or the API credits, busy, too slow) it is made with Kling instead, for
+  the same credits (`HeyGen clip not made, making it with Kling`, with the code), so the video is still made; HeyGen's
+  copies are deleted and the clip is marked `meta.fallback`. The hourly summary counts those clips ("Clips made with
+  Kling…"). `HeyGen clip failed` carries HeyGen's short code (`code`, e.g. `generation_failed`; `rejected: true` for a
+  content filter's refusal, which is not asked of HeyGen again) and `HeyGen clip request failed` the HTTP status of a
+  refused call. Check the key and the API credits in HeyGen; `FAL_CLIP_MODEL` back to `kling` switches everyone over
+  without a deploy.
 - **Renderer** (`RENDERER_UNAVAILABLE`, `MEDIA_TIMEOUT`, `MEDIA_LOST`): check Containers in the dashboard (instances
   running, the latest image rolled out, errors). Three containers render one job each; more work waits for a free
   one, and runs time out after about 40 minutes of waiting or rendering.
