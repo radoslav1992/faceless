@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Repeat, Search, Wand2 } from "lucide-react";
 import { errorText, newKey, post, useAuth } from "../lib";
@@ -11,7 +11,7 @@ import { creditBlock, CreditBlockNotice, MusicChoice, useOfferedVoice, VoiceSele
 import { categories, isTemplate, templateIds, templates, type CategoryId, type TemplateId } from "../../shared/templates";
 import { languages, type MusicMood } from "../../shared/series";
 import { specCredits, type StorySpec } from "../../shared/formats";
-import { storyStyles, type StoryStyle } from "../../shared/story";
+import { STORY_MAX_CHARS, storyStyles, type StoryStyle } from "../../shared/story";
 import { creditsLabel, SECONDS_PER_CREDIT, videoCredits } from "../../shared/credits";
 import "./create.css";
 
@@ -60,6 +60,8 @@ type Form = {
   /** Sound effects from the library: a whoosh on scene changes and sounds the writer picks (changed in the editor). */
   sounds: boolean;
 };
+/** Text that reads like a whole story rather than a topic: long, or several lines. */
+const storyLike = (text: string) => text.trim().length >= 280 || text.trim().split(/\n\s*\n|\n/).filter(Boolean).length >= 4;
 const formFor = (id: TemplateId, prompt = ""): Form => {
   const t = templates[id];
   return { prompt, script: "", title: "", animal: "", object: "", seconds: t.seconds, language: "en", voiceId: t.voice, style: t.style, music: t.music, musicTrackId: null, subject: "", sounds: true };
@@ -77,10 +79,14 @@ export function Create() {
   const [writing, setWriting] = useState(false);
   const [making, setMaking] = useState(false);
   const [key] = useState(newKey);
+  // A story pasted as a topic, taken to Text to video with the choices made so far (see the hint under the topic).
+  const carry = useRef<Partial<Form> | null>(null);
   // A new style starts from its own choices; a draft from the home page's demo fills in the storytime story.
   useEffect(() => {
     if (!template) return;
     const next = formFor(template, params.get("prompt") || "");
+    if (carry.current) Object.assign(next, carry.current);
+    carry.current = null;
     if (params.get("draft") === "demo") {
       try {
         const d = JSON.parse(localStorage.getItem(DEMO_DRAFT) || "null");
@@ -196,8 +202,19 @@ export function Create() {
           )}
           {(t.kind === "story" || t.kind === "pov") && (
             <label className="field"><span>{t.kind === "pov" ? "Scenario" : template === "custom" ? "What's the video about?" : "Topic or idea"}</span>
-              <textarea className="textarea" rows={3} maxLength={600} value={form.prompt} placeholder={t.examples[0]} onChange={(e) => set({ prompt: e.target.value })} />
-              <span className="row wrap" style={{ gap: 6 }}>{t.examples.map((x) => <button key={x} type="button" className="chip button" onClick={() => set({ prompt: x })}>{x}</button>)}</span>
+              <textarea className="textarea" rows={storyLike(form.prompt) ? 8 : 3} maxLength={STORY_MAX_CHARS} value={form.prompt} placeholder={t.examples[0]} onChange={(e) => set({ prompt: e.target.value })} />
+              {t.kind === "story" && storyLike(form.prompt) ? (
+                <span className="hint">
+                  This reads like a whole story: it will be retold in this style at the length you choose. Want your exact words, scene by
+                  scene?{" "}
+                  <button type="button" className="link" onClick={() => {
+                    carry.current = { script: form.prompt, style: form.style, voiceId: form.voiceId, music: form.music, musicTrackId: form.musicTrackId, language: form.language, subject: form.subject };
+                    setParams({ template: "script" });
+                  }}>Use Text to video</button>
+                </span>
+              ) : (
+                <span className="row wrap" style={{ gap: 6 }}>{t.examples.map((x) => <button key={x} type="button" className="chip button" onClick={() => set({ prompt: x })}>{x}</button>)}</span>
+              )}
             </label>
           )}
           {t.kind !== "script" && t.kind !== "backdrop" && (

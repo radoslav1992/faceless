@@ -14,7 +14,7 @@ import { nextSlot, seriesSettings } from "./series";
 import { cancelScheduled } from "./publishing";
 import { serveObject } from "./storage";
 import { templateIds, templates, type TemplateId } from "../shared/templates";
-import { storyStyleIds, storyStyles } from "../shared/story";
+import { STORY_MAX_CHARS, storyStyleIds, storyStyles } from "../shared/story";
 import { SECONDS_PER_CREDIT } from "../shared/credits";
 import { voiceIdSchema } from "../shared/voices";
 import { activeVoices } from "./voices";
@@ -92,8 +92,8 @@ async function videoOut(env: Env, v: any) {
 
 const createSchema = z.object({
   type: z.enum(templateIds as [TemplateId, ...TemplateId[]]).default("story"),
-  prompt: z.string().trim().max(600).default(""),
-  script: z.string().trim().max(2400).default(""),
+  prompt: z.string().trim().max(STORY_MAX_CHARS).default(""),
+  script: z.string().trim().max(STORY_MAX_CHARS).default(""),
   title: z.string().trim().max(140).default(""),
   animal: z.string().trim().max(60).default(""),
   object: z.string().trim().max(60).default(""),
@@ -260,7 +260,7 @@ const tools = [
       type: "object", additionalProperties: false,
       properties: {
         type: { type: "string", enum: templateIds, description: "Video type (see list_video_types). Default: story." },
-        prompt: { type: "string", description: "Topic, idea or scenario." },
+        prompt: { type: "string", description: "Topic, idea or scenario, or a whole story to retell in the type's style (up to 2,400 characters)." },
         script: { type: "string", description: "For type 'script': the exact words to narrate." },
         title: { type: "string", description: "For type 'storytime': the title question." },
         animal: { type: "string", description: "For type 'mashup': the animal." },
