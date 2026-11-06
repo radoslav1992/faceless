@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import worker from "../server/index";
 import { ContentGeneration } from "../server/content-workflow";
 import { planRender, type PlanContext } from "../server/render-plan";
-import { acceptScenePlan, acceptStory, conceptToSpec, storyShape } from "../server/story";
+import { acceptScenePlan, acceptStory, conceptToSpec, OWNER_RULE, storyShape } from "../server/story";
 import { acceptNewSounds, acceptSounds, rankSounds } from "../server/sounds";
 import { alignedWords, ALIGNMENT_URL, forcedAlignment, speak, SPEECH_MODEL } from "../server/providers/elevenlabs";
 import { adminClipModels, clipModelFor, falRequest, referenceModel, referencePrompt, submitFal } from "../server/providers/fal";
@@ -1252,6 +1252,18 @@ describe("planning and writing through the API", () => {
     expect(spec.scenes).toHaveLength(5);
     expect(seen[1].instructions).toMatch(/about 20 seconds of speech, about 300 characters in all, split into exactly 4 scenes/);
     expect(JSON.parse(seen[1].input).ownerRequest).toBe("octopus facts");
+    // The owner's request decides what the video is about; a whole story pasted as the topic is retold, not set aside.
+    expect(seen[1].instructions).toContain(OWNER_RULE);
+    expect(seen[1].instructions).toMatch(/retell that story in the template's tone/);
+    expect(seen[1].instructions).toContain("Never repeat a topic from the recent titles, unless the owner's request asks for it.");
+    const story = ["Every night, when the world falls asleep, a hidden library opens its doors.", "Inside, there are millions of books.", "A little boy wanders between the shelves."]
+      .join("\n\n").repeat(12).slice(0, 2400);
+    const told = await call(worker, env, "POST", "/api/story/draft", { template: "bedtime", prompt: story, seconds: 60 }, user.cookie);
+    expect(told.status).toBe(200);
+    const wrote = seen.filter((x) => x.instructions.startsWith("You write the script")).at(-1);
+    expect(JSON.parse(wrote.input).ownerRequest).toBe(story.trim());
+    // Longer than a script may be is refused, not cut.
+    expect((await call(worker, env, "POST", "/api/story/draft", { template: "bedtime", prompt: "x".repeat(2401) }, user.cookie)).status).toBe(400);
     expect(new Set(models)).toEqual(new Set(["openai/gpt-6-luna"]));
     // Drafting is free: nothing was charged or made.
     expect(env.CONTENT.created).toHaveLength(0);
