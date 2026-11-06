@@ -148,7 +148,10 @@ export async function start(env: Env, id: string, attempts: number): Promise<Out
     return await settle(env, l, await socialPlatforms[l.platform].publish(env, ctx), true);
   } catch (e) {
     const current = await env.DB.prepare("SELECT ticket FROM publications WHERE id=?").bind(id).first<{ ticket: string | null }>();
-    if (!current?.ticket || current.ticket === CLAIMED || nothingPosted(e)) {
+    // A gateway error (502/503/504) after the upload began says nothing of what the network has: it may have finished
+    // the post. Its status is checked (and the upload resumed), never started again, which could post it twice.
+    const gateway = e instanceof SocialError && [502, 503, 504].includes(e.status);
+    if (!current?.ticket || current.ticket === CLAIMED || (nothingPosted(e) && !gateway)) {
       await env.DB.prepare("UPDATE publications SET ticket=NULL WHERE id=? AND attempts=?").bind(id, attempts).run();
       return failedFrom(e);
     }

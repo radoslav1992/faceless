@@ -445,7 +445,7 @@ class ValidationTest(RendererTest):
             self.base(urls=[photo.replace('http://', 'http://user@')]),
             self.base(urls=photo),
             self.base(width=4096, height=4096), self.base(width=1280, height=720), self.base(width='720'),
-            self.segment(duration=0.2), self.segment(duration=121), self.segment(duration='1'), self.segment(duration=float('nan')),
+            self.segment(duration=0.2), self.segment(duration=server.MAX_OUTPUT + 2), self.segment(duration='1'), self.segment(duration=float('nan')),
             self.segment(duration=10 ** 400), self.segment(motion='spin'), self.segment(fit='stretch'), self.segment(kind='gif'),
             self.base(segments=[]), self.base(segments=[{'kind': 'color', 'color': '#00000', 'duration': 1}]),
             self.base(segments=[{'kind': 'color', 'color': '#000000\n', 'duration': 1}]),
@@ -507,6 +507,14 @@ class UnitTest(unittest.TestCase):
         self.assertIn("zoompan=z='1.12':x='(iw-iw/zoom)*on/23'", server.motion_filter('pan-right', 720, 1280, 0.8))
         self.assertIn("z='1+0.12*on/23'", server.motion_filter('zoom-in', 720, 1280, 0.8))
         with self.assertRaises(ValueError): server.motion_filter('spin', 720, 1280, 1)
+
+    def test_one_segment_can_last_the_whole_video_and_subtitles_fit_the_request(self):
+        # A 2:50 clip of a long video, or a story over one background picture, is a single segment.
+        self.assertEqual(server.segment_plan({'kind': 'image', 'input': 0, 'duration': 170}, 1, 1080, 1920)['frames'], 170 * server.FPS)
+        self.assertEqual(server.segment_plan({'kind': 'video', 'input': 0, 'duration': 180.4}, 1, 1080, 1920)['frames'], round(180.4 * server.FPS))
+        with self.assertRaises(ValueError): server.segment_plan({'kind': 'image', 'input': 0, 'duration': server.MAX_OUTPUT + 2}, 1, 1080, 1920)
+        # Animated ("wave") subtitles of a 3-minute video are about 3.4 MiB of JSON.
+        self.assertGreaterEqual(server.MAX_BODY, 4 * 1024 * 1024)
 
     def test_captions_load_the_bundled_fonts(self):
         with tempfile.TemporaryDirectory(dir=WORK) as directory:
@@ -617,7 +625,7 @@ class HttpTest(RendererTest):
         self.assertEqual(self.call('POST', '/jobs', b'[1, 2]')[0], 400)
         self.assertEqual(self.call('POST', '/other', {})[0], 404)
         connection = http.client.HTTPConnection('127.0.0.1', self.httpd.server_address[1], timeout=10)
-        connection.putrequest('POST', '/jobs'); connection.putheader('Content-Length', str(3 * 1024 * 1024)); connection.endheaders()
+        connection.putrequest('POST', '/jobs'); connection.putheader('Content-Length', str(9 * 1024 * 1024)); connection.endheaders()
         self.assertEqual(connection.getresponse().status, 413)
         connection.close()
         self.assertEqual(server.JOBS, {})

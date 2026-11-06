@@ -285,8 +285,10 @@ again by itself.
   (`HeyGen copy could not be deleted; remove it in HeyGen` after two weeks: delete it in HeyGen by hand). A presenter
   HeyGen stopped supporting can be hidden in Admin → Presenters (its videos then fail with `AVATAR_GONE` only if they
   need a new presenter video).
-- **HeyGen Video 1 clips** (`heygen-video-1`; `GENERATION_*` like fal's): a clip HeyGen fails to make is asked for
-  once more as a new job (`HeyGen clip failed, asking for it again`, after its copy is deleted). When HeyGen can't make
+- **HeyGen Video 1 clips** (`heygen-video-1`; `GENERATION_*` like fal's): a passing problem reaching HeyGen (no
+  answer, a 5xx, a 429) is never counted as a failure: the request is sent again with the same Idempotency-Key, and a
+  job being made is asked about again later (`HeyGen clip request failed` logs each, with its status). A clip HeyGen
+  fails to make is asked for once more as a new job (`HeyGen clip failed, asking for it again`, after its copy is deleted). When HeyGen can't make
   it after all (failed twice, refused it, the key or the API credits, busy, too slow) it is made with Kling instead, for
   the same credits (`HeyGen clip not made, making it with Kling`, with the code), so the video is still made; HeyGen's
   copies are deleted and the clip is marked `meta.fallback`. The hourly summary counts those clips ("Clips made with

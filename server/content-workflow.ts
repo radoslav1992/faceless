@@ -11,7 +11,7 @@ import { fetchOutput } from "./providers/http";
 import { canFallBack, clipModelFor, falResult, falStatus, referenceModel, submitFal, type FalTicket, type Reference } from "./providers/fal";
 import { isAdmin } from "./auth";
 import { forcedAlignment, speak } from "./providers/elevenlabs";
-import { avatarVideoStatus, heygenClipRequest, heygenClipStatus, submitAvatarVideo, submitHeyGenClip } from "./providers/heygen";
+import { avatarVideoStatus, heygenClipRequest, heygenClipStatus, heygenRetry, submitAvatarVideo, submitHeyGenClip } from "./providers/heygen";
 import { avatarFor, forgetHeyGenVideo } from "./avatars";
 import { releaseRender, renderFailures, renderFile, renderStatus, submitRender } from "./renderer";
 import { planRender, type Media, type Plan, type PlanContext } from "./render-plan";
@@ -202,9 +202,14 @@ async function generateMedia(
     const s = await readState(e, run.id);
     const existing = s.assets?.[name] && await e.DB.prepare("SELECT id FROM media_assets WHERE id=? AND status='ready'").bind(s.assets[name]).first();
     if (existing) return s.assets![name];
-    // HeyGen's download link is signed: asked for afresh, so a later retry gets one that still works.
-    const fresh = job ? await heygenClipStatus(e, job) : null;
-    if (fresh && !fresh.done) throw new Error("GENERATION_FAILED");
+    // HeyGen's download link is signed: asked for afresh, so a later retry gets one that still works (a few tries when
+    // HeyGen can't answer for now: the clip is made and paid, so it is never given up for a passing problem).
+    let fresh = job ? await heygenClipStatus(e, job) : null;
+    for (let i = 0; fresh && !fresh.done && fresh.transient && i < 3; i++) {
+      await new Promise((resolve) => setTimeout(resolve, heygenRetry.ms));
+      fresh = await heygenClipStatus(e, job!);
+    }
+    if (fresh && !fresh.done) throw new Error(fresh.transient ? "GENERATION_STATUS" : "GENERATION_FAILED");
     const url = fresh?.done ? fresh.url : await falResult(e, kind, ticket as FalTicket);
     const assetId = s.assets?.[name] || uid();
     await patchState(e, run.id, (s) => { (s.assets ||= {})[name] = assetId; });
@@ -434,6 +439,8 @@ async function drawPicture(e: Env, step: WorkflowStep, run: RunInfo, name: strin
     return generateMedia(e, step, run, `${name}-again`, m, phase, undefined, references, true);
   });
 }
+/** HeyGen's answers that mean it didn't make the clip: failed it (twice), refused it, the key or its credits, too busy, too slow. */
+const KLING_INSTEAD = ["GENERATION_FAILED", "GENERATION_REJECTED", "GENERATION_UNAVAILABLE", "GENERATION_BUSY", "GENERATION_TIMEOUT"];
 /** A scene's clip model: the one an administrator chose for it (when they may), else everyone's (FAL_CLIP_MODEL). */
 async function sceneClipModel(e: Env, run: RunInfo, m: PendingMedia) {
   return clipModelFor(e, m.clipModel ? await ownerIsAdmin(e, run.user_id) : false, m.clipModel);
@@ -461,8 +468,9 @@ async function makeClip(e: Env, step: WorkflowStep, run: RunInfo, name: string, 
     }
   } catch (error) {
     const code = (error as Error)?.message;
-    // A request whose answer was lost may have been accepted: never paid for twice.
-    if (code === "GENERATION_UNCERTAIN") throw error;
+    // Only when HeyGen didn't make the clip. Anything else (a request whose answer was lost, a made clip HeyGen can't
+    // hand over for now, our own storage or database) ends the run: a Kling clip would be paid for on top.
+    if (!KLING_INSTEAD.includes(code)) throw error;
     console.warn("HeyGen clip not made, making it with Kling", { runId: run.id, name, code });
     await step.do(`${name}-forget-heygen`, safe, async () => {
       const tickets = (await readState(e, run.id)).tickets || {};

@@ -57,12 +57,14 @@ export function addMonths(start: number, n: number) {
 /**
  * The month of a paid period `t` falls in: monthly periods are one month (0); a longer one (yearly, or a grant of
  * several months) is cut into calendar months from its start, so its credits come month by month like a monthly plan's.
+ * Past the period's end (a renewal not confirmed yet, RENEWAL_GRACE) it stays in the last month: no month starts at
+ * or after the end, so a year never gets a 13th month of credits.
  */
 export function periodMonth(start: number, end: number, t: number) {
   if (end - start <= 40 * DAY) return { index: 0, start, end };
   const at = (n: number) => addMonths(start, n);
   let index = 0;
-  while (index < 12 && at(index + 1) <= t) index++;
+  while (index < 240 && at(index + 1) < end && at(index + 1) <= t) index++;
   return { index, start: at(index), end: Math.min(end, at(index + 1)) };
 }
 

@@ -62,6 +62,23 @@ describe("auth", () => {
     expect(sqlite.prepare("SELECT COUNT(*) AS n FROM users WHERE id=?").get(user.id)).toEqual({ n: 0 });
     expect(sqlite.prepare("SELECT prefix FROM cleanup_tasks").all()).toEqual([{ prefix: `media/${user.id}/` }]);
   });
+  it("refuses to delete an account while something is being made, before its paid plan is touched", async () => {
+    const { env, sqlite } = testEnv({ STRIPE_SECRET_KEY: "sk_test_local_only" });
+    const user = signedIn(sqlite);
+    sqlite.prepare("UPDATE users SET password_hash=?,stripe_customer='cus_busy' WHERE id=?").run(await hashPassword("a-long-password"), user.id);
+    sqlite.prepare("INSERT INTO usage_windows(id,user_id,quota) VALUES (?,?,10)").run(`${user.id}:trial`, user.id);
+    sqlite.prepare("INSERT INTO runs(id,user_id,window_id,idempotency_key,kind,status,created_at,updated_at) VALUES ('r1',?,?,'k1','video','running',1,1)")
+      .run(user.id, `${user.id}:trial`);
+    const stripe: string[] = [];
+    vi.stubGlobal("fetch", async (url: any) => { stripe.push(String(url)); return Response.json({ data: [] }); });
+    const r = await call(worker, env, "DELETE", "/api/settings/account", { password: "a-long-password" }, user.cookie);
+    expect(r.status).toBe(409);
+    expect(r.data.error).toMatch(/still being made or published/);
+    // Stripe was never asked to cancel anything, and the account is still there.
+    expect(stripe).toEqual([]);
+    expect(sqlite.prepare("SELECT COUNT(*) AS n FROM users WHERE id=?").get(user.id)).toEqual({ n: 1 });
+    vi.unstubAllGlobals();
+  });
 });
 
 describe("plans and usage windows", () => {
@@ -99,6 +116,10 @@ describe("plans and usage windows", () => {
     // A start on the 31st falls back to the last day of shorter months, as Stripe does.
     expect(periodMonth(start, end, Date.UTC(2026, 1, 15) / 1000)).toEqual({ index: 0, start, end: Date.UTC(2026, 1, 28) / 1000 });
     expect(periodMonth(start, end, Date.UTC(2026, 2, 5) / 1000)).toEqual({ index: 1, start: Date.UTC(2026, 1, 28) / 1000, end: Date.UTC(2026, 2, 31) / 1000 });
+    // Past the year's end, while the renewal isn't confirmed yet: still the 12th month, never a 13th with new credits.
+    const yearEnd = Date.UTC(2027, 0, 31) / 1000;
+    expect(periodMonth(start, yearEnd, yearEnd - 86400)).toMatchObject({ index: 11 });
+    expect(periodMonth(start, yearEnd, yearEnd + 2 * 86400)).toMatchObject({ index: 11, end: yearEnd });
     const { env, sqlite } = testEnv();
     const a = signedIn(sqlite);
     subscribe(sqlite, a.id, "starter", { days: 365, startedAgo: 40 * 86400 });

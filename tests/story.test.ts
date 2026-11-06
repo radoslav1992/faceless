@@ -6,7 +6,7 @@ import { acceptScenePlan, acceptStory, conceptToSpec, OWNER_RULE, storyShape } f
 import { acceptNewSounds, acceptSounds, rankSounds } from "../server/sounds";
 import { alignedWords, ALIGNMENT_URL, forcedAlignment, speak, SPEECH_MODEL } from "../server/providers/elevenlabs";
 import { adminClipModels, clipModelFor, falRequest, referenceModel, referencePrompt, submitFal } from "../server/providers/fal";
-import { heygenClipRequest } from "../server/providers/heygen";
+import { heygenClipRequest, heygenRetry } from "../server/providers/heygen";
 import { attention } from "../server/operations";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 import { estimatedSeconds, narrationCurrent, pendingMedia, pictureSheets, specCredits, specSchema, storySpec, type StorySpec } from "../shared/formats";
@@ -722,14 +722,14 @@ function alignment() {
  * ElevenLabs (speech, forced alignment) and fal; `refuseClip` makes the clip model refuse, `refuse` the models it
  * names when their result is read (as Nano Banana does); `timings` false drops them.
  */
-function providers({ refuseClip = false, refuseHeyGen = false, heygenFails = 0, heygenDown = false, timings = true, refuse = (() => false) as (model: string) => boolean } = {}) {
-  const calls: { method: string; url: string; body?: any }[] = [];
+function providers({ refuseClip = false, refuseHeyGen = false, heygenFails = 0, heygenDown = false, heygenHiccups = false, timings = true, refuse = (() => false) as (model: string) => boolean } = {}) {
+  const calls: { method: string; url: string; body?: any; headers?: Headers }[] = [];
   const failing = new Set<string>();
   let n = 0;
   vi.stubGlobal("fetch", async (input: any, init: any = {}) => {
     const url = String(input?.url ?? input), method = init.method || input?.method || "GET";
     const body = typeof init.body === "string" ? JSON.parse(init.body) : init.body instanceof FormData ? Object.fromEntries([...init.body.entries()].map(([k, v]) => [k, typeof v === "string" ? v : `file:${(v as File).size}`])) : undefined;
-    calls.push({ method, url, body });
+    calls.push({ method, url, body, headers: new Headers(init.headers || input?.headers) });
     if (url === ALIGNMENT_URL) return Response.json({ words: words.map((w) => ({ ...w, loss: 0.1 })), characters: [], loss: 0.1 });
     if (url.includes("api.elevenlabs.io")) return Response.json({ audio_base64: Buffer.from(new Uint8Array(DURATION * 48000)).toString("base64"), ...(timings && { alignment: alignment() }) });
     const fal = url.match(/^https:\/\/queue\.fal\.run\/(.+?)(\/requests\/.*)?$/);
@@ -745,6 +745,8 @@ function providers({ refuseClip = false, refuseHeyGen = false, heygenFails = 0, 
     if (url === "https://api.heygen.com/v3/models/videos" && method === "POST") {
       // Out of API credits: HeyGen answers 400.
       if (heygenDown) return Response.json({ error: { code: "insufficient_credits", message: "Insufficient credits" } }, { status: 400 });
+      // A gateway error on the first try (HeyGen may or may not have the job: the same Idempotency-Key finds it).
+      if (heygenHiccups && calls.filter((c) => c.url === url).length === 1) return new Response("bad gateway", { status: 502 });
       const id = `hv${++n}`;
       // The first `heygenFails` jobs fail at HeyGen.
       if (calls.filter((c) => c.url === url).length <= heygenFails) failing.add(id);
@@ -754,6 +756,8 @@ function providers({ refuseClip = false, refuseHeyGen = false, heygenFails = 0, 
     if (hv) {
       const polls = calls.filter((c) => c.url === url).length;
       if (polls === 1) return Response.json({ data: { video_id: hv[1], status: "processing" } });
+      // HeyGen can't answer for a moment: the job is still fine.
+      if (heygenHiccups && (polls === 2 || polls === 4)) return new Response("unavailable", { status: 503 });
       if (refuseHeyGen) return Response.json({ data: { video_id: hv[1], status: "failed", failure_code: "generation_failed", failure_message: "Content moderation" } });
       if (failing.has(hv[1])) return Response.json({ data: { video_id: hv[1], status: "failed", failure_code: "generation_failed", failure_message: "Internal error" } });
       return Response.json({ data: { video_id: hv[1], status: "completed", video_url: `https://resource2.heygen.ai/videos/${hv[1]}.mp4?sig=${polls}` } });
@@ -992,6 +996,28 @@ describe("narrated videos in the content run", () => {
     await run();
     expect(used()).toBe(charged);
     expect(sqlite.prepare("SELECT status,error FROM runs ORDER BY created_at DESC, rowid DESC LIMIT 1").get()).toMatchObject({ status: "failed", error: "GENERATION_REJECTED" });
+  });
+
+  it("never pays HeyGen twice for a passing problem: a gateway error or no answer is asked again, not counted as a failure", async () => {
+    const { env, user, spec, used, run } = await setup();
+    env.HEYGEN_API_KEY = "hg";
+    env.FAL_CLIP_MODEL = "heygen-video-1";
+    heygenRetry.ms = 1;
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const calls = providers({ heygenHiccups: true });
+    const before = used();
+    const made = await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    await run();
+    // The submit is sent again with the same Idempotency-Key (HeyGen answers with the job it already has).
+    const posts = calls.filter((c) => c.method === "POST" && c.url === "https://api.heygen.com/v3/models/videos");
+    expect(posts).toHaveLength(2);
+    expect(posts[0].headers!.get("Idempotency-Key")).toBe(posts[1].headers!.get("Idempotency-Key"));
+    // A 503 while it is being made, and again when the finished clip's link is fetched: one job, no Kling, no retry.
+    const jobs = new Set(calls.filter((c) => /\/models\/videos\/hv\d+$/.test(c.url)).map((c) => c.url));
+    expect(jobs.size).toBe(1);
+    expect(calls.some((c) => c.method === "POST" && /kling-video/.test(c.url))).toBe(false);
+    expect((await call(worker, env, "GET", `/api/videos/${made.data.id}`, undefined, user.cookie)).data.video.renderStatus).not.toBe("failed");
+    expect(used()).toBe(before + made.data.credits);
   });
 
   it("asks HeyGen once more for a clip it failed to make, then makes it with Kling; without credits, with Kling at once", async () => {

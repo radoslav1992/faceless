@@ -4,7 +4,7 @@ import { deleteCookie } from "hono/cookie";
 import { z } from "zod";
 import type { App } from "../types";
 import { checkPassword, defer, hashPassword, rate } from "../security";
-import { dbFailure } from "../db";
+import { ACTIVE, dbFailure } from "../db";
 import { endPaidAccess } from "../billing";
 import { SESSION_COOKIE } from "../auth";
 import { revokeAccess } from "../social/credentials";
@@ -35,6 +35,12 @@ settings.delete("/account", async (c) => {
   await rate(c, "account-delete", 5, 3600, user.id);
   const d = z.object({ password: z.string().min(1).max(128) }).parse(await c.req.json());
   if (!(await checkPassword(d.password, user.password_hash))) throw new HTTPException(400, { message: "Your password isn't right." });
+  // Refused while something is being made or published (the user_busy trigger): asked first, so a refused deletion
+  // never cancels the paid plan of an account that stays.
+  const busy = await c.env.DB.prepare(
+    `SELECT EXISTS(SELECT 1 FROM runs WHERE user_id=?1 AND status IN ${ACTIVE}) OR EXISTS(SELECT 1 FROM publications WHERE user_id=?1 AND status='publishing') AS busy`,
+  ).bind(user.id).first<{ busy: number }>();
+  if (busy?.busy) dbFailure(new Error("USER_BUSY"));
   if (user.stripe_customer && c.env.STRIPE_SECRET_KEY) await endPaidAccess(c.env, user.stripe_customer, "deletion");
   const accounts = (await c.env.DB.prepare("SELECT id,platform,credentials FROM social_accounts WHERE user_id=?").bind(user.id)
     .all<{ id: string; platform: PlatformId; credentials: string }>()).results;
