@@ -29,15 +29,10 @@ async function failure(r: Response) {
   await r.body?.cancel();
   return new ProviderError(r.status === 401 || r.status === 402 || r.status === 403 ? "AVATAR_UNAVAILABLE" : r.status === 429 ? "AVATAR_BUSY" : "AVATAR_FAILED");
 }
-async function call(env: Env, path: string, init: RequestInit & { timeout?: number; prefix?: Prefix } = {}) {
-  const { timeout = 45000, prefix = "AVATAR", ...rest } = init;
-  const r = await providerFetch(`${API}${path}`, { ...rest, headers: { ...headers(env, prefix), ...(rest.headers as Record<string, string>) }, signal: AbortSignal.timeout(timeout) })
-    .catch((e) => { throw e instanceof ProviderError ? e : new ProviderError(`${prefix}_FAILED`); });
-  if (!r.ok && prefix === "GENERATION") {
-    // A clip's refusal is read like fal's (a content filter, the account's credits: HeyGen answers 400 for those too).
-    console.warn("HeyGen clip request failed", { status: r.status });
-    throw new ProviderError(await failureCode(r, "GENERATION"));
-  }
+async function call(env: Env, path: string, init: RequestInit & { timeout?: number } = {}) {
+  const { timeout = 45000, ...rest } = init;
+  const r = await providerFetch(`${API}${path}`, { ...rest, headers: { ...headers(env), ...(rest.headers as Record<string, string>) }, signal: AbortSignal.timeout(timeout) })
+    .catch((e) => { throw e instanceof ProviderError ? e : new ProviderError("AVATAR_FAILED"); });
   if (!r.ok) throw await failure(r);
   return r;
 }
@@ -164,20 +159,60 @@ export function heygenClipRequest(prompt: string, image: string, seconds: number
     resolution: quality === "high" ? "1080p" : "768p",
   };
 }
-/** Asks for a clip, paid once: `key` is the Idempotency-Key, so a resent request finds the same job. Its job ID. */
-export async function submitHeyGenClip(env: Env, key: string, request: ReturnType<typeof heygenClipRequest>) {
-  const r = await call(env, "/models/videos", {
-    method: "POST", timeout: 60000, prefix: "GENERATION",
-    headers: { "Content-Type": "application/json", "Idempotency-Key": key },
-    body: JSON.stringify(request),
-  });
-  const body = await r.json() as any;
-  if (body?.error || !body?.data?.video_id) throw new ProviderError("GENERATION_FAILED");
-  return validId(body.data.video_id, "GENERATION");
+/** Pause between tries of a HeyGen Video call (milliseconds; tests shorten it). */
+export const heygenRetry = { ms: 2000 };
+/**
+ * A HeyGen Video call, telling a passing problem from HeyGen's answer: no answer (network, timeout), a server or gateway
+ * error (5xx), too many requests (429) or the same request still being handled (409) is "transient": the call can be
+ * made again, and a job may well be fine. Any other refusal is HeyGen's (a content filter, the key or its credits).
+ */
+async function clipCall(env: Env, path: string, init: RequestInit & { timeout?: number } = {}): Promise<Response | "transient"> {
+  const { timeout = 45000, ...rest } = init;
+  let r: Response;
+  try {
+    r = await providerFetch(`${API}${path}`, { ...rest, headers: { ...headers(env, "GENERATION"), ...(rest.headers as Record<string, string>) }, signal: AbortSignal.timeout(timeout) });
+  } catch (e) {
+    if (e instanceof ProviderError) throw e;
+    console.warn("HeyGen clip request failed", { status: 0 });
+    return "transient";
+  }
+  if (r.ok) return r;
+  console.warn("HeyGen clip request failed", { status: r.status });
+  if (r.status >= 500 || r.status === 429 || r.status === 409) {
+    await r.body?.cancel();
+    return "transient";
+  }
+  // A clip's refusal is read like fal's (a content filter, the account's credits: HeyGen answers 400 for those too).
+  throw new ProviderError(await failureCode(r, "GENERATION"));
 }
-/** A clip's state: queued or being made, or done with its download link (signed: asked again for a fresh one). */
-export async function heygenClipStatus(env: Env, jobId: string): Promise<{ done: false } | { done: true; url: string }> {
-  const body = await (await call(env, `/models/videos/${validId(jobId, "GENERATION")}`, { prefix: "GENERATION" })).json() as any;
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Asks for a clip, paid once: `key` is the Idempotency-Key, so a request sent again (no answer, a server error) finds
+ * the same job instead of paying for another. Its job ID; GENERATION_FAILED when HeyGen can't be reached after 3 tries.
+ */
+export async function submitHeyGenClip(env: Env, key: string, request: ReturnType<typeof heygenClipRequest>) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt) await pause(heygenRetry.ms * attempt);
+    const r = await clipCall(env, "/models/videos", {
+      method: "POST", timeout: 60000,
+      headers: { "Content-Type": "application/json", "Idempotency-Key": key },
+      body: JSON.stringify(request),
+    });
+    if (r === "transient") continue;
+    const body = await r.json() as any;
+    if (body?.error || !body?.data?.video_id) throw new ProviderError("GENERATION_FAILED");
+    return validId(body.data.video_id, "GENERATION");
+  }
+  throw new ProviderError("GENERATION_FAILED");
+}
+/**
+ * A clip's state: queued or being made, or done with its download link (signed: asked again for a fresh one). When
+ * HeyGen can't answer for now (`transient`), the job is not known to have failed: it is asked again later.
+ */
+export async function heygenClipStatus(env: Env, jobId: string): Promise<{ done: false; transient?: true } | { done: true; url: string }> {
+  const r = await clipCall(env, `/models/videos/${validId(jobId, "GENERATION")}`);
+  if (r === "transient") return { done: false, transient: true };
+  const body = await r.json() as any;
   const data = body?.data;
   if (body?.error || !data || data.video_id !== jobId) throw new ProviderError("GENERATION_FAILED");
   if (data.status === "pending" || data.status === "processing") return { done: false };

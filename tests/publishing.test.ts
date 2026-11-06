@@ -810,6 +810,26 @@ describe("publishing", () => {
     expect(bytesOf(puts[2])).toEqual(fill(4096, 1).slice(1000));
   });
 
+  it("checks a YouTube upload that ended in a gateway error instead of uploading the video a second time", async () => {
+    const s = setup();
+    const account = await addAccount(s, "youtube");
+    const pubId = addPublication(s, await addVideo(s), account, "youtube");
+    const session = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&upload_id=gw";
+    const calls = mockFetch([
+      ["POST", "https://www.googleapis.com/upload/youtube/v3/videos", () => new Response(null, { status: 200, headers: { Location: session } })],
+      ["PUT", session, sequence(
+        // The last (only) chunk: the gateway times out, but YouTube has the whole file.
+        () => ok({ error: { errors: [{ reason: "backendError" }] } }, { status: 503 }),
+        () => ok({ id: "gatewayvid1", status: { uploadStatus: "uploaded" } }),
+      )],
+    ]);
+    const p = await publish(s, pubId);
+    expect(p).toMatchObject({ status: "published", external_id: "gatewayvid1" });
+    // One upload session: the status was asked (Content-Range bytes */size), no new upload was started.
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+    expect(calls.filter((c) => c.method === "PUT").map((c) => c.headers.get("Content-Range"))).toEqual(["bytes 0-4095/4096", "bytes */4096"]);
+  });
+
   it("marks the account expired when its token cannot be refreshed", async () => {
     const s = setup();
     const account = await addAccount(s, "tiktok", { tokens: { expiresAt: now() - 10 } });

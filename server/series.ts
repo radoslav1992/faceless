@@ -138,8 +138,10 @@ series.patch("/:id", async (c) => {
   }).parse(await c.req.json());
   // Partial updates are merged into the stored settings and validated as a whole.
   const settings = d.settings ? seriesSettingsSchema.parse({ ...seriesSettings(s), ...d.settings }) : seriesSettings(s);
-  await checkSettings(c.env, user, s.template, settings, seriesSettings(s).voiceId);
   const status = d.status ?? s.status;
+  // New settings, or a series about to run again, must be valid now. Pausing or renaming never is refused: a series
+  // saved before a rule existed (the "made for kids" answer, a track since switched off) can always be stopped.
+  if (d.settings || (status === "active" && s.status !== "active")) await checkSettings(c.env, user, s.template, settings, seriesSettings(s).voiceId);
   // A new schedule or a resumed series starts again from the next slot from now (made slots are never made twice).
   const restart = status === "active" && (s.status !== "active" || JSON.stringify(settings.schedule) !== JSON.stringify(seriesSettings(s).schedule));
   const next = restart ? nextSlot(settings, now() + 10 * MINUTE) : s.next_slot;

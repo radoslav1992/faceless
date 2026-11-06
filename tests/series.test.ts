@@ -289,4 +289,22 @@ describe("changing a series", () => {
     expect(row(id)).toBeUndefined();
     expect((sqlite.prepare("SELECT series_id FROM videos WHERE id=?").get(v.id) as any).series_id).toBeNull();
   });
+
+  it("always pauses, even a series saved before a rule its settings now break; resuming checks them", async () => {
+    const { env, sqlite, user, create } = setup();
+    const id = (await create()).data.series.id;
+    // Saved before YouTube's "made for kids" question: it posts to a YouTube channel without an answer.
+    sqlite.prepare("INSERT INTO social_accounts(id,user_id,platform,external_id,name,credentials,status,created_at,updated_at) VALUES (?,?,'youtube','c2','Channel','x','active',1,1)")
+      .run("00000000-0000-4000-8000-0000000000bb", user.id);
+    sqlite.prepare("UPDATE series SET settings=json_set(json_remove(settings,'$.madeForKids'),'$.accounts',json_array(?)) WHERE id=?").run("00000000-0000-4000-8000-0000000000bb", id);
+    const paused = await call(worker, env, "PATCH", `/api/series/${id}`, { status: "paused" }, user.cookie);
+    expect(paused.status).toBe(200);
+    expect(paused.data.series.status).toBe("paused");
+    // A rename is never refused either; running it again needs the answer first.
+    expect((await call(worker, env, "PATCH", `/api/series/${id}`, { name: "Renamed" }, user.cookie)).status).toBe(200);
+    const resumed = await call(worker, env, "PATCH", `/api/series/${id}`, { status: "active" }, user.cookie);
+    expect(resumed.status).toBe(400);
+    expect(resumed.data.error).toMatch(/made for kids/);
+    expect((await call(worker, env, "PATCH", `/api/series/${id}`, { status: "active", settings: { madeForKids: false } }, user.cookie)).data.series.status).toBe("active");
+  });
 });

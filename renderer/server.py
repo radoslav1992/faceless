@@ -20,7 +20,7 @@ from xml.sax.saxutils import escape, quoteattr
 JOBS = {}
 LOCK = threading.Lock()
 OPERATIONS = ('compose', 'stills', 'inspect', 'track', 'preview')
-MAX_BODY = 2 * 1024 * 1024          # bytes of a POST /jobs payload
+MAX_BODY = 8 * 1024 * 1024          # bytes of a POST /jobs payload (a 3-minute video's animated subtitles are over 3 MiB)
 MAX_BYTES = 2 * 1024 * 1024 * 1024  # bytes of one downloaded input (long videos for clips, ~1.9 GB uploads)
 MAX_SIDE = 4096                     # pixels on either side of an input picture
 MAX_VIDEO_PIXELS = 9_000_000        # pixels of one input video frame
@@ -418,7 +418,8 @@ def keep_ranges(keep, frames):
 def segment_plan(s, count, width, height):
     if not isinstance(s, dict): raise ValueError('Invalid segment')
     # Durations are snapped to the frame grid, so picture and sound of every segment have exactly the same length.
-    frames = int(round(number(s.get('duration'), 0.5, 120) * FPS))
+    # One segment can be the whole video (a clip of a long video, a story over one background picture): up to its limit.
+    frames = int(round(number(s.get('duration'), 0.5, MAX_OUTPUT + 1) * FPS))
     mode = s.get('fit') if s.get('fit') is not None else 'cover'
     if mode not in ('cover', 'contain'): raise ValueError('Invalid fit')
     motion = s.get('motion')
