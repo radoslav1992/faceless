@@ -55,17 +55,18 @@ npx wrangler d1 migrations list faceless --remote   # nothing left to apply
   caption fonts. It also installs OpenCV and downloads the YuNet face model at a fixed commit, checked against its
   SHA-256, so the build needs network access to `media.githubusercontent.com`. Each `standard-2` instance runs one
   render at a time.
-- **Domain**: `hookstreak.app` (and `www.hookstreak.app`, which redirects to it) are custom domains in `routes`, with
-  `SITE_URL=https://hookstreak.app` and `CONTACT_EMAIL=hello@hookstreak.app` in `vars`. Both domains used to belong to
-  the ad-app Worker (hookstreak.com): deploy ad-app without them first (a domain belongs to one Worker at a time), and if
-  they still show under ad-app's Domains & Routes, remove them there. hookstreak.app has Email Sending onboarded in
-  Cloudflare (mail goes out from `hello@hookstreak.app`), and Email Routing forwards mail sent to that address
-  (replies, and the contact address on the legal pages) to the operator's inbox. `allowed_sender_addresses` also keeps
-  `hello@hookstreak.com` for a dashboard `EMAIL_FROM` that still names it; change `CONTACT_EMAIL`, `EMAIL_FROM` and the
-  allowed senders together. The Worker sends every other host (except `*.workers.dev` and localhost) to the same path
-  on `SITE_URL` (308). `SITE_URL` must be the public `https`
-  origin: the renderer downloads only from it, and OAuth redirect URIs and the providers' input links are built from
-  it.
+- **Domain**: `hookstreak.app` is the public address, with `SITE_URL=https://hookstreak.app` and
+  `CONTACT_EMAIL=hello@hookstreak.app` in `vars`. `www.hookstreak.app`, `hookstreak.com` and `www.hookstreak.com` are
+  custom domains in `routes` too, and redirect to it. A domain belongs to one Worker at a time. All four used to be the
+  ad-app Worker's. A deploy from CI runs without a terminal, so wrangler moves a custom domain from another Worker
+  without asking. That cuts both ways: ad-app's `wrangler.jsonc` must not list them, or its next deploy (Workers Builds)
+  takes them back. If one still shows under ad-app's Domains & Routes, remove it there. hookstreak.app has Email Sending
+  onboarded in Cloudflare (mail goes out from `hello@hookstreak.app`), and Email Routing forwards mail sent to that
+  address (replies, and the contact address on the legal pages) to the operator's inbox. `allowed_sender_addresses` also
+  keeps `hello@hookstreak.com` for a dashboard `EMAIL_FROM` that still names it; change `CONTACT_EMAIL`, `EMAIL_FROM`
+  and the allowed senders together. The Worker sends every other host (except `*.workers.dev` and localhost) to the same
+  path on `SITE_URL` (308). `SITE_URL` must be the public `https` origin: the renderer downloads only from it, and OAuth
+  redirect URIs and the providers' input links are built from it.
 - **The domain's security settings** must let machines read the capability links: the renderer, fal, TikTok and
   Instagram download `/api/render-inputs/`, `/api/upload-inputs/` and `/api/publish-media/` (each link
   carries its own token). A challenge there fails every video with "A file in this post couldn't be loaded". Keep Bot
