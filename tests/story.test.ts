@@ -279,6 +279,8 @@ describe("the format", () => {
       image: { type: "url", url: image }, duration: 5, resolution: "768p",
     });
     expect(heygenClipRequest("A wave.", image, 10, "high")).toMatchObject({ duration: 10, resolution: "1080p" });
+    // Any whole number of seconds HeyGen takes (5 to 30), rounded up.
+    expect([4, 6, 6.2, 40].map((n) => heygenClipRequest("A wave.", image, n).duration)).toEqual([5, 6, 7, 30]);
     expect(adminClipModels({ FAL_CLIP_MODEL_ADMIN: "heygen-video-1" } as any)).toEqual(["kling"]);
     expect(adminClipModels({ FAL_CLIP_MODEL_ADMIN: "heygen-video-1", HEYGEN_API_KEY: "hg" } as any)).toEqual(["kling", "heygen-video-1"]);
     expect(clipModelFor({ FAL_CLIP_MODEL: "heygen-video-1" } as any, false)).toBe("kling");
@@ -968,6 +970,33 @@ describe("narrated videos in the content run", () => {
     const clip = sqlite.prepare("SELECT kind,mime,bytes FROM media_assets WHERE video_id=? AND kind='ai_clip'").get(created.data.id) as any;
     expect(clip).toMatchObject({ kind: "ai_clip", mime: "video/mp4", bytes: 2000 });
     expect(sqlite.prepare("SELECT COUNT(*) n FROM cleanup_tasks WHERE prefix LIKE 'heygen/%'").get()).toEqual({ n: 0 });
+  });
+
+  it("asks HeyGen for a clip as long as its scene is on screen, after the voice, never longer than chosen", async () => {
+    const { env, user, spec, run } = await setup();
+    env.HEYGEN_API_KEY = "hg";
+    env.FAL_CLIP_MODEL = "heygen-video-1";
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ask = async (clipSeconds: 5 | 10, options: Parameters<typeof providers>[0] = {}) => {
+      const calls = providers(options);
+      const chosen = { ...spec, scenes: spec.scenes.map((s) => (s.source === "clip" ? { ...s, clipSeconds } : s)) };
+      expect((await call(worker, env, "POST", "/api/videos", { spec: chosen, idempotencyKey: crypto.randomUUID() }, user.cookie)).status).toBe(201);
+      await run();
+      return calls;
+    };
+    // The clip's scene (the second sentence, 3.0–7.8 s, faded in) is on screen for about 5.7 s: 6 seconds, not 10.
+    let calls = await ask(10);
+    const voice = calls.findIndex((c) => c.url.includes("api.elevenlabs.io"));
+    const asked = calls.findIndex((c) => c.method === "POST" && c.url === "https://api.heygen.com/v3/models/videos");
+    expect(voice).toBeGreaterThanOrEqual(0);
+    expect(asked).toBeGreaterThan(voice);
+    expect(calls[asked].body).toMatchObject({ duration: 6 });
+    // Never longer than the length chosen (what its credits paid for): 5 stays 5.
+    calls = await ask(5);
+    expect(calls.find((c) => c.method === "POST" && c.url === "https://api.heygen.com/v3/models/videos")!.body).toMatchObject({ duration: 5 });
+    // Kling, making a clip HeyGen refused, keeps the length chosen (its clips are 5 or 10 seconds).
+    calls = await ask(10, { refuseHeyGen: true });
+    expect(calls.find((c) => c.method === "POST" && /kling-video/.test(c.url))!.body).toMatchObject({ duration: "10" });
   });
 
   it("makes a clip HeyGen's filter refused with Kling instead, and fails the video only when Kling refuses it too", async () => {

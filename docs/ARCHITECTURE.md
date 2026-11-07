@@ -318,7 +318,10 @@ D1 batch, so the credits are reserved by the triggers before any work starts. It
    `FAL_CLIP_MODEL` can choose MiniMax H3, FLUX 3 Max or HeyGen Video 1 instead for everyone (HeyGen Video 1 through
    HeyGen's API, `server/providers/heygen.ts`: `POST /v3/models/videos` in `image_to_video` mode with an
    Idempotency-Key, polled, saved from a fresh signed link, then HeyGen's copy deleted; a job HeyGen fails is asked for
-   once more, and a clip HeyGen can't make after all is made with Kling instead, `makeClip`); administrators can pick one per scene
+   once more, and a clip HeyGen can't make after all is made with Kling instead, `makeClip`; HeyGen bills by the
+   second and takes any whole number from 5 to 30, so its clips are made after the voice (step 3), each asked for the
+   time its scene is on screen with its transitions, rounded up, from 5 s up to the 5 or 10 s chosen, `clipLength`;
+   Kling's stay 5 or 10 s); administrators can pick one per scene
    (`scene.clipModel`) from `FAL_CLIP_MODEL_ADMIN`'s list, which `clipModelFor` honours only for an administrator's
    video and only while the model is on the list; the render never plays a clip's own sound).
    Every picture's prompt carries the subject, the look and the description of the scene's place. So the scenes look
@@ -336,7 +339,8 @@ D1 batch, so the credits are reserved by the triggers before any work starts. It
    out. Nano Banana 2.1 is asked for `safety_tolerance` 5 (fal's default is 4 of 1–6), as it refused ordinary
    scenes of dark stories.
    Each is stored in R2 as an asset of the video (marked `{"ai":true}`) and written back into the spec.
-3. **Voice + alignment** (after the pictures, so a refused picture stops the run before the voice is paid): ElevenLabs
+3. **Voice + alignment** (after the pictures and every clip but HeyGen Video's, so a refused one stops the run before
+   the voice is paid): ElevenLabs
    `eleven_v4` with timestamps of the text as written, saved as a WAV. The text is the script with each scene's tone
    before its words as an Eleven v4 audio tag (`[whispers]`, `[excited]`, … from `voiceTones`, a tested list; a tone
    lasts until the next, `voicedScript`); the timings skip what is in brackets, so the subtitles never show the tags. A

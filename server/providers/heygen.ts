@@ -143,11 +143,15 @@ export async function deleteAvatarVideo(env: Env, videoId: string) {
 
 // HeyGen Video 1 (heygen-video-1): a scene's clip from its picture -------------------------------------------------
 
+/** The longest clip HeyGen Video 1 makes from a picture (seconds). */
+const HEYGEN_CLIP_MAX = 30;
+
 /**
  * A clip that opens on the scene's picture (`image_to_video`: the picture is its first frame, so the clip keeps the
- * picture's 9:16 shape and the video's look), 5 or 10 seconds, at 768p for regular quality and 1080p for high (billed
- * at three times the 768p rate). HeyGen fetches the picture from its capability link. The schema is strict: only these
- * fields. The clip's own sound is never played (the render takes only its picture).
+ * picture's 9:16 shape and the video's look), `seconds` long in whole seconds (HeyGen takes 5 to 30 and bills the
+ * length it makes), at 768p for regular quality and 1080p for high (billed at three times the 768p rate). HeyGen
+ * fetches the picture from its capability link. The schema is strict: only these fields. The clip's own sound is
+ * never played (the render takes only its picture).
  */
 export function heygenClipRequest(prompt: string, image: string, seconds: number | undefined, quality: ClipQuality = "regular") {
   return {
@@ -155,7 +159,7 @@ export function heygenClipRequest(prompt: string, image: string, seconds: number
     mode: "image_to_video",
     prompt: `${prompt.trim()} No text, captions, logos or watermarks in the picture.`,
     image: { type: "url", url: image },
-    duration: seconds === 10 ? 10 : CLIP_SECONDS,
+    duration: Math.min(HEYGEN_CLIP_MAX, Math.max(CLIP_SECONDS, Math.ceil(seconds ?? CLIP_SECONDS))),
     resolution: quality === "high" ? "1080p" : "768p",
   };
 }
