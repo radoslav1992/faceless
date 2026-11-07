@@ -13,11 +13,14 @@
     // hookstreak.app has Email Sending (and Email Routing for replies) set up in Cloudflare.
     "CONTACT_EMAIL": "hello@hookstreak.app",
   },
-  // hookstreak.app is the public address; www redirects there (canonicalUrl in server/config.ts). Both were custom
-  // domains of the ad-app Worker (hookstreak.com): deploy ad-app without them first, a domain belongs to one Worker.
+  // hookstreak.app is the public address; www.hookstreak.app, hookstreak.com and www.hookstreak.com redirect there
+  // (canonicalUrl in server/config.ts). A domain belongs to one Worker: a deploy from CI moves these from another
+  // Worker, so ad-app (hookstreak.com's Worker before) must not list them, or its next deploy takes them back.
   "routes": [
     { "pattern": "hookstreak.app", "custom_domain": true },
     { "pattern": "www.hookstreak.app", "custom_domain": true },
+    { "pattern": "hookstreak.com", "custom_domain": true },
+    { "pattern": "www.hookstreak.com", "custom_domain": true },
   ],
   "assets": {
     "directory": "./dist",

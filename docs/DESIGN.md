@@ -46,7 +46,7 @@ notices mean "waiting" or "worth a look", red means failed or destructive, viole
 
 - **Logo**: Hookstreak's mark, a hook whose point turns into an upward streak (`LogoMark` in `src/ui.tsx`), ink on a
   lime rounded tile, beside the wordmark "Hookstreak Shorts" in Bricolage 800. The favicon (`public/favicon.svg`) is the
-  same mark, as on hookstreak.com.
+  same mark as the Hookstreak ads app (radoslav1992/ad-app).
 - **Glow**: soft radial lime gradients behind the home hero, the sign-in stage, the try-it demo and the call-to-action
   band; `.glow-text` gives a headline phrase a lime glow.
 - **Sample phones**: 9:16 frames with a drawn picture slowly zooming (Ken Burns), a white title card (or a POV line, or
