@@ -104,6 +104,17 @@ function soundEffects(spec: StorySpec, ctx: PlanContext, inputs: Inputs, shown: 
 }
 
 /**
+ * How long scene `n` is on screen in a narrated video's render (half of each transition beside it included), in
+ * seconds; null when it is not shown on its own (one background clip under the whole voice, or squeezed out).
+ */
+export function sceneOnScreen(spec: StorySpec, narration: { duration: number; words: CaptionWord[] }, n: number): number | null {
+  if (spec.backdrop) return null;
+  const timing = storyTiming(spec.scenes, narration.words, Math.min(MAX_SECONDS, narration.duration));
+  const part = storySegments(timing, spec.scenes.map((s) => s.transition)).find((p) => p.scene === n);
+  return part ? part.frames / FPS : null;
+}
+
+/**
  * A narrated video: a picture per scene (or its presenter speaking) on the voiceover's clock with a transition centred
  * on every scene edge (the segments overlap by them, so they add up to the voice exactly) — or one background clip
  * looping under the whole voice — the voice as one track, subtitles over it all, music and sound effects under it, and

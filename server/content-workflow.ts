@@ -14,7 +14,7 @@ import { forcedAlignment, speak } from "./providers/elevenlabs";
 import { avatarVideoStatus, heygenClipRequest, heygenClipStatus, heygenRetry, submitAvatarVideo, submitHeyGenClip } from "./providers/heygen";
 import { avatarFor, forgetHeyGenVideo } from "./avatars";
 import { releaseRender, renderFailures, renderFile, renderStatus, submitRender } from "./renderer";
-import { planRender, type Media, type Plan, type PlanContext } from "./render-plan";
+import { planRender, sceneOnScreen, type Media, type Plan, type PlanContext } from "./render-plan";
 import { failAsset } from "./media";
 import { claimSpeech, mayHaveSpeech, storedTranscript, transcribe } from "./speech";
 import { momentsAfterSpeech } from "./highlights";
@@ -27,7 +27,7 @@ import {
   type HighlightSpec, type PendingMedia, type Spec, type StorySpec,
 } from "../shared/formats";
 import { PRESENTER_ENGINES } from "../shared/presenter";
-import type { ClipModel } from "../shared/credits";
+import { CLIP_SECONDS, type ClipModel } from "../shared/credits";
 import { trackSchema, type Track } from "../shared/track";
 import { narrationKey, placeKey, storyScript, textWords, voicedScript } from "../shared/story";
 import { PRODUCT } from "../shared/brand";
@@ -185,7 +185,7 @@ async function generateMedia(
     await phase(kind === "clip" ? "clip" : "images");
     // HeyGen Video makes a clip from the scene's picture (the Idempotency-Key finds a resent request's job).
     const t: MediaTicket = clipModel === "heygen-video-1" && image
-      ? { heygen: await submitHeyGenClip(e, `${run.id}-${name}`, heygenClipRequest(m.prompt, image, m.seconds, m.quality)) }
+      ? { heygen: await submitHeyGenClip(e, `${run.id}-${name}`, heygenClipRequest(m.prompt, image, await clipLength(e, run, m), m.quality)) }
       : await submitFal(e, kind, m.prompt, { image, seconds: m.seconds, clipQuality: m.quality, clipModel, references: refs.length ? refs : undefined, fallback });
     await patchState(e, run.id, (s) => { (s.tickets ||= {})[name] = t; });
     return t;
@@ -259,23 +259,33 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
     if (needsTracking(first)) await trackMoment(e, step, run, first, phase);
     return renderAndSave(e, step, run, phase);
   }
-  // AI pictures and clips the video asks for (clips are made from their pictures, made first), the pictures drawn from
-  // the video's reference sheets, made before them.
+  // AI pictures and clips the video asks for (clips are made from their pictures), the pictures drawn from the video's
+  // reference sheets, made before them.
   const pending = pendingMedia(first);
   const sheets = pending.some((m) => m.kind === "image") ? await makeSheets(e, step, run, first, phase) : { places: {} };
-  for (let i = 0; i < pending.length; i++) {
-    const m = pending[i];
-    const assetId = m.kind === "image"
-      ? await drawPicture(e, step, run, `ai-${i}`, m, phase, () => referencePictures(e, run, sheets, first.scenes[m.path[1] as number]?.place))
-      : await makeClip(e, step, run, `ai-${i}`, m, phase, m.from ? () => sourcePicture(e, run, m) : undefined);
-    await step.do(`ai-${i}-apply`, async () => updateSpec(e, videoId, (spec) => {
-      let target = spec;
-      for (const part of m.path) target = target[part];
-      target[m.key] = assetId;
-    }));
-  }
-  // The AI voice, after the pictures (a refused picture stops the run before the voice is paid for).
+  const make = async (which: (m: PendingMedia, i: number) => boolean) => {
+    for (let i = 0; i < pending.length; i++) {
+      const m = pending[i];
+      if (!which(m, i)) continue;
+      const assetId = m.kind === "image"
+        ? await drawPicture(e, step, run, `ai-${i}`, m, phase, () => referencePictures(e, run, sheets, first.scenes[m.path[1] as number]?.place))
+        : await makeClip(e, step, run, `ai-${i}`, m, phase, models.get(i)!, m.from ? () => sourcePicture(e, run, m) : undefined);
+      await step.do(`ai-${i}-apply`, async () => updateSpec(e, videoId, (spec) => {
+        let target = spec;
+        for (const part of m.path) target = target[part];
+        target[m.key] = assetId;
+      }));
+    }
+  };
+  // Each clip's model, settled once. HeyGen Video clips wait for the voice: each is asked for the time its scene is on
+  // the voice's clock (HeyGen bills by the second). Every other clip is made before it, like the pictures: one refused
+  // stops the run before the voice is paid for.
+  const models = new Map<number, ClipModel>();
+  for (const [i, m] of pending.entries()) if (m.kind === "clip") models.set(i, await step.do(`ai-${i}-model`, () => sceneClipModel(e, run, m)));
+  const afterVoice = (m: PendingMedia, i: number) => m.kind === "clip" && !!m.from && models.get(i) === "heygen-video-1";
+  await make((m, i) => !afterVoice(m, i));
   if (first.narration.kind === "voice" && !narrationCurrent(first)) await makeNarration(e, step, run, first, phase);
+  await make(afterVoice);
   // The presenter speaking the recorded voice, after it.
   if (first.presenter) {
     const voiced = await step.do("spec-voiced", () => loadSpec(e, videoId)) as StorySpec;
@@ -439,6 +449,25 @@ async function drawPicture(e: Env, step: WorkflowStep, run: RunInfo, name: strin
     return generateMedia(e, step, run, `${name}-again`, m, phase, undefined, references, true);
   });
 }
+/**
+ * How long a HeyGen Video clip is asked for: the time its scene is on screen (on the voice's clock, transitions
+ * included), in whole seconds, from 5 (HeyGen's shortest) up to the length chosen for it (5 or 10, what its credits
+ * paid for). HeyGen bills by the second, so a 6-second scene is no longer paid as a 10-second clip. Without the
+ * voice's timing (or a scene of its own on screen) it is the chosen length.
+ */
+async function clipLength(e: Env, run: RunInfo, m: PendingMedia): Promise<number> {
+  const chosen = m.seconds === 10 ? 10 : CLIP_SECONDS;
+  const n = m.path[0] === "scenes" ? Number(m.path[1]) : NaN;
+  if (!Number.isInteger(n)) return chosen;
+  try {
+    const spec = await loadSpec(e, run.video_id);
+    if (isHighlight(spec)) return chosen;
+    const seconds = sceneOnScreen(spec, await narrationContext(e, run.user_id, spec), n);
+    return seconds == null ? chosen : Math.min(chosen, Math.max(CLIP_SECONDS, Math.ceil(seconds - 0.01)));
+  } catch {
+    return chosen;
+  }
+}
 /** HeyGen's answers that mean it didn't make the clip: failed it (twice), refused it, the key or its credits, too busy, too slow. */
 const KLING_INSTEAD = ["GENERATION_FAILED", "GENERATION_REJECTED", "GENERATION_UNAVAILABLE", "GENERATION_BUSY", "GENERATION_TIMEOUT"];
 /** A scene's clip model: the one an administrator chose for it (when they may), else everyone's (FAL_CLIP_MODEL). */
@@ -451,9 +480,9 @@ async function sceneClipModel(e: Env, run: RunInfo, m: PendingMedia) {
  * job, which a new one would bill again). When HeyGen can't make it after all (failed twice, refused it, the key or its
  * credits, busy, too slow), it is made with Kling instead, for the same credits, so the video is still made; HeyGen's
  * copies are deleted, and the clip is marked (meta.fallback) for the operator summary. Kling's own failure is thrown.
+ * `model` is the scene's, settled once by makeVideo.
  */
-async function makeClip(e: Env, step: WorkflowStep, run: RunInfo, name: string, m: PendingMedia, phase: Phase, from?: () => Promise<string>) {
-  const model = await step.do(`${name}-model`, () => sceneClipModel(e, run, m));
+async function makeClip(e: Env, step: WorkflowStep, run: RunInfo, name: string, m: PendingMedia, phase: Phase, model: ClipModel, from?: () => Promise<string>) {
   if (model !== "heygen-video-1" || !from) return generateMedia(e, step, run, name, m, phase, from);
   try {
     try {
