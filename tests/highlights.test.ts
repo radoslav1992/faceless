@@ -446,6 +446,110 @@ describe("making clips", () => {
     expect((await call(worker, env, "PUT", `/api/videos/${made.data.id}`, { spec: story, idempotencyKey: crypto.randomUUID() }, user.cookie)).status).toBe(400);
   });
 
+  it("prices an edit against the moment last paid for, so a chain of small edits costs what one jump does", async () => {
+    const { env, user, source, run, used, sqlite } = await setup();
+    const id = source(3600, transcript(100));
+    let video: any;
+    const reload = async () => { video = (await call(worker, env, "GET", `/api/videos/${video.id}`, undefined, user.cookie)).data.video; };
+    const make = async (start: number, end: number) => {
+      const made = await call(worker, env, "POST", "/api/videos", { spec: momentSpec(id, { ...MOMENT, start, end }, defaultClipOptions), idempotencyKey: crypto.randomUUID() }, user.cookie);
+      video = { id: made.data.id };
+      await run();
+      await reload();
+      return made.data.credits;
+    };
+    // Moves the clip to `start`–`end`: the editor's price (the same function, against the stored spec) is what's charged.
+    const edit = async (start: number, end: number, extra: Record<string, unknown> = {}) => {
+      const next = { ...video.spec, source: { ...video.spec.source, start, end }, ...extra };
+      const shown = specCredits(next, false, undefined, video.spec);
+      const r = await call(worker, env, "PUT", `/api/videos/${video.id}`, { spec: next, idempotencyKey: crypto.randomUUID() }, user.cookie);
+      expect([r.status, r.data.credits]).toEqual([200, shown]);
+      await run();
+      await reload();
+      expect(video.renderStatus).toBe("ready");
+      return r.data.credits;
+    };
+    const paid = (start: number, end: number) => ({ assetId: id, start, end });
+
+    // Stretched a step at a time, each step keeping half of the one before: 0–60 s (1 credit), 0–120 s keeps all of
+    // what was paid (free), 0–180 s is two thirds new footage: a new 3-credit clip, as the one jump to it would be.
+    expect(await make(0, 60)).toBe(1);
+    expect(video.spec.paid).toEqual(paid(0, 60));
+    expect(await edit(0, 120)).toBe(0);
+    expect(video.spec.paid).toEqual(paid(0, 60));
+    expect(await edit(0, 180)).toBe(3);
+    expect(video.spec.paid).toEqual(paid(0, 180));
+    // Trims of what was paid stay free.
+    expect(await edit(4, 170)).toBe(0);
+    expect(await edit(10, 40)).toBe(0);
+    expect(used()).toBe(4);
+
+    // Moved a step at a time: 0–60 s, then 30–90 s (half of it paid: free), then 60–120 s, none of it paid: 1 credit,
+    // even with a paid moment made up by the browser.
+    expect(await make(0, 60)).toBe(1);
+    expect(await edit(30, 90)).toBe(0);
+    expect(await edit(60, 120, { paid: paid(30, 90) })).toBe(1);
+    expect(video.spec.paid).toEqual(paid(60, 120));
+    expect(await edit(90, 150)).toBe(0);
+    expect(used()).toBe(6);
+
+    // A clip saved before the paid moment was kept: its stored moment counts as paid from its first edit on.
+    expect(await make(0, 60)).toBe(1);
+    sqlite.prepare("UPDATE videos SET spec=json_remove(spec,'$.paid') WHERE id=?").run(video.id);
+    await reload();
+    expect(await edit(30, 90)).toBe(0);
+    expect(video.spec.paid).toEqual(paid(0, 60));
+    expect(await edit(60, 120)).toBe(1);
+    expect(used()).toBe(8);
+
+    // A move whose run failed was refunded, so it was never paid for: made again, it is charged again.
+    const moved = await call(worker, env, "PUT", `/api/videos/${video.id}`, { spec: { ...video.spec, source: { ...video.spec.source, start: 200, end: 260 } }, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(moved.data.credits).toBe(1);
+    const big = crypto.randomUUID();
+    sqlite.prepare("INSERT INTO media_assets(id,user_id,kind,name,object_key,mime,bytes,status,created_at,updated_at) VALUES (?,?,'upload','Big',?,'video/mp4',(SELECT max_bytes FROM media_limits WHERE user_id=?)-(SELECT SUM(bytes) FROM media_assets WHERE user_id=?),'ready',1,1)")
+      .run(big, user.id, `media/${user.id}/${big}.mp4`, user.id, user.id);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await run();
+    await reload();
+    expect([video.renderStatus, video.spec.paid, used()]).toEqual(["failed", paid(60, 120), 8]);
+    sqlite.prepare("DELETE FROM media_assets WHERE id=?").run(big);
+    expect(specCredits(video.spec, false, undefined, video.spec)).toBe(1);
+    expect((await call(worker, env, "POST", `/api/videos/${video.id}/render`, { idempotencyKey: crypto.randomUUID() }, user.cookie)).data.credits).toBe(1);
+    await run();
+    await reload();
+    expect([video.renderStatus, video.spec.paid, used()]).toEqual(["ready", paid(200, 260), 9]);
+  });
+
+  it("keeps no render it can't record when the storage fills up, and writes one file however often the step is tried", async () => {
+    const { env, user, source, used, sqlite } = await setup();
+    const id = source(3600, transcript(40, 30));
+    const made = await call(worker, env, "POST", "/api/videos", { spec: momentSpec(id, MOMENT, defaultClipOptions), idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect([made.status, used()]).toEqual([201, 1]);
+    // Filled up meanwhile: 1,000 bytes left, less than the render.
+    const { room } = sqlite.prepare("SELECT (SELECT max_bytes FROM media_limits WHERE user_id=?)-SUM(bytes) AS room FROM media_assets WHERE user_id=?").get(user.id, user.id) as any;
+    const big = crypto.randomUUID();
+    sqlite.prepare("INSERT INTO media_assets(id,user_id,kind,name,object_key,mime,bytes,status,created_at,updated_at) VALUES (?,?,'upload','Big',?,'video/mp4',?,'ready',1,1)")
+      .run(big, user.id, `media/${user.id}/${big}.mp4`, room - 1000);
+    // Steps are tried again as Workflows do (up to their retry limit); every file the run starts writing is noted.
+    const retried = { do: async (_name: string, a: any, b?: any) => {
+      for (let n = 0; ; n++) {
+        try { return await (b ?? a)(); } catch (error) { if (n >= (b ? a.retries?.limit ?? 0 : 0)) throw error; }
+      }
+    }, sleep: async () => {} };
+    const written: string[] = [];
+    const upload = env.MEDIA.createMultipartUpload;
+    env.MEDIA.createMultipartUpload = (key: string, opts: any) => { written.push(key); return upload(key, opts); };
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const c of env.CONTENT.created.splice(0)) await new ContentGeneration({} as any, env).run({ payload: c.params } as any, retried as any);
+    const video = (await call(worker, env, "GET", `/api/videos/${made.data.id}`, undefined, user.cookie)).data.video;
+    expect([video.renderStatus, video.renderError]).toEqual(["failed", "Your storage is full, so this video couldn't be kept. Delete some files or videos, or upgrade your plan, then try again. Your credits were refunded."]);
+    expect(sqlite.prepare("SELECT error FROM runs WHERE video_id=?").get(video.id)).toEqual({ error: "STORAGE_FULL" });
+    expect(used()).toBe(0);
+    // The save step ran three times, writing the same render each time, and deleted it each time it couldn't be recorded.
+    expect([written.length, new Set(written).size]).toEqual([3, 1]);
+    expect([...env.MEDIA.objects.keys()].filter((key) => !key.includes(id))).toEqual([]);
+  });
+
   it("are cut only from the owner's own videos, within them", async () => {
     const { env, user, source, sqlite } = await setup();
     const make = (spec: unknown) => call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);

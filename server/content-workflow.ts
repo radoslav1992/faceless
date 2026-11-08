@@ -81,6 +81,7 @@ const messages: Record<string, string> = {
   AVATAR_TIMEOUT: "The presenter's video took too long. Try again.",
   AVATAR_GONE: "This presenter is no longer available. Choose another one.",
   VIDEO_INVALID: "This video's settings aren't valid any more. Open it and save it again.",
+  STORAGE_FULL: "Your storage is full, so this video couldn't be kept. Delete some files or videos, or upgrade your plan, then try again.",
 };
 /** Fails a run exactly once (the trigger refunds its credits) and tells its video why. */
 export async function failRun(e: Env, id: string, code = "INTERNAL") {
@@ -92,6 +93,21 @@ export async function failRun(e: Env, id: string, code = "INTERNAL") {
     ...(run.video_id ? [e.DB.prepare("UPDATE videos SET render_status='failed',render_error=?,updated_at=? WHERE id=? AND render_status IN ('queued','running')").bind(message, now(), run.video_id)] : []),
   ]);
   if (run.video_id) await videoFailed(e, run.video_id).catch((error) => console.error("Failure notice failed", { videoId: run.video_id, error: (error as Error)?.name }));
+}
+
+/**
+ * Records a file the run has just stored (`insert`, into media_assets). When the owner's storage is full (the plan's
+ * bytes or 5,000 files: the triggers refuse the record with STORAGE_FULL), nothing would ever delete the stored file, so
+ * it is deleted at once and the run stops with that code: the owner is told to make room, and the credits come back.
+ */
+async function recordFile(e: Env, key: string, insert: D1PreparedStatement) {
+  try {
+    await insert.run();
+  } catch (error) {
+    if (!String((error as Error)?.message ?? error).includes("STORAGE_FULL")) throw error;
+    await e.MEDIA.delete(key).catch((failure) => console.error("Unrecorded file not deleted", { error: (failure as Error)?.name }));
+    throw new Error("STORAGE_FULL");
+  }
 }
 
 const once = { retries: { limit: 0, delay: "1 second" as const }, timeout: "10 minutes" as const };
@@ -225,10 +241,10 @@ async function generateMedia(
     } else {
       duration = (await storedDuration(e, key, bytes)) ?? 5;
     }
-    await e.DB.prepare(
+    await recordFile(e, key, e.DB.prepare(
       "INSERT OR REPLACE INTO media_assets(id,user_id,video_id,kind,name,object_key,mime,bytes,duration,width,height,status,meta,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'ready',?,?,?)",
     ).bind(assetId, run.user_id, run.video_id, kind === "clip" ? "ai_clip" : "ai_image", `AI ${kind === "clip" ? "clip" : "picture"}: ${m.prompt}`.slice(0, 160), key, actual, bytes, duration, width, height,
-      JSON.stringify({ prompt: m.prompt.slice(0, 400), ai: true, ...(m.sheet && { sheet: m.sheet }), ...(instead && { clipModel: instead, fallback: true }) }), now(), now()).run();
+      JSON.stringify({ prompt: m.prompt.slice(0, 400), ai: true, ...(m.sheet && { sheet: m.sheet }), ...(instead && { clipModel: instead, fallback: true }) }), now(), now()));
     return assetId;
   });
   // Ours is saved: HeyGen's copy goes (retried hourly while HeyGen can't be reached).
@@ -337,10 +353,10 @@ async function makePresenter(e: Env, step: WorkflowStep, run: RunInfo, spec: Sto
     const bytes = await storeStream(e, key, await fetchOutput(fresh?.done ? fresh.url : url, AbortSignal.timeout(240000)), 400 * MB, "video/mp4");
     const duration = (await storedDuration(e, key, bytes)) ?? 0;
     const name = (await avatarFor(e, p.avatarId))?.name || "Presenter";
-    await e.DB.prepare(
+    await recordFile(e, key, e.DB.prepare(
       "INSERT OR REPLACE INTO media_assets(id,user_id,video_id,kind,name,object_key,mime,bytes,duration,width,height,status,meta,created_at,updated_at) VALUES (?,?,?,'ai_clip',?,?,'video/mp4',?,?,0,0,'ready',?,?,?)",
     ).bind(assetId, run.user_id, run.video_id, `AI presenter: ${name}`.slice(0, 160), key, bytes, duration,
-      JSON.stringify({ ai: true, presenter: true, avatarId: p.avatarId, quality: p.quality }), now(), now()).run();
+      JSON.stringify({ ai: true, presenter: true, avatarId: p.avatarId, quality: p.quality }), now(), now()));
     return assetId;
   });
   await step.do("presenter-apply", () => updateSpec(e, run.video_id, (s) => {
@@ -364,13 +380,14 @@ async function renderAndSave(e: Env, step: WorkflowStep, run: RunInfo, phase: Ph
     // Files with AI pictures, clips or voices in them carry {"ai":true}, so publishing can disclose them.
     const store = async (name: string, n: number, mime: string, kind: "render" | "cover", label: string, duration = 0) => {
       if (saved[name] && await e.DB.prepare("SELECT 1 FROM media_assets WHERE id=?").bind(saved[name]).first()) return saved[name];
-      const assetId = uid(), key = mediaKey(run.user_id, assetId, extOf(mime));
-      const bytes = await storeStream(e, key, await renderFile(e, s.slots!.compose, s.jobs!.compose, n), mime === "video/mp4" ? 400 * MB : 20 * MB, mime);
-      await e.DB.prepare(
-        "INSERT INTO media_assets(id,user_id,video_id,kind,name,object_key,mime,bytes,duration,width,height,status,meta,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'ready',?,?,?)",
-      ).bind(assetId, run.user_id, videoId, kind, label, key, mime, bytes, duration, plan.compose.width, plan.compose.height, plan.compose.synthetic ? '{"ai":true}' : "{}", now(), now()).run();
-      await patchState(e, run.id, (st) => { (st.assets ||= {})[name] = assetId; });
+      // The file's ID is kept before it is written, so a retried step writes the same file again, never another one.
+      const assetId = saved[name] || uid(), key = mediaKey(run.user_id, assetId, extOf(mime));
+      if (!saved[name]) await patchState(e, run.id, (st) => { (st.assets ||= {})[name] = assetId; });
       saved[name] = assetId;
+      const bytes = await storeStream(e, key, await renderFile(e, s.slots!.compose, s.jobs!.compose, n), mime === "video/mp4" ? 400 * MB : 20 * MB, mime);
+      await recordFile(e, key, e.DB.prepare(
+        "INSERT INTO media_assets(id,user_id,video_id,kind,name,object_key,mime,bytes,duration,width,height,status,meta,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'ready',?,?,?)",
+      ).bind(assetId, run.user_id, videoId, kind, label, key, mime, bytes, duration, plan.compose.width, plan.compose.height, plan.compose.synthetic ? '{"ai":true}' : "{}", now(), now()));
       return assetId;
     };
     const duration = output.duration || 0;
@@ -383,9 +400,14 @@ async function renderAndSave(e: Env, step: WorkflowStep, run: RunInfo, phase: Ph
     const sheets = new Set(isHighlight(current) ? [] : pictureSheets(current).map((s) => s.key));
     const owned = (await e.DB.prepare("SELECT id,json_extract(meta,'$.sheet') AS sheet FROM media_assets WHERE video_id=?").bind(videoId).all<{ id: string; sheet: string | null }>()).results;
     const stale = owned.filter((r) => !keep.has(r.id) && !(r.sheet && sheets.has(r.sheet))).map((r) => r.id);
+    // A clip's moment counts as paid for once the run that charged for it has made it: later edits are priced against
+    // it (shared/formats.ts specCredits). A free run keeps the moment paid before; a failed run is refunded and records nothing.
+    const credits = (await e.DB.prepare("SELECT credits FROM runs WHERE id=?").bind(run.id).first<{ credits: number }>())?.credits ?? 0;
+    const paid = isHighlight(current) && credits > 0 ? JSON.stringify({ assetId: current.source.assetId, start: current.source.start, end: current.source.end }) : null;
     await e.DB.batch([
       e.DB.prepare("UPDATE videos SET video_asset=?,cover_asset=?,duration=?,render_status='ready',render_error=NULL,updated_at=? WHERE id=?")
         .bind(video, cover, duration, now(), videoId),
+      ...(paid ? [e.DB.prepare("UPDATE videos SET spec=json_set(spec,'$.paid',json(?)) WHERE id=?").bind(paid, videoId)] : []),
       ...stale.map((x) => e.DB.prepare("DELETE FROM media_assets WHERE id=?").bind(x)),
     ]);
   });
@@ -585,9 +607,9 @@ async function makeNarration(e: Env, step: WorkflowStep, run: RunInfo, spec: Sto
     const result = await speak(e, voiceId, voiced, spec.language || "en", "original");
     const assetId = uid(), key = mediaKey(run.user_id, assetId, "wav");
     await e.MEDIA.put(key, result.audio, { httpMetadata: { contentType: "audio/wav" } });
-    await e.DB.prepare(
+    await recordFile(e, key, e.DB.prepare(
       "INSERT INTO media_assets(id,user_id,video_id,kind,name,object_key,mime,bytes,duration,status,meta,created_at,updated_at) VALUES (?,?,?,'voice','Voiceover',?,'audio/wav',?,?,'ready','{\"ai\":true}',?,?)",
-    ).bind(assetId, run.user_id, run.video_id, key, result.audio.length, result.seconds, now(), now()).run();
+    ).bind(assetId, run.user_id, run.video_id, key, result.audio.length, result.seconds, now(), now()));
     await patchState(e, run.id, (s) => { (s.assets ||= {}).voice = assetId; (s.tickets ||= {}).words = result.words; s.tickets.voiceSeconds = result.seconds; });
     return { assetId, seconds: result.seconds, words: result.words };
   });

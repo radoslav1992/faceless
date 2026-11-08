@@ -20,7 +20,10 @@ export type ComposeSegment = {
   kind: "image" | "video" | "color";
   /** "color" only: the solid background, #rrggbb. */
   color?: string;
-  /** Seconds this segment lasts in the output (0.5–120). A video shorter than that holds its last frame. */
+  /**
+   * Seconds this segment lasts in the output (0.5 up to the whole video, 3 minutes). A video shorter than that holds
+   * its last frame, or starts again with `loop`.
+   */
   duration: number;
   /** Video only: where in the source the segment starts (seconds). */
   trim?: number;

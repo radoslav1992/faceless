@@ -39,7 +39,7 @@ export const PRESENTER_CREDITS: Record<PresenterQuality, number> = { regular: 1,
 export const PRESENTER_SECONDS = 5;
 /**
  * A clip of a long video (shared/highlights.ts): one credit per started minute of its moment. Edits are free while
- * the clip keeps at least half of its moment; moved to other footage, it costs a new clip.
+ * at least half of the clip lies in the moment it was last paid for; moved mostly onto other footage, it costs a new clip.
  */
 export const HIGHLIGHT_SECONDS_PER_CREDIT = 60;
 /** Transcribing a long video (over 10 minutes, for clips): one credit per started 30 minutes of it. */

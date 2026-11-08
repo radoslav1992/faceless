@@ -139,4 +139,16 @@ describe("headlines and background clips in the render", () => {
     expect(told.voice).toMatchObject({ start: 0, volume: 1 });
     expect(() => planRender(spec({ backdrop: { libraryId: id(8) } }), ctx)).toThrow("MEDIA_INPUT");
   });
+
+  it("covers every second of a long voice with a short background clip, with no piece too short to render", () => {
+    const under = (clip: number, seconds: number) => planRender(spec({ kind: "backdrop", backdrop: { libraryId: id(9) } }), {
+      ...ctx, media: { ...ctx.media, [id(9)]: { key: "library/parkour.mp4", kind: "video", duration: clip } }, narration: { ...ctx.narration!, duration: seconds },
+    }).compose.segments;
+    // A 10 s clip under 30.3 s of voice once left a 0.3 s piece (the renderer takes 0.5 s at least); a 2 s clip under
+    // 100 s stopped after 40 pieces, at 80 s, dropping the rest of the voice. One segment loops it to the end.
+    expect(under(10, 30.3)).toEqual([{ kind: "video", input: 0, trim: 0, duration: 30.3, audio: 0, loop: true }]);
+    expect(under(2, 100)).toEqual([{ kind: "video", input: 0, trim: 0, duration: 100, audio: 0, loop: true }]);
+    // A clip as long as the voice plays once.
+    expect(under(120, 100)).toEqual([{ kind: "video", input: 0, trim: 0, duration: 100, audio: 0 }]);
+  });
 });

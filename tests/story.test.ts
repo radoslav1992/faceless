@@ -1203,6 +1203,58 @@ describe("narrated videos in the content run", () => {
     expect([(await get()).renderStatus, used()]).toEqual(["ready", created.data.credits]);
   });
 
+  /** Fills the user's storage up to `free` bytes short of the plan's, with one big upload (deleted to make room again). */
+  const fill = (sqlite: any, userId: string, free: number) => {
+    const { room } = sqlite.prepare("SELECT (SELECT max_bytes FROM media_limits WHERE user_id=?)-COALESCE(SUM(bytes),0) AS room FROM media_assets WHERE user_id=?").get(userId, userId) as any;
+    const big = crypto.randomUUID();
+    sqlite.prepare("INSERT INTO media_assets(id,user_id,kind,name,object_key,mime,bytes,status,created_at,updated_at) VALUES (?,?,'upload','Big',?,'video/mp4',?,'ready',1,1)")
+      .run(big, userId, `media/${userId}/${big}.mp4`, room - free);
+    return () => sqlite.prepare("DELETE FROM media_assets WHERE id=?").run(big);
+  };
+
+  it("refuses to start a video or an edit its storage has no room for, before anything is paid", async () => {
+    const { env, sqlite, user, spec, used, run } = await setup();
+    const calls = providers();
+    const created = await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    await run();
+    const made = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
+    expect(made.renderStatus).toBe("ready");
+    const spent = used(), paid = calls.length;
+    const empty = fill(sqlite, user.id, 1000);
+    const full = [413, "Your storage is full. Delete some files or videos, or upgrade your plan."];
+    // A new video, an edit that makes the video again and a retry are refused at once: no run, no credits, no provider.
+    const fresh = await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect([fresh.status, fresh.data.error]).toEqual(full);
+    const restyled = await call(worker, env, "PUT", `/api/videos/${made.id}`, { spec: { ...made.spec, captions: { enabled: true, style: "bold" } }, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect([restyled.status, restyled.data.error]).toEqual(full);
+    const retried = await call(worker, env, "POST", `/api/videos/${made.id}/render`, { idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect([retried.status, retried.data.error]).toEqual(full);
+    expect([env.CONTENT.created.length, used(), calls.length]).toEqual([0, spent, paid]);
+    expect((await call(worker, env, "GET", `/api/videos/${made.id}`, undefined, user.cookie)).data.video.renderStatus).toBe("ready");
+    // Room again: it is made.
+    empty();
+    expect((await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie)).status).toBe(201);
+  });
+
+  it("stops a run whose files no longer fit, deletes what it stored, refunds it and says why", async () => {
+    const { env, sqlite, user, spec, own, used, run } = await setup();
+    providers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const created = await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(used()).toBe(created.data.credits);
+    // Filled up meanwhile (other uploads): the first AI picture is made and stored, but can't be kept.
+    fill(sqlite, user.id, 0);
+    await run();
+    const post = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
+    expect(post.renderStatus).toBe("failed");
+    expect(post.renderError).toBe("Your storage is full, so this video couldn't be kept. Delete some files or videos, or upgrade your plan, then try again. Your credits were refunded.");
+    expect(sqlite.prepare("SELECT error FROM runs WHERE video_id=?").get(post.id)).toEqual({ error: "STORAGE_FULL" });
+    expect(used()).toBe(0);
+    // Nothing it stored is left behind without a record (only the owner's own picture is in storage).
+    expect([...env.MEDIA.objects.keys()]).toEqual([`media/${user.id}/${own}.jpg`]);
+    expect(sqlite.prepare("SELECT COUNT(*) AS n FROM media_assets WHERE video_id=?").get(post.id)).toEqual({ n: 0 });
+  });
+
   it("times a voice without timings by forced alignment of the recording, never paying for the voice twice", async () => {
     const { env, user, spec, run } = await setup();
     const calls = providers({ timings: false });
@@ -1217,6 +1269,43 @@ describe("narrated videos in the content run", () => {
     expect(post.spec.generated.words[0]).toMatchObject({ text: "Octopuses", start: words[0].start });
     const compose = env.MEDIA_RENDERER.log.filter((p: any) => p.operation === "compose").at(-1);
     expect(compose.ass).toContain("Octopuses");
+  });
+
+  it("keeps a long link in a scene as one word, cut short, so the paid voice is used and the video stays editable", async () => {
+    const { env, sqlite, user, spec, used, run } = await setup();
+    env.FAL_REFERENCE_MODEL = "off";
+    providers();
+    // ElevenLabs times every character it was sent: the link is one token of 140 characters.
+    const others = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: any, init: any = {}) => {
+      if (!String(input?.url ?? input).includes("/v1/text-to-speech/")) return others(input, init);
+      const chars = [...JSON.parse(init.body).text as string], step = DURATION / chars.length;
+      return Response.json({
+        audio_base64: Buffer.from(new Uint8Array(DURATION * 48000)).toString("base64"),
+        alignment: { characters: chars, character_start_times_seconds: chars.map((_, i) => i * step), character_end_times_seconds: chars.map((_, i) => (i + 1) * step) },
+      });
+    });
+    const link = `https://example.com/${"a".repeat(120)}`;
+    const linked = { ...spec, scenes: spec.scenes.map((s, n) => ({ ...s, source: "image" as const, assetId: undefined, ...(n === 4 && { text: `${s.text} Read more at ${link}` }) })) };
+    const created = await call(worker, env, "POST", "/api/videos", { spec: linked, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    await run();
+    const get = async () => (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
+    let post = await get();
+    expect([post.renderStatus, post.renderError]).toEqual(["ready", null]);
+    // Word for word as written (the count decides the timing), the link cut to the longest word a video keeps.
+    expect(post.spec.generated.words).toHaveLength(textWords(storyScript(linked.scenes)).length);
+    expect(post.spec.generated.words.at(-1).text).toBe(link.slice(0, 80));
+    expect(used()).toBe(created.data.credits);
+    // A video saved with the whole link before words were cut is made again from its paid voice, for free.
+    const stored = JSON.parse((sqlite.prepare("SELECT spec FROM videos WHERE id=?").get(post.id) as any).spec);
+    stored.generated.words.at(-1).text = link;
+    sqlite.prepare("UPDATE videos SET spec=? WHERE id=?").run(JSON.stringify(stored), post.id);
+    const retried = await call(worker, env, "POST", `/api/videos/${post.id}/render`, { idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(retried.data.credits).toBe(0);
+    await run();
+    post = await get();
+    expect([post.renderStatus, post.renderError]).toEqual(["ready", null]);
+    expect((specSchema.parse(stored) as StorySpec).generated!.words.at(-1)!.text).toBe(link.slice(0, 80));
   });
 });
 

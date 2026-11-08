@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { captionStyles, type CaptionStyle } from "./captions";
+import { captionStyles, MAX_WORD_CHARS, type CaptionStyle } from "./captions";
 import { clipCredits, highlightCredits, pictureCredits, presenterCredits, speechSeconds, videoCredits, voiceCredits, type ClipModel, type ClipQuality } from "./credits";
 import { presenterScene, presenterSchema } from "./presenter";
 import { defaultLook, textLookSchema } from "./overlay";
@@ -16,8 +16,9 @@ import {
 // - "story": a narrated video (shared/story.ts) whose scenes reference media by ID (the owner's uploads, the shared
 //   library, AI pictures and clips once made) or ask for AI media with a description;
 // - "highlight": a clip of one of the owner's long videos (shared/highlights.ts), cut, framed and captioned.
-// The server owns `generated` (a story's recorded voice and its word timings), `presented` (its presenter's video) and
-// `tracked` (where a clip's people are): an edit from the browser never sets them.
+// The server owns `generated` (a story's recorded voice and its word timings), `presented` (its presenter's video),
+// `tracked` (where a clip's people are) and `paid` (the moment a clip was last paid for): an edit from the browser never
+// sets them.
 
 const uuid = z.uuid();
 /** A library track or an own upload (audio), at a volume. */
@@ -33,7 +34,10 @@ const generatedVoice = z.object({
   /** What the voice was made from; a change asks for a new (paid) recording. */
   key: z.string().max(200),
   voiceAssetId: uuid.optional(),
-  words: z.array(z.object({ text: z.string().max(80), start: z.number(), end: z.number() })).max(2000).default([]),
+  // A word is cut to MAX_WORD_CHARS rather than refused: a video saved with a longer one (a URL in a scene) before the
+  // voice's words were cut would otherwise never validate again, and every run of it would fail. No word is longer
+  // than the longest script.
+  words: z.array(z.object({ text: z.string().max(STORY_MAX_CHARS * 2).transform((t) => t.slice(0, MAX_WORD_CHARS)), start: z.number(), end: z.number() })).max(2000).default([]),
 });
 export type Generated = z.infer<typeof generatedVoice>;
 
@@ -132,6 +136,11 @@ export const highlightSpec = z.object({
   moment: z.object({ score: z.number().int().min(0).max(99), why: z.string().trim().max(200).default("") }).nullable().default(null),
   /** Server-owned: where the people are in this moment (measured when it is made), for `key` = trackKey. */
   tracked: z.object({ key: z.string().max(200), track: trackSchema }).optional(),
+  /**
+   * Server-owned: the moment the clip was last paid for, recorded when the run that charged for it made it. Edits are
+   * priced against it (specCredits), never against the edit before, so small steps cost what one jump does.
+   */
+  paid: z.object({ assetId: uuid, start: z.number().min(0), end: z.number().min(0) }).optional(),
   caption: z.string().trim().max(2200).default(""),
   hashtags: z.array(hashtag).max(15).default([]),
   title: z.string().trim().max(100).default(""),
@@ -151,6 +160,11 @@ export const trackKey = (spec: HighlightSpec) => `${spec.source.assetId}:${spec.
 export function momentOverlap(a: { start: number; end: number }, b: { start: number; end: number }) {
   return Math.max(0, Math.min(a.end, b.end) - Math.max(a.start, b.start)) / Math.max(0.01, b.end - b.start);
 }
+/** The moment a clip was last paid for: `paid`, or its own moment for a clip saved before that was kept. */
+export const paidMoment = (spec: HighlightSpec) => {
+  const { assetId, start, end } = spec.paid ?? spec.source;
+  return { assetId, start, end };
+};
 
 /** The AI voice is recorded for the video's current words and voice (no new recording is paid). */
 export function narrationCurrent(spec: StorySpec) {
@@ -223,15 +237,19 @@ export function pendingMedia(spec: Spec): PendingMedia[] {
  * owner's recording when it narrates); a made one only what an edit asks for again: new narration for changed words,
  * new pictures. AI clips are paid by their length either way, and a presenter by the voice's length whenever it has no
  * video for the current avatar, quality and words. A clip of a long video costs its moment's length, and again only
- * when an edit (from `before`, the stored spec) moves it mostly onto other footage.
+ * when an edit (from `before`, the stored spec) moves it mostly off the footage it was last paid for (paidMoment).
  */
 export function specCredits(spec: Spec, initial: boolean, seconds?: number, before?: Spec) {
-  // A clip: its moment's length when it is new, or moved mostly onto other footage of the video; other edits are free.
+  // A clip: its moment's length when it is new, or moved mostly onto footage that wasn't paid for; other edits are
+  // free. Measured against what was paid, never the edit before: a chain of edits that each keep half of the one
+  // before would otherwise stretch or move a clip anywhere for free.
   if (isHighlight(spec)) {
     const length = spec.source.end - spec.source.start;
     if (initial) return highlightCredits(length);
-    const kept = before && isHighlight(before) && before.source.assetId === spec.source.assetId && momentOverlap(before.source, spec.source) >= 0.5;
-    return kept || !before ? 0 : highlightCredits(length);
+    if (!before) return 0;
+    const paid = isHighlight(before) ? paidMoment(before) : null;
+    const kept = !!paid && paid.assetId === spec.source.assetId && momentOverlap(paid, spec.source) >= 0.5;
+    return kept ? 0 : highlightCredits(length);
   }
   const pending = pendingMedia(spec);
   const clips = clipCredits(pending.filter((m) => m.kind === "clip").map((m) => ({ seconds: m.seconds ?? 5, quality: m.quality })));
@@ -280,10 +298,11 @@ export function specHook(spec: Spec) {
 }
 /**
  * The parts of a spec that change the picture or sound; edits elsewhere (caption, hashtags, title, a clip's moment
- * note) need no new render.
+ * note, the moment it was last paid for) need no new render.
  */
 export function visualPart(spec: Spec) {
   const { caption: _c, hashtags: _h, title: _t, topic: _o, ...rest } = spec;
   if ("moment" in rest) delete (rest as Partial<HighlightSpec>).moment;
+  if ("paid" in rest) delete (rest as Partial<HighlightSpec>).paid;
   return JSON.stringify(rest);
 }

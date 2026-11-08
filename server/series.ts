@@ -4,10 +4,10 @@ import { z } from "zod";
 import type { App, DbUser, Env } from "./types";
 import { MINUTE, now, uid } from "./types";
 import { siteUrl } from "./config";
-import { dbFailure, json, ownedSeries } from "./db";
+import { dbFailure, json, ownedSeries, refusal } from "./db";
 import { rate, sendMail } from "./security";
 import { allowance } from "./billing";
-import { canCreate, checkReferences, createVideo, requireVerified, videoView } from "./videos";
+import { canCreate, checkReferences, createVideo, requireVerified, storageFull, videoView } from "./videos";
 import { scheduleEpisode, cancelScheduled, PAUSED } from "./publishing";
 import { voiceUsable } from "./voices";
 import { backdropFor, conceptToSpec, musicCatalog, writeVideo } from "./story";
@@ -77,6 +77,7 @@ const blockedText: Record<string, string> = {
   trial: "Paused: your free trial has ended. Choose a plan to keep the series going.",
   failed: "Skipped: we couldn't write that episode. The next one is tried as usual.",
   busy: "Skipped: too much was being made at once. The next episode goes ahead.",
+  storage: "Skipped: your storage is full. Delete some files or videos, or upgrade, and the next episode goes ahead.",
 };
 function seriesView(s: any, extra: Record<string, unknown> = {}) {
   const settings = seriesSettings(s);
@@ -239,6 +240,8 @@ export async function makeEpisode(
   const a = await allowance(env, user);
   if (a.trialEnded) return { error: "Your free trial has ended. Choose a plan to keep the series going.", status: 402, blocked: "trial" };
   if (a.used + episodeCredits(settings) > a.limit) return { error: "Not enough credits left for this episode.", status: 402, blocked: "credits" };
+  // Before it is written: an episode whose files could not be kept is never made.
+  if (await storageFull(env, user.id)) return { error: refusal("STORAGE_FULL").message, status: 413, blocked: "storage" };
   const recent = (await env.DB.prepare("SELECT title FROM videos WHERE series_id=? AND title<>'' ORDER BY created_at DESC LIMIT 40").bind(s.id).all<{ title: string }>()).results.map((r) => r.title);
   const catalog = settings.music.trackId ? [] : await musicCatalog(env, settings.music.mood);
   const backdropId = template.kind === "backdrop" ? await backdropFor(env, settings.backdropId) : null;
@@ -262,7 +265,7 @@ export async function makeEpisode(
     if (previous) return { id: previous.video_id };
     return await createVideo(env, user, spec, a, key, { seriesId: s.id, slotAt: slot, approved: !settings.review, maxCredits: episodeCredits(settings) });
   } catch (e) {
-    if (e instanceof HTTPException) return { error: e.message, status: e.status, blocked: e.status === 402 ? "credits" : e.status === 429 ? "busy" : "failed" };
+    if (e instanceof HTTPException) return { error: e.message, status: e.status, blocked: e.status === 402 ? "credits" : e.status === 429 ? "busy" : e.status === 413 ? "storage" : "failed" };
     throw e;
   }
 }
@@ -301,8 +304,8 @@ export async function runEpisode(env: Env, seriesId: string, slot: number) {
   const retry = result.blocked === "failed" && s.failures + 1 < 3;
   await env.DB.prepare(`UPDATE series SET failures=?,blocked=?,next_slot=CASE WHEN ? THEN next_slot ELSE ? END,updated_at=? WHERE id=? AND (next_slot IS NULL OR next_slot<=?)`)
     .bind(retry ? s.failures + 1 : 0, retry ? s.blocked : result.blocked, retry ? 1 : 0, after, now(), seriesId, slot).run();
-  // Running out of credits or the trial is worth an e-mail once (not for every skipped slot).
-  if (!retry && result.blocked !== s.blocked && ["credits", "trial"].includes(result.blocked) && settings.notify)
+  // Running out of credits or storage, or the trial ending, is worth an e-mail once (not for every skipped slot).
+  if (!retry && result.blocked !== s.blocked && ["credits", "trial", "storage"].includes(result.blocked) && settings.notify)
     await mail(env, user.email, `Your series “${s.name}” skipped an episode`, [
       blockedText[result.blocked], "", `Open the series: ${siteUrl(env)}/app/series/${s.id}`,
     ]).catch(() => {});

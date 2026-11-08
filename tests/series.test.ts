@@ -191,6 +191,31 @@ describe("episodes", () => {
     expect(row(id).blocked).toBeNull();
   });
 
+  it("skips a slot when the storage is full, before writing it, says why once, and goes ahead when there is room", async () => {
+    const { env, sqlite, user, create, row, videos } = setup("starter");
+    const id = (await create()).data.series.id;
+    let written = 0;
+    env.AI.run = async () => episode(++written);
+    await call(worker, env, "GET", "/api/auth/me", undefined, user.cookie);
+    const big = crypto.randomUUID();
+    sqlite.prepare("INSERT INTO media_assets(id,user_id,kind,name,object_key,mime,bytes,status,created_at,updated_at) VALUES (?,?,'upload','Big',?,'video/mp4',(SELECT max_bytes FROM media_limits WHERE user_id=?),'ready',1,1)")
+      .run(big, user.id, `media/${user.id}/${big}.mp4`, user.id);
+    const first = row(id).next_slot;
+    expect(await runEpisode(env, id, first)).toEqual({ state: "skipped", reason: "storage" });
+    expect([videos(id).length, written]).toEqual([0, 0]);
+    expect(row(id)).toMatchObject({ blocked: "storage", failures: 0 });
+    expect(row(id).next_slot).toBeGreaterThan(first);
+    await runEpisode(env, id, row(id).next_slot);
+    expect(env.EMAIL.sent.filter((m: any) => /skipped an episode/.test(m.subject))).toHaveLength(1);
+    expect((await call(worker, env, "GET", "/api/series", undefined, user.cookie)).data.series[0].blocked).toMatch(/storage is full/);
+    // "Make one now" says so too.
+    const now = await call(worker, env, "POST", `/api/series/${id}/episodes`, { idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect([now.status, now.data.error]).toEqual([413, "Your storage is full. Delete some files or videos, or upgrade your plan."]);
+    sqlite.prepare("DELETE FROM media_assets WHERE id=?").run(big);
+    expect((await runEpisode(env, id, row(id).next_slot)).state).toBe("made");
+    expect(row(id).blocked).toBeNull();
+  });
+
   it("retries a slot the writer failed up to three times, then skips it", async () => {
     const { env, create, row } = setup();
     const id = (await create()).data.series.id;

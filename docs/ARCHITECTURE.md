@@ -80,7 +80,10 @@ Triggers keep the rules in the database, so no code path can skip them:
   `run_credit_charge` adds them to `used` in the same transaction, and `run_refund` gives them back exactly once when
   a queued or running run becomes `failed`. `run_active_limit` allows 20 active runs per person (`RUNS_BUSY`).
 - **Storage**: `media_storage_limit` (the plan's bytes in `media_limits`) and `media_file_limit` (5,000 files) answer
-  `STORAGE_FULL`.
+  `STORAGE_FULL`. A run records its files after storing them in R2, so no run starts without room for its render and
+  cover (`storageFull`: less than 1 MB or 2 files left refuses a new video, an edit that makes one again, a retry and a
+  series episode, before anything is paid); a file a run then can't record is deleted at once and the run fails with
+  `STORAGE_FULL` (refunded, the owner told to make room).
 - **Work in progress**: `video_busy`, `account_busy` and `user_busy` refuse deletes while a run or a publication is
   under way.
 - **Cleanup**: `media_cleanup`, `library_cleanup`, `style_example_cleanup` and `user_cleanup` queue R2 keys or prefixes
@@ -104,7 +107,8 @@ of 21 styles), an optional on-screen headline (`shared/headline.ts`), an
 optional background clip that replaces the pictures (storytime), music (a library track or an upload, with a volume),
 sound effects (`sounds`: on or off, a volume and the whoosh of scene changes; a scene's own sound is its `soundId`;
 a video without `sounds` has none), and the post text (caption, hashtags, title, topic). `generated` (the recorded AI voice and its word timings) is owned
-by the server: the browser never sets it.
+by the server: the browser never sets it. Its words count as written (one per run of non-space characters), each cut
+to 80 characters (`MAX_WORD_CHARS`: a link in a scene is one long word), also when an older spec is read.
 
 A scene's picture is an **AI image** (made once, then shown with a slow zoom or pan), an **AI clip** made from that
 image (5 or 10 s), the owner's **image or video**, or a **library clip or picture**, chosen scene by scene in the
@@ -379,7 +383,8 @@ after it was created, and only for the owner's files (`media/<user>/…`) or the
 its first word, on the 1/30 s frame grid, and lasts at least half a second. Transitions (FFmpeg `xfade`: fade, fade
 through black, dissolve, slides, wipes, circle, zoom; "auto" is a calm varied sequence) are an even number of frames
 centred on their scene edge, shortened to fit 40% of the shorter scene, so the segments less their overlaps add up to
-the voice exactly. A storytime loops its background clip under the whole voice instead. A presenter's scenes cut its
+the voice exactly. A storytime loops its background clip under the whole voice instead (one segment that starts the
+clip again from its beginning, `loop`, however short the clip and long the voice). A presenter's scenes cut its
 video at the same second of the voice (`trim` = where the segment starts on the output clock), so its lips stay in
 time across cuts and transitions; it is cropped to fill the frame. The voice is one track from 0;
 subtitles are burned in as ASS from real word timings only (never estimates); the headline is drawn on top for its
@@ -431,8 +436,10 @@ The app's Clips (code: "highlights", so they never mix with a scene's AI clip): 
   3 minutes), instant cuts (`shared/cuts.ts`: pauses over 0.6 s shortened, fillers removed, on the 1/30 s grid),
   a layout, captions (style and position), an optional hook title (`headline`), music, the post text, and the
   writer's note on the moment (`moment`: score and reason, never rendered). It costs 1 credit per started minute of its
-  moment; an edit is free unless it keeps less than half of the moment it replaces (`specCredits` with the stored spec);
-  a clip whose first run failed (refunded) costs a new one when it is made again.
+  moment; an edit is free unless less than half of its new moment lies in the moment last paid for (`specCredits` with
+  the stored spec). That moment is the server-owned `paid`, recorded when the run that charged for it made the clip (a
+  clip saved before it was kept starts from its stored moment), so a chain of edits costs what one jump does, and a
+  refunded run's moment is charged again; a clip whose first run failed (refunded) costs a new one when it is made again.
 - **Layouts**: `follow` (a 9:16 crop on whoever is talking, `shared/track.ts`), `split` with two windows stacked
   (`speakers`: placed on the two people found unless the owner moved them; `screen`: a camera window over the screen),
   `crop` (one window) and `fit` (the whole picture over a blur). A window is a centre and a zoom; `paneWindow` turns it
@@ -481,10 +488,10 @@ handling daylight saving time. Plans limit how many series a person has; text to
   series has them on and, for storytime, a background clip), builds the spec and creates the video with the idempotency key `episode:<series>:<slot>`. Autopilot
   episodes are approved when they are made; review-mode episodes wait. The series then moves on to the slot after.
 - **Retries and blocked reasons.** A slot that cannot be made is skipped with a reason kept in `series.blocked`:
-  `trial` (the free trial ended), `credits` (not enough credits), `busy` (20 runs active) or `failed` (the writer
-  failed). A writer failure is retried by the cron after the 15-minute claim, up to three attempts, before the slot is
-  skipped. The owner gets one e-mail when a series becomes blocked by credits or the trial (not for every skipped
-  slot), when the series sends notices.
+  `trial` (the free trial ended), `credits` (not enough credits), `storage` (the storage is full; checked before the
+  episode is written), `busy` (20 runs active) or `failed` (the writer failed). A writer failure is retried by the cron
+  after the 15-minute claim, up to three attempts, before the slot is skipped. The owner gets one e-mail when a series
+  becomes blocked by credits, storage or the trial (not for every skipped slot), when the series sends notices.
 - **Late grace.** A slot more than 3 hours (`LATE_GRACE`) in the past is never made late: the series jumps to its next
   slot. An episode that becomes ready after its slot still posts at once if the slot passed less than 3 hours ago;
   later ones are left for the owner to post by hand.
