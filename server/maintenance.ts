@@ -86,27 +86,57 @@ export async function reconcileRuns(e: Env) {
   ).bind(now(), now() - 30 * MINUTE).run();
 }
 
+// R2 deletes at most 1,000 keys a call. A deleted account queues one task per file (5,000 at most) plus its folder,
+// so the queue is worked through in batches of that size until it is empty or the pass has used its share of the
+// hourly run: 30 seconds, or 300 storage and database calls (the Worker's subrequests are shared by every stage).
+export const CLEANUP_BATCH = 1000, CLEANUP_CALLS = 300, CLEANUP_TIME = 30_000;
+
 /**
- * Deletes the R2 files of deleted rows (exact keys and prefixes), a batch at a time. Anything outside the media,
- * library, style example and avatar folders is refused: nothing is deleted and the row moves to the operations view
- * for a manual check. (HeyGen copies waiting for deletion, `heygen/…`, are handled by deleteHeyGenCopies.)
+ * Deletes the R2 files of deleted rows, oldest first. A task is a file's exact key (`media/{user}/{id}.{ext}`, one
+ * object: deleted with up to 999 others in one call) or a folder ending in "/" (a deleted account, library item, style
+ * example or avatar: listed and deleted 1,000 files a call). Anything outside the media, library, style example and
+ * avatar folders is refused: nothing is deleted and the row moves to the operations view for a manual check. (HeyGen
+ * copies waiting for deletion, `heygen/…`, are handled by deleteHeyGenCopies.)
  */
 export async function drainCleanup(e: Env) {
-  const tasks = (await e.DB.prepare("SELECT prefix FROM cleanup_tasks WHERE prefix NOT LIKE 'heygen/%' ORDER BY created_at LIMIT 50").all<{ prefix: string }>()).results;
-  for (const { prefix } of tasks) {
-    if (!/^(media|library|examples|avatars)\/[A-Za-z0-9._/-]+$/.test(prefix) || prefix.includes("..")) {
-      console.error("Storage cleanup refused");
-      await flagForReview(e, "cleanup", prefix, null, "refused");
-      await e.DB.prepare("DELETE FROM cleanup_tasks WHERE prefix=?").bind(prefix).run();
-      continue;
+  const until = Date.now() + CLEANUP_TIME;
+  let calls = 0;
+  const spent = () => calls >= CLEANUP_CALLS || Date.now() >= until;
+  while (!spent()) {
+    calls++;
+    const tasks = (await e.DB.prepare("SELECT prefix FROM cleanup_tasks WHERE prefix NOT LIKE 'heygen/%' ORDER BY created_at LIMIT ?")
+      .bind(CLEANUP_BATCH).all<{ prefix: string }>()).results;
+    const files: string[] = [], done: string[] = [];
+    for (const { prefix } of tasks) {
+      if (!/^(media|library|examples|avatars)\/[A-Za-z0-9._/-]+$/.test(prefix) || prefix.includes("..")) {
+        console.error("Storage cleanup refused");
+        await flagForReview(e, "cleanup", prefix, null, "refused");
+        calls++;
+        done.push(prefix);
+      } else if (!prefix.endsWith("/")) files.push(prefix);
+      // A folder left for later once the pass is spent (its files may already be partly deleted: the next pass goes on).
+      else if (!spent()) {
+        let cursor: string | undefined, rounds = 0;
+        do {
+          const page = await e.MEDIA.list({ prefix, cursor, limit: 1000 });
+          if (page.objects.length) await e.MEDIA.delete(page.objects.map((o) => o.key));
+          calls += 2;
+          cursor = page.truncated ? page.cursor : undefined;
+        } while (cursor && ++rounds < 20 && !spent());
+        if (!cursor) done.push(prefix);
+      }
     }
-    let cursor: string | undefined, rounds = 0;
-    do {
-      const page = await e.MEDIA.list({ prefix, cursor, limit: 1000 });
-      if (page.objects.length) await e.MEDIA.delete(page.objects.map((o) => o.key));
-      cursor = page.truncated ? page.cursor : undefined;
-    } while (cursor && ++rounds < 20);
-    if (!cursor) await e.DB.prepare("DELETE FROM cleanup_tasks WHERE prefix=?").bind(prefix).run();
+    if (files.length) {
+      await e.MEDIA.delete(files);
+      calls++;
+      done.push(...files);
+    }
+    // One statement for the whole batch (D1 binds at most 100 values, so the keys go as one JSON array).
+    if (done.length) {
+      await e.DB.prepare("DELETE FROM cleanup_tasks WHERE prefix IN (SELECT value FROM json_each(?))").bind(JSON.stringify(done)).run();
+      calls++;
+    }
+    if (tasks.length < CLEANUP_BATCH) return;
   }
 }
 /** Uploads never finished in a day are dropped; checks that never answered are failed. */

@@ -156,27 +156,71 @@ export function usePoll(fn: () => unknown, ms: number, active = true) {
     return () => clearInterval(id);
   }, [ms, active]);
 }
-/** Loads `path` (re-loading when it changes); `reload` fetches again. */
+/**
+ * Which answers to a repeated request still count. Answers can arrive out of order on a slow network: once what is
+ * asked for changes (`want`), answers to earlier requests are stale, and an answer older than one already shown is
+ * dropped, so a slow early answer can't replace a newer one (Videos: Failed, then All, must not end on the failed ones).
+ */
+export function answerOrder<K>(key: K) {
+  let current = key, asked = 0, shown = 0;
+  return {
+    /** What is asked for now. */
+    want(next: K) {
+      if (next === current) return;
+      current = next;
+      shown = asked;
+    },
+    /** Numbers a new request. */
+    ask: () => ++asked,
+    /** Whether the answer to request `n`, made for `key`, should be shown; it is then the newest shown. */
+    fresh(n: number, key: K) {
+      if (key !== current || n <= shown) return false;
+      shown = n;
+      return true;
+    },
+  };
+}
+/** Loads `path` (re-loading when it changes); `reload` fetches again. Only the newest answer for the current path is shown. */
 export function useApi<T>(path: string | null) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(!!path);
+  const [order] = useState(() => answerOrder(path));
   const reload = useCallback(async () => {
     if (!path) return;
+    const n = order.ask();
     try {
-      setData(await api<T>(path));
+      const result = await api<T>(path);
+      if (!order.fresh(n, path)) return;
+      setData(result);
       setError(null);
+      setLoading(false);
     } catch (e) {
+      if (!order.fresh(n, path)) return;
       setError(errorText(e));
-    } finally {
       setLoading(false);
     }
-  }, [path]);
+  }, [path, order]);
   useEffect(() => {
+    order.want(path);
     setLoading(!!path);
     void reload();
-  }, [reload, path]);
+  }, [reload, path, order]);
   return { data, error, loading, reload, setData };
+}
+/**
+ * Calls `fn` when the browser shows the page again from its back/forward cache (Back from Stripe or a network's consent
+ * screen). The page comes back exactly as it was left, so a spinner started before leaving would otherwise stay.
+ */
+export function onPageRestored(target: EventTarget, fn: () => void) {
+  const listener = (e: Event) => { if ((e as PageTransitionEvent).persisted) fn(); };
+  target.addEventListener("pageshow", listener);
+  return () => target.removeEventListener("pageshow", listener);
+}
+export function usePageRestored(fn: () => void) {
+  const saved = useRef(fn);
+  saved.current = fn;
+  useEffect(() => onPageRestored(window, () => saved.current()), []);
 }
 export const number = (n: number) => new Intl.NumberFormat("en-US").format(n);
 export const seconds = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;

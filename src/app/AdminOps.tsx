@@ -19,7 +19,7 @@ type Operations = {
   failures: { area: string; code: string; count: number }[];
   active: { runs: number; publishing: number; overdue: number };
   accounts: { platform: string; total: number; recent: number }[];
-  cleanup: { pending: number; overdue: number; oldest: number | null };
+  cleanup: { pending: number; overdue: number; oldest: number | null; heygen: number };
   stripe: { reconciliation: { at: number; checked: number; updated: number; failed: number } | null; renewalsOverdue: number; grants: number; lastWebhook: number | null };
   reviews: { area: "runs" | "cleanup"; ref: string; requestId: string | null; reason: string; createdAt: number }[];
 };
@@ -67,7 +67,7 @@ export function OperationsTab() {
         <Stat label="Runs open over 1 hour" value={data.active.runs} sub="AI or render work; failed and refunded at 3 hours" />
         <Stat label="Publishing over 1 hour" value={data.active.publishing} sub="Given up at 2 hours" />
         <Stat label="Overdue scheduled posts" value={data.active.overdue} sub="Due over 15 minutes ago" />
-        <Stat label="Cleanup waiting over 1 day" value={data.cleanup.overdue} sub={`${number(data.cleanup.pending)} waiting${data.cleanup.oldest ? ` · oldest ${ago(data.cleanup.oldest)}` : ""}`} />
+        <Stat label="Cleanup waiting over 1 day" value={data.cleanup.overdue} sub={`${number(data.cleanup.pending)} waiting${data.cleanup.oldest ? ` · oldest ${ago(data.cleanup.oldest)}` : ""}${data.cleanup.heygen ? ` · ${number(data.cleanup.heygen)} HeyGen copies` : ""}`} />
       </div>
 
       <section className="card" aria-labelledby="ops-failures">
@@ -334,7 +334,7 @@ function GrantsCard() {
           <h2 id="grants-title"><Gift size={18} aria-hidden="true" style={{ verticalAlign: -2, marginRight: 6 }} />Give a plan for free</h2>
           <p>
             For testers, partners and support cases: find the account by email, then choose the plan and for how long. Each month comes with the plan's
-            full credits; unused credits don't roll over. Afterwards the person goes back to their paid plan or the free plan. Giving a plan again replaces
+            full credits; unused plan credits don't roll over (credit packs bought meanwhile do). Afterwards the person goes back to their paid plan or the free plan. Giving a plan again replaces
             the running one. Stripe never sees it.
           </p>
         </div>

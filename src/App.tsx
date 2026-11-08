@@ -93,9 +93,24 @@ function Boundary({ children }: { children: ReactNode }) {
   return <ErrorBoundary resetKey={pathname}><Suspense fallback={loading}>{children}</Suspense></ErrorBoundary>;
 }
 /** Signed-in pages: the visitor is sent to sign in, and back here afterwards. */
-function RequireUser({ user, loading: busy, children }: { user: User | null; loading: boolean; children: ReactNode }) {
+function RequireUser({ user, loading: busy, failed, retry, children }: { user: User | null; loading: boolean; failed: boolean; retry: () => Promise<void>; children: ReactNode }) {
   const { pathname, search } = useLocation();
+  const [retrying, setRetrying] = useState(false);
   if (busy) return loading;
+  // Who is signed in couldn't be checked (offline, a server error): sending a signed-in person to sign in would lose
+  // their place, so offer to check again instead.
+  if (!user && failed) {
+    return (
+      <div className="loading-page" role="alert">
+        <div className="stack center">
+          <p>We can't reach the server. Check your connection and try again.</p>
+          <button type="button" className="btn primary" disabled={retrying} onClick={() => { setRetrying(true); void retry().finally(() => setRetrying(false)); }}>
+            {retrying ? "Trying again…" : "Try again"}
+          </button>
+        </div>
+      </div>
+    );
+  }
   if (!user) return <Navigate to={`/login?next=${encodeURIComponent(pathname + search)}`} replace />;
   return <>{children}</>;
 }
@@ -137,7 +152,7 @@ export function App() {
           {(["login", "register", "forgot", "reset", "verify"] as const).map((mode) => (
             <Route key={mode} path={mode} element={<AuthPage mode={mode} />} />
           ))}
-          <Route path="app" element={<RequireUser user={user} loading={busy}><AppLayout /></RequireUser>}>
+          <Route path="app" element={<RequireUser user={user} loading={busy} failed={failed} retry={refresh}><AppLayout /></RequireUser>}>
             <Route index element={<Home />} />
             <Route path="create" element={<Create />} />
             <Route path="videos" element={<Videos />} />

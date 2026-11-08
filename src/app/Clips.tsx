@@ -39,10 +39,21 @@ function sourceState(s: Source): { text: string; tone: string; busy?: boolean } 
   return { text: "Ready to find clips", tone: "violet" };
 }
 
+/** True while the component is on screen: work that outlives it (an upload, a request) checks it before moving the page. */
+function useOpen() {
+  const open = useRef(false);
+  useEffect(() => {
+    open.current = true;
+    return () => { open.current = false; };
+  }, []);
+  return open;
+}
+
 export function ClipsPage() {
   const user = useSignedInUser();
   const navigate = useNavigate();
   const toast = useToast();
+  const open = useOpen();
   const { data, error, loading, reload } = useApi<{ sources: Source[] }>("/highlights/sources");
   const uploads = useUploads({
     only: "video",
@@ -50,7 +61,8 @@ export function ClipsPage() {
     onDone: (asset) => {
       void reload();
       if (asset.status === "failed") toast(`${asset.name}: ${asset.error || "This video can't be used."}`, "bad");
-      else navigate(`/app/clips/${asset.id}`);
+      // A long upload goes on after the owner leaves this page: don't pull them away from what they opened since.
+      else if (open.current) navigate(`/app/clips/${asset.id}`);
     },
   });
   const [importing, setImporting] = useState(false);
@@ -127,12 +139,15 @@ function ImportDialog({ onClose, onImported }: { onClose: () => void; onImported
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const open = useOpen();
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setProblem(null);
     try {
-      onImported((await post<{ asset: Asset }>("/media/imports", { url })).asset);
+      const { asset } = await post<{ asset: Asset }>("/media/imports", { url });
+      // Cancelled (or the page left) meanwhile: the import goes on, but the owner stays where they are.
+      if (open.current) onImported(asset);
     } catch (err) {
       setProblem(errorText(err));
       setBusy(false);

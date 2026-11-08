@@ -4,11 +4,11 @@ import { z } from "zod";
 import type { App, DbUser, Env } from "./types";
 import { MINUTE, now, uid } from "./types";
 import { siteUrl } from "./config";
-import { dbFailure, json, ownedSeries } from "./db";
+import { dbFailure, json, ownedSeries, refusal } from "./db";
 import { rate, sendMail } from "./security";
 import { allowance } from "./billing";
-import { canCreate, checkReferences, createVideo, requireVerified, videoView } from "./videos";
-import { scheduleEpisode, cancelScheduled } from "./publishing";
+import { canCreate, checkReferences, createVideo, requireVerified, storageFull, videoView } from "./videos";
+import { scheduleEpisode, cancelScheduled, PAUSED } from "./publishing";
 import { voiceUsable } from "./voices";
 import { backdropFor, conceptToSpec, musicCatalog, writeVideo } from "./story";
 import { chooseSounds } from "./sounds";
@@ -33,12 +33,51 @@ export function seriesSettings(s: { settings: string }): SeriesSettings {
 /** The first posting slot after `after` (null: the schedule has none within 60 days). */
 export const nextSlot = (settings: SeriesSettings, after: number) => slots(settings.schedule, after, 60)[0] ?? null;
 
+/**
+ * A series starting again from now (resumed, or given a new schedule) keeps the episodes it already made for coming
+ * slots, so no slot is written, charged or posted twice. An episode whose time the schedule still has stays there; one
+ * whose time it no longer has (18:00 became 19:00) moves, with the posts scheduled at that time, to the first coming
+ * slot without an episode. Returns the slot to make next: the first coming one without an episode (at least 10
+ * minutes away, like a new series' first; null when the schedule has none within 60 days).
+ */
+export async function planFromNow(env: Env, seriesId: string, settings: SeriesSettings): Promise<number | null> {
+  const t = now();
+  const made = (await env.DB.prepare("SELECT id,slot_at,status FROM videos WHERE series_id=? AND slot_at IS NOT NULL ORDER BY slot_at")
+    .bind(seriesId).all<{ id: string; slot_at: number; status: string }>()).results;
+  const scheduled = new Set(slots(settings.schedule, t, 60));
+  // A slot with any episode, a rejected one included, is never made again (one video per slot).
+  const taken = new Set(made.map((v) => v.slot_at));
+  const free = slots(settings.schedule, t + 10 * MINUTE, 60).filter((at) => !taken.has(at));
+  for (const v of made) {
+    if (v.slot_at <= t || v.status === "rejected" || scheduled.has(v.slot_at)) continue;
+    const at = free.shift();
+    if (at === undefined) break;
+    // Posts the owner moved to a time of their own keep it.
+    await env.DB.batch([
+      env.DB.prepare("UPDATE videos SET slot_at=?,updated_at=? WHERE id=?").bind(at, t, v.id),
+      env.DB.prepare("UPDATE publications SET scheduled_at=?,updated_at=? WHERE video_id=? AND status='scheduled' AND scheduled_at=?").bind(at, t, v.id, v.slot_at),
+    ]);
+  }
+  return free[0] ?? null;
+}
+/**
+ * A resumed series posts again: its approved, ready episodes get back the posts the pause canceled, at their slot, or
+ * at once when the slot passed less than LATE_GRACE ago (an older one is left for the owner to post by hand, as a late
+ * episode is). Posts canceled by hand or failed stay as they are (scheduleEpisode).
+ */
+export async function resumePosts(env: Env, seriesId: string) {
+  const episodes = (await env.DB.prepare("SELECT id FROM videos WHERE series_id=? AND slot_at>? AND status='approved' AND render_status='ready'")
+    .bind(seriesId, now() - LATE_GRACE).all<{ id: string }>()).results;
+  for (const v of episodes) await scheduleEpisode(env, v.id);
+}
+
 /** Why the last slot was skipped, in plain words. */
 const blockedText: Record<string, string> = {
   credits: "Skipped: not enough credits left. Add a credit pack or upgrade, and the next episode goes ahead.",
   trial: "Paused: your free trial has ended. Choose a plan to keep the series going.",
   failed: "Skipped: we couldn't write that episode. The next one is tried as usual.",
   busy: "Skipped: too much was being made at once. The next episode goes ahead.",
+  storage: "Skipped: your storage is full. Delete some files or videos, or upgrade, and the next episode goes ahead.",
 };
 function seriesView(s: any, extra: Record<string, unknown> = {}) {
   const settings = seriesSettings(s);
@@ -141,14 +180,17 @@ series.patch("/:id", async (c) => {
   const status = d.status ?? s.status;
   // New settings, or a series about to run again, must be valid now. Pausing or renaming never is refused: a series
   // saved before a rule existed (the "made for kids" answer, a track since switched off) can always be stopped.
-  if (d.settings || (status === "active" && s.status !== "active")) await checkSettings(c.env, user, s.template, settings, seriesSettings(s).voiceId);
-  // A new schedule or a resumed series starts again from the next slot from now (made slots are never made twice).
-  const restart = status === "active" && (s.status !== "active" || JSON.stringify(settings.schedule) !== JSON.stringify(seriesSettings(s).schedule));
-  const next = restart ? nextSlot(settings, now() + 10 * MINUTE) : s.next_slot;
+  const resumed = status === "active" && s.status !== "active";
+  if (d.settings || resumed) await checkSettings(c.env, user, s.template, settings, seriesSettings(s).voiceId);
+  // A new schedule or a resumed series starts again from now, keeping the episodes already made for coming slots.
+  const restart = resumed || (status === "active" && JSON.stringify(settings.schedule) !== JSON.stringify(seriesSettings(s).schedule));
+  const next = restart ? await planFromNow(c.env, s.id, settings) : s.next_slot;
   await c.env.DB.prepare("UPDATE series SET name=?,settings=?,status=?,next_slot=?,failures=CASE WHEN ? THEN 0 ELSE failures END,blocked=CASE WHEN ? THEN NULL ELSE blocked END,updated_at=? WHERE id=?")
     .bind(d.name ?? s.name, JSON.stringify(settings), status, next, restart ? 1 : 0, restart ? 1 : 0, now(), s.id).run();
-  // Pausing stops what was still to post; changed channels apply to episodes not scheduled yet.
-  if (status === "paused" && s.status !== "paused") await cancelScheduled(c.env, user.id, s.id);
+  // Pausing stops what was still to post, and resuming (the series active again) brings it back; changed channels
+  // apply to episodes not scheduled yet.
+  if (status === "paused" && s.status !== "paused") await cancelScheduled(c.env, user.id, s.id, PAUSED);
+  if (resumed) await resumePosts(c.env, s.id);
   return c.json({ series: seriesView({ ...(await ownedSeries(c.env, user.id, s.id)) }) });
 });
 series.delete("/:id", async (c) => {
@@ -169,25 +211,37 @@ series.post("/:id/episodes", async (c) => {
   await rate(c, "series-episode", 30, 3600, user.id);
   requireVerified(user);
   const s = await ownedSeries(c.env, user.id, c.req.param("id"));
-  const { slot } = z.object({ slot: z.number().int().positive().optional() }).parse(await c.req.json().catch(() => ({})));
+  const { slot, idempotencyKey } = z.object({ slot: z.number().int().positive().optional(), idempotencyKey: z.uuid() })
+    .parse(await c.req.json().catch(() => ({})));
+  // The same click sent again (a retry after a timeout) gets the episode it made: never a second one, or a second charge.
+  const key = episodeKey(s.id, slot ?? null, idempotencyKey);
+  const previous = await c.env.DB.prepare("SELECT video_id FROM runs WHERE user_id=? AND idempotency_key=?").bind(user.id, key).first<{ video_id: string }>();
+  if (previous) return c.json({ video: { id: previous.video_id } });
   const settings = seriesSettings(s);
   if (slot !== undefined && !slots(settings.schedule, now(), 15).includes(slot)) throw new HTTPException(400, { message: "Pick one of the series' coming posting times." });
   const a = await allowance(c.env, user);
   canCreate(a, episodeCredits(settings));
-  const video = await makeEpisode(c.env, user, s, slot ?? null);
+  const video = await makeEpisode(c.env, user, s, slot ?? null, key);
   if ("error" in video) throw new HTTPException(video.status as 503, { message: video.error });
   return c.json({ video }, 201);
 });
+
+/** The idempotency key of an episode's run: one per slot, or for an extra one the browser's key of that click. */
+const episodeKey = (seriesId: string, slot: number | null, extra: string) => (slot ? `episode:${seriesId}:${slot}` : `episode:${seriesId}:extra:${extra}`);
 
 /**
  * Writes and creates one episode of a series: for `slot` (one video per slot), or an extra one (null). Returns the
  * video, or why it could not be made (`blocked`: the reason kept on the series when a slot is skipped).
  */
-export async function makeEpisode(env: Env, user: DbUser, s: any, slot: number | null): Promise<{ id: string } | { error: string; status: number; blocked: string }> {
+export async function makeEpisode(
+  env: Env, user: DbUser, s: any, slot: number | null, key = episodeKey(s.id, slot, uid()),
+): Promise<{ id: string } | { error: string; status: number; blocked: string }> {
   const settings = seriesSettings(s), template = templateOf(s.template);
   const a = await allowance(env, user);
   if (a.trialEnded) return { error: "Your free trial has ended. Choose a plan to keep the series going.", status: 402, blocked: "trial" };
   if (a.used + episodeCredits(settings) > a.limit) return { error: "Not enough credits left for this episode.", status: 402, blocked: "credits" };
+  // Before it is written: an episode whose files could not be kept is never made.
+  if (await storageFull(env, user.id)) return { error: refusal("STORAGE_FULL").message, status: 413, blocked: "storage" };
   const recent = (await env.DB.prepare("SELECT title FROM videos WHERE series_id=? AND title<>'' ORDER BY created_at DESC LIMIT 40").bind(s.id).all<{ title: string }>()).results.map((r) => r.title);
   const catalog = settings.music.trackId ? [] : await musicCatalog(env, settings.music.mood);
   const backdropId = template.kind === "backdrop" ? await backdropFor(env, settings.backdropId) : null;
@@ -206,13 +260,12 @@ export async function makeEpisode(env: Env, user: DbUser, s: any, slot: number |
   if (!spec) return { error: "The episode we wrote didn't come out right. Please try again.", status: 502, blocked: "failed" };
   try {
     await checkReferences(env, user.id, spec, settings.voiceId);
-    // One video per slot: a retried workflow step finds the episode it already created.
-    const key = slot ? `episode:${s.id}:${slot}` : uid();
+    // One video per slot (and per "Make one now" click): a retried workflow step finds the episode it already created.
     const previous = await env.DB.prepare("SELECT video_id FROM runs WHERE user_id=? AND idempotency_key=?").bind(user.id, key).first<{ video_id: string }>();
     if (previous) return { id: previous.video_id };
     return await createVideo(env, user, spec, a, key, { seriesId: s.id, slotAt: slot, approved: !settings.review, maxCredits: episodeCredits(settings) });
   } catch (e) {
-    if (e instanceof HTTPException) return { error: e.message, status: e.status, blocked: e.status === 402 ? "credits" : e.status === 429 ? "busy" : "failed" };
+    if (e instanceof HTTPException) return { error: e.message, status: e.status, blocked: e.status === 402 ? "credits" : e.status === 429 ? "busy" : e.status === 413 ? "storage" : "failed" };
     throw e;
   }
 }
@@ -251,8 +304,8 @@ export async function runEpisode(env: Env, seriesId: string, slot: number) {
   const retry = result.blocked === "failed" && s.failures + 1 < 3;
   await env.DB.prepare(`UPDATE series SET failures=?,blocked=?,next_slot=CASE WHEN ? THEN next_slot ELSE ? END,updated_at=? WHERE id=? AND (next_slot IS NULL OR next_slot<=?)`)
     .bind(retry ? s.failures + 1 : 0, retry ? s.blocked : result.blocked, retry ? 1 : 0, after, now(), seriesId, slot).run();
-  // Running out of credits or the trial is worth an e-mail once (not for every skipped slot).
-  if (!retry && result.blocked !== s.blocked && ["credits", "trial"].includes(result.blocked) && settings.notify)
+  // Running out of credits or storage, or the trial ending, is worth an e-mail once (not for every skipped slot).
+  if (!retry && result.blocked !== s.blocked && ["credits", "trial", "storage"].includes(result.blocked) && settings.notify)
     await mail(env, user.email, `Your series “${s.name}” skipped an episode`, [
       blockedText[result.blocked], "", `Open the series: ${siteUrl(env)}/app/series/${s.id}`,
     ]).catch(() => {});

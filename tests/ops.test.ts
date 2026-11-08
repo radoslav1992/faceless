@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Stripe from "stripe";
 import worker from "../server/index";
-import { maintenance, drainCleanup } from "../server/maintenance";
+import { maintenance, drainCleanup, CLEANUP_CALLS } from "../server/maintenance";
 import { addMonths, confirmPendingContracts, reconcileStripe, webhook } from "../server/billing";
 import { applyRetention } from "../server/retention";
-import { attention, operationsSnapshot, reviewRuns } from "../server/operations";
+import { attention, operationsSnapshot, reportAttention, reviewRuns } from "../server/operations";
 import { countUpload, quotaDay, reportUploads, uploadsToday } from "../server/youtube-quota";
 import { IMMEDIATE_START_TEXT, IMMEDIATE_START_VERSION, withdrawalRefund } from "../shared/withdrawal";
 import { now, DAY, HOUR } from "../server/types";
@@ -105,6 +105,10 @@ function stripeApi(o: { started?: number; refundFails?: boolean; subscriptions?:
     if (url.includes("/v1/subscriptions")) return Response.json({ object: "list", has_more: false, data: o.subscriptions ? o.subscriptions() : [sub()] });
     if (url.includes("/v1/invoices")) return Response.json({ object: "list", has_more: false, data: [{ id: "in_1", object: "invoice", created: now() - 3 * DAY, currency: "usd",
       payments: { object: "list", data: [{ status: "paid", amount_paid: amount, payment: { type: "payment_intent", payment_intent: "pi_1" } }] } }] });
+    // Which invoice a payment belongs to: pi_1 pays the subscription's invoice in_1.
+    if (url.includes("/v1/invoice_payments")) return Response.json({ object: "list", has_more: false, data: new URL(url).searchParams.get("payment[payment_intent]") !== "pi_1" ? [] : [{
+      id: "inpay_1", object: "invoice_payment", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_1" },
+      invoice: { id: "in_1", object: "invoice", parent: { type: "subscription_details", subscription_details: { subscription: "sub_1" } } } }] });
     if (url.includes("/v1/payment_intents/pi_1")) return Response.json({ id: "pi_1", object: "payment_intent", latest_charge: { id: "ch_1", amount, amount_refunded: 0 } });
     if (url.includes("/v1/refunds")) {
       if (o.refundFails) return Response.json({ error: { type: "invalid_request_error", message: "No" } }, { status: 400 });
@@ -269,6 +273,15 @@ describe("withdrawal within 14 days", () => {
     expect(quote.data).toMatchObject({ paid: 28800, used: 60, quota: 720, refund: 26400 });
   });
 
+  it("counts the credits used before a change between monthly and yearly billing, whose payment is counted too", async () => {
+    const { env, sqlite, admin, client } = paying();
+    // The subscription's first, monthly period (50 credits used), before yearly billing started a new one at 100.
+    sqlite.prepare("INSERT INTO usage_windows(id,user_id,plan,quota,used) VALUES (?,?,'daily',60,50)").run(`${client.id}:sub_1:40`, client.id);
+    stripeApi({ interval: "year", amount: 28800 });
+    const quote = await call(worker, env, "GET", "/api/admin/withdrawals/quote?email=client@example.com", undefined, admin.cookie);
+    expect(quote.data).toMatchObject({ paid: 28800, used: 65, quota: 720, refund: 26200 });
+  });
+
   it("records a refund Stripe refused for completion by hand, and refuses after 14 days or without a paid plan", async () => {
     const { env, sqlite, admin } = paying();
     stripeApi({ refundFails: true });
@@ -285,6 +298,68 @@ describe("withdrawal within 14 days", () => {
     // An account that never paid has no Stripe customer.
     const free = signedIn(sqlite, "free@example.com");
     expect((await call(worker, env, "GET", `/api/admin/withdrawals/quote?email=${free.email}`, undefined, admin.cookie)).status).toBe(404);
+  });
+});
+
+/* ------------------------------------------------------------------------------------------------ refunds */
+
+describe("refunds made in Stripe", () => {
+  /** A customer in a paid Creator month (period from `start`), who bought a pack of 40 credits. */
+  async function withPack(start = now() - DAY, end = start + 30 * DAY) {
+    const { env, sqlite } = billingEnv();
+    const client = signedIn(sqlite, "client@example.com");
+    sqlite.prepare("UPDATE users SET stripe_customer='cus_1' WHERE id=?").run(client.id);
+    sqlite.prepare("INSERT INTO subscriptions(id,user_id,plan,status,period_start,period_end,cancel_at_period_end,event_created) VALUES ('sub_1',?,'daily','active',?,?,0,1)")
+      .run(client.id, start, end);
+    const calls = stripeApi();
+    await webhook(await event("checkout.session.completed", {
+      id: "cs_pack", object: "checkout.session", mode: "payment", payment_status: "paid", customer: "cus_1", payment_intent: "pi_pack",
+      amount_total: 2800, currency: "usd", metadata: { kind: "topup", pack: "pack40", credits: "40", user_id: client.id },
+    }), env);
+    expect(await me(env, client.cookie)).toMatchObject({ plan: "daily", limit: 100, topped: 40 });
+    return { env, sqlite, client, calls };
+  }
+  const refunded = (intent: string) => ({ id: "ch_" + intent, object: "charge", customer: "cus_1", payment_intent: intent, amount: 2800, amount_refunded: 2800, refunded: true });
+
+  it("take a pack's credits back once, also when Stripe sends the event again, and never end the plan for it", async () => {
+    const { env, sqlite, client, calls } = await withPack();
+    // The refund is applied, then recording the event fails: Stripe sends the same event again later.
+    const prepare = env.DB.prepare;
+    env.DB.prepare = (sql: string) => sql.startsWith("INSERT OR IGNORE INTO billing_events")
+      ? { bind: () => ({ run: async () => { throw new Error("D1 unavailable"); } }) } : prepare(sql);
+    await expect(webhook(await event("charge.refunded", refunded("pi_pack"), "evt_refund"), env)).rejects.toThrow("D1 unavailable");
+    env.DB.prepare = prepare;
+    expect(await me(env, client.cookie)).toMatchObject({ plan: "daily", limit: 60, topped: 0 });
+    await webhook(await event("charge.refunded", refunded("pi_pack"), "evt_refund"), env);
+    expect(await me(env, client.cookie)).toMatchObject({ plan: "daily", limit: 60, topped: 0 });
+    expect(sqlite.prepare("SELECT status FROM subscriptions WHERE id='sub_1'").get()).toEqual({ status: "active" });
+    expect(sqlite.prepare("SELECT COUNT(*) AS n FROM billing_events WHERE id='evt_refund'").get()).toEqual({ n: 1 });
+    // Neither does a full refund of a payment that is not one of the subscription's invoices; only that ends the plan.
+    await webhook(await event("charge.refunded", refunded("pi_other")), env);
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    expect(await me(env, client.cookie)).toMatchObject({ plan: "daily", limit: 60 });
+    await webhook(await event("charge.refunded", refunded("pi_1")), env);
+    expect(calls.filter((c) => c.method === "DELETE").map((c) => new URL(c.url).pathname)).toEqual(["/v1/subscriptions/sub_1"]);
+    expect(await me(env, client.cookie)).toMatchObject({ plan: "free" });
+  });
+
+  it("take a pack's credits back from the month they rolled over into", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const start = Date.UTC(2026, 3, 1) / 1000;
+      vi.setSystemTime((start + HOUR) * 1000);
+      const { env, sqlite, client } = await withPack(start, addMonths(start, 1));
+      sqlite.prepare("UPDATE usage_windows SET used=50 WHERE id=?").run(`${client.id}:sub_1:${start}`);
+      // Renewed a month later: the 50 left (the pack's 40 among them) roll over.
+      vi.setSystemTime((addMonths(start, 1) + HOUR) * 1000);
+      sqlite.prepare("UPDATE sessions SET expires_at=?").run(now() + DAY);
+      sqlite.prepare("UPDATE subscriptions SET period_start=?,period_end=? WHERE id='sub_1'").run(addMonths(start, 1), addMonths(start, 2));
+      expect(await me(env, client.cookie)).toMatchObject({ limit: 110, carried: 50 });
+      await webhook(await event("charge.refunded", refunded("pi_pack")), env);
+      expect(await me(env, client.cookie)).toMatchObject({ plan: "daily", limit: 70, carried: 10 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -402,7 +477,7 @@ describe("plan grants", () => {
     expect(paidWindows()[0].quota).toBeGreaterThan(0);
     stripeApi({ subscriptions: () => [] });
     sqlite.prepare("UPDATE users SET stripe_customer='cus_1' WHERE id=?").run(user.id);
-    await webhook(await event("charge.refunded", { id: "ch_1", object: "charge", customer: "cus_1", refunded: true }), { ...env, STRIPE_WEBHOOK_SECRET: secret });
+    await webhook(await event("charge.refunded", { id: "ch_1", object: "charge", customer: "cus_1", payment_intent: "pi_1", refunded: true }), { ...env, STRIPE_WEBHOOK_SECRET: secret });
     expect(windowOf(sqlite, `${user.id}:${running.id}:${start}`)).toEqual(granted);
     expect(paidWindows()).toEqual([{ used: 0, quota: 0 }]);
     expect(await me(env, user.cookie)).toMatchObject({ plan: "studio", granted: true, limit: granted.quota });
@@ -508,6 +583,102 @@ describe("retention", () => {
     await applyRetention(env);
     expect(sqlite.prepare("SELECT COUNT(*) n FROM users").get()).toEqual({ n: 0 });
     expect(sqlite.prepare("SELECT prefix FROM cleanup_tasks").all()).toEqual([{ prefix: `media/${id}/` }]);
+  });
+});
+
+/* ------------------------------------------------------------------------------------------------ storage cleanup */
+
+describe("storage cleanup", () => {
+  /** Counts the R2 calls cleanup makes, and the keys each delete asks for. */
+  function watched(env: any) {
+    const calls = { lists: 0, deletes: [] as number[] };
+    const list = env.MEDIA.list, del = env.MEDIA.delete;
+    env.MEDIA.list = async (o: any) => { calls.lists++; return list(o); };
+    env.MEDIA.delete = async (keys: string | string[]) => { calls.deletes.push([keys].flat().length); return del(keys); };
+    return calls;
+  }
+  const waiting = (sqlite: any) => (sqlite.prepare("SELECT COUNT(*) n FROM cleanup_tasks").get() as { n: number }).n;
+
+  it("deletes a deleted account's 5,000 files in one pass, 1,000 keys a call, and what was queued after it", async () => {
+    const { env, sqlite } = testEnv();
+    const gone = signedIn(sqlite), other = signedIn(sqlite);
+    const file = sqlite.prepare("INSERT INTO media_assets(id,user_id,kind,name,object_key,mime,created_at,updated_at) VALUES (?,?,'upload','f',?,'video/mp4',1,1)");
+    sqlite.exec("BEGIN");
+    for (let i = 0; i < 5000; i++) {
+      const id = crypto.randomUUID(), key = `media/${gone.id}/${id}.mp4`;
+      file.run(id, gone.id, key);
+      env.MEDIA.objects.set(key, { bytes: new Uint8Array(1) });
+    }
+    sqlite.exec("COMMIT");
+    const kept = `media/${other.id}/kept.mp4`, deleted = `media/${other.id}/deleted.mp4`;
+    file.run("kept", other.id, kept);
+    file.run("deleted", other.id, deleted);
+    await env.MEDIA.put(kept, "x");
+    await env.MEDIA.put(deleted, "x");
+    // The account goes (its folder and one task per file), then someone else deletes a file.
+    sqlite.prepare("DELETE FROM users WHERE id=?").run(gone.id);
+    sqlite.prepare("DELETE FROM media_assets WHERE id='deleted'").run();
+    expect(waiting(sqlite)).toBe(5002);
+    const calls = watched(env);
+    await drainCleanup(env);
+    expect(waiting(sqlite)).toBe(0);
+    expect([...env.MEDIA.objects.keys()]).toEqual([kept]);
+    expect(Math.max(...calls.deletes)).toBeLessThanOrEqual(1000);
+    expect(calls.lists + calls.deletes.length).toBeLessThan(20);
+  });
+
+  it("keeps each pass within its time and calls, and the next pass goes on", async () => {
+    const { env, sqlite } = testEnv();
+    const queue = sqlite.prepare("INSERT INTO cleanup_tasks(prefix,created_at) VALUES (?,1)");
+    sqlite.exec("BEGIN");
+    for (let i = 0; i < 3000; i++) queue.run(`media/u/${crypto.randomUUID()}.mp4`);
+    sqlite.exec("COMMIT");
+    // R2 answering slowly: each call takes 20 seconds, so a pass ends after its second batch.
+    let clock = Date.now();
+    const slow = vi.spyOn(Date, "now").mockImplementation(() => clock);
+    const calls = watched(env), del = env.MEDIA.delete;
+    env.MEDIA.delete = async (keys: string[]) => { clock += 20_000; return del(keys); };
+    await drainCleanup(env);
+    expect(waiting(sqlite)).toBe(1000);
+    await drainCleanup(env);
+    expect(waiting(sqlite)).toBe(0);
+    expect(calls.deletes).toEqual([1000, 1000, 1000]);
+
+    // Folders are listed one by one: a pass stops at its share of calls and leaves the rest for the next.
+    slow.mockRestore();
+    sqlite.exec("BEGIN");
+    for (let i = 0; i < 200; i++) {
+      queue.run(`library/item${i}/`);
+      env.MEDIA.objects.set(`library/item${i}/file.mp3`, { bytes: new Uint8Array(1) });
+    }
+    sqlite.exec("COMMIT");
+    calls.lists = 0;
+    calls.deletes = [];
+    await drainCleanup(env);
+    expect(calls.lists + calls.deletes.length).toBeLessThanOrEqual(CLEANUP_CALLS);
+    expect(waiting(sqlite)).toBeGreaterThan(0);
+    await drainCleanup(env);
+    expect(waiting(sqlite)).toBe(0);
+    expect(env.MEDIA.objects.size).toBe(0);
+  });
+});
+
+describe("maintenance queries", () => {
+  it("find unfinished videos and uploads through their small indexes, never by reading every row", async () => {
+    const { env, sqlite } = testEnv();
+    const statements = new Set<string>(), prepare = env.DB.prepare;
+    env.DB.prepare = (sql: string) => { statements.add(sql); return prepare(sql); };
+    // An hourly pass (publishing runs every minute, uploads are checked hourly) and a five-minute one (interrupted videos).
+    await maintenance(env, HOURLY);
+    await maintenance(env, Date.UTC(2026, 9, 9, 12, 20));
+    const plan = (sql: string) => (sqlite.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...Array(sql.split("?").length - 1).fill(0)) as { detail: string }[])
+      .map((r) => r.detail).join("; ");
+    const plans = [...statements].filter((sql) => /WHERE render_status|FROM media_assets WHERE status=/.test(sql)).map(plan);
+    // "The video couldn't be made in time" (publishing), interrupted videos, and unfinished, unchecked and failed uploads.
+    expect(plans).toHaveLength(5);
+    for (const p of plans) expect(p).not.toMatch(/SCAN (videos|media_assets)\b/);
+    expect(plans.filter((p) => p.includes("USING INDEX videos_unfinished"))).toHaveLength(2);
+    expect(plans.filter((p) => /USING (COVERING )?INDEX media_unfinished/.test(p))).toHaveLength(3);
   });
 });
 
@@ -660,12 +831,57 @@ describe("operations summary", () => {
     expect(alert(sqlite)).toBeUndefined();
   });
 
+  it("reminds of a cleanup backlog every 6 hours while it is worked through, not every hour as its count moves", async () => {
+    const { env, sqlite, run } = ops();
+    const queue = (n: number) => {
+      for (let i = 0; i < n; i++) sqlite.prepare("INSERT INTO cleanup_tasks(prefix,created_at) VALUES (?,?)").run(`media/u/${crypto.randomUUID()}.mp4`, now() - 2 * DAY);
+    };
+    queue(3);
+    await reportAttention(env);
+    expect(env.EMAIL.sent).toHaveLength(2);
+    expect(env.EMAIL.sent[0].text).toContain("Storage cleanup waiting for more than 1 day: 3");
+    // Hours later fewer are left, then more joined: the same problem, no new mail.
+    sqlite.prepare("DELETE FROM cleanup_tasks WHERE rowid IN (SELECT rowid FROM cleanup_tasks LIMIT 2)").run();
+    await reportAttention(env);
+    queue(5);
+    await reportAttention(env);
+    expect(env.EMAIL.sent).toHaveLength(2);
+    // After 6 hours: a reminder, with the count then.
+    sqlite.prepare("UPDATE operations_state SET value=json_set(value,'$.at',?) WHERE key='alert'").run(now() - 7 * HOUR);
+    await reportAttention(env);
+    expect(env.EMAIL.sent).toHaveLength(4);
+    expect(env.EMAIL.sent[2].text).toContain("Storage cleanup waiting for more than 1 day: 6");
+    // Anything else is news at once.
+    run("running", { created: now() - 4 * HOUR });
+    await reportAttention(env);
+    expect(env.EMAIL.sent).toHaveLength(6);
+  });
+
+  it("counts HeyGen's copies waiting for deletion apart from storage cleanup, and gives them up after two weeks without a key", async () => {
+    const { env, sqlite } = ops();
+    expect(env.HEYGEN_API_KEY).toBeUndefined();
+    sqlite.prepare("INSERT INTO cleanup_tasks(prefix,created_at) VALUES ('heygen/video/vid_1',?),('heygen/video/vid_2',?)").run(now() - 2 * DAY, now() - 15 * DAY);
+    const fetched: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => { fetched.push(url); return Response.json({}); });
+    // The summary goes out first, then the HeyGen stage.
+    await maintenance(env, HOURLY);
+    expect(env.EMAIL.sent).toHaveLength(2);
+    expect(env.EMAIL.sent[0].text).toContain("HeyGen copies of presenter videos and clips not deleted at HeyGen after 1 day");
+    expect(env.EMAIL.sent[0].text).not.toContain("Storage cleanup");
+    // Nothing could be asked of HeyGen: the copy two weeks old is given up (to delete in HeyGen by hand), the other waits.
+    expect(fetched).toEqual([]);
+    expect(console.error).toHaveBeenCalledWith("HeyGen copy could not be deleted; remove it in HeyGen", { task: "heygen/video/vid_2" });
+    expect(sqlite.prepare("SELECT prefix FROM cleanup_tasks").all()).toEqual([{ prefix: "heygen/video/vid_1" }]);
+    expect((await attention(env)).counts).toMatchObject({ cleanup: 0, heygenCleanup: 1 });
+    expect((await operationsSnapshot(env)).cleanup).toEqual({ pending: 0, overdue: 0, oldest: null, heygen: 1 });
+  });
+
   it("never lets a mail failure or a failing stage stop maintenance; both are reported next hour", async () => {
     const { env, sqlite, run } = ops();
     run("running", { created: now() - 4 * HOUR });
     env.EMAIL.send = async () => { throw new Error("mail down"); };
     sqlite.prepare("INSERT INTO cleanup_tasks(prefix,created_at) VALUES ('media/u/old.jpg',?)").run(now() - 2 * DAY);
-    env.MEDIA.list = async () => { throw new Error("R2 down"); };
+    env.MEDIA.delete = async () => { throw new Error("R2 down"); };
     sqlite.prepare("INSERT INTO sessions(token_hash,user_id,expires_at) SELECT 'expired',id,1 FROM users").run();
     await maintenance(env, HOURLY);
     expect(console.error).toHaveBeenCalledWith("Operator alert not sent", { recipients: 2 });

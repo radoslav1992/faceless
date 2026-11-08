@@ -13,6 +13,11 @@ const refusals: Record<string, [number, string]> = {
   ACCOUNT_BUSY: [409, "A video is being published to this account right now. Try again in a minute."],
   USER_BUSY: [409, "Something is still being made or published for you. Try again when it has finished."],
 };
+/** The HTTP error people get for a trigger refusal, for refusing the same thing before the database would. */
+export function refusal(code: keyof typeof refusals) {
+  const [status, message] = refusals[code];
+  return new HTTPException(status as 402, { message });
+}
 /** Turns a trigger refusal into a clear HTTP error; anything else is rethrown. */
 export function dbFailure(e: unknown): never {
   const text = String((e as Error)?.message || e);

@@ -195,14 +195,18 @@ export async function forgetHeyGenVideo(env: Env, videoId: string) {
     console.error("HeyGen copy will be deleted later", { videoId });
   }
 }
-/** Hourly: retries the HeyGen copies not deleted yet; after two weeks the task is dropped (HeyGen's retention removes it). */
+/**
+ * Hourly: retries the HeyGen copies not deleted yet; after two weeks the task is dropped (HeyGen's retention removes it),
+ * also without HEYGEN_API_KEY, so the operations summary's HeyGen line clears once the key was removed on purpose.
+ */
 export async function deleteHeyGenCopies(env: Env) {
-  if (!heygenEnabled(env)) return;
+  const enabled = heygenEnabled(env);
   const tasks = (await env.DB.prepare("SELECT prefix,created_at FROM cleanup_tasks WHERE prefix LIKE 'heygen/%' ORDER BY created_at LIMIT 50")
     .all<{ prefix: string; created_at: number }>()).results;
   for (const t of tasks) {
     const id = /^heygen\/video\/([a-zA-Z0-9_-]{1,160})$/.exec(t.prefix)?.[1];
     try {
+      if (!enabled) throw new Error("HEYGEN_API_KEY is not set");
       if (id) await deleteAvatarVideo(env, id);
       await env.DB.prepare("DELETE FROM cleanup_tasks WHERE prefix=?").bind(t.prefix).run();
     } catch {

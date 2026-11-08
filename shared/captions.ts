@@ -63,13 +63,19 @@ export function captionLook(document: CaptionDocument): CaptionLook {
     resolution: document.resolution || "720p", fit: document.fit || "auto",
   };
 }
+/** The most characters a stored word keeps (a video's recorded words, transcripts, alignments): a longer token is cut. */
+export const MAX_WORD_CHARS = 80;
+/**
+ * The words of a voice's character timings (audio tags in brackets skipped), one per run of non-space characters. A
+ * longer token than MAX_WORD_CHARS (a URL) is cut, never split, so the words still count as written.
+ */
 export function alignmentWords(alignment: { characters: string[]; characterStartTimesSeconds: number[]; characterEndTimesSeconds: number[] } | undefined): CaptionWord[] {
   if (!alignment) return [];
   const { characters, characterStartTimesSeconds: starts, characterEndTimesSeconds: ends } = alignment;
   if (characters.length !== starts.length || characters.length !== ends.length) return [];
   const words: CaptionWord[] = [];
   let word: CaptionWord | null = null, inTag = false;
-  const flush = () => { if (word) words.push(word); word = null; };
+  const flush = () => { if (word) words.push({ ...word, text: word.text.slice(0, MAX_WORD_CHARS) }); word = null; };
   for (let i = 0; i < characters.length; i++) {
     const char = characters[i];
     if (!Number.isFinite(starts[i]) || !Number.isFinite(ends[i]) || starts[i] < 0 || ends[i] < starts[i]) return [];

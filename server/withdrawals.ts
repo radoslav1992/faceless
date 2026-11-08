@@ -45,11 +45,11 @@ async function quote(e: Env, address: string) {
   const paid = payments.reduce((sum, p) => sum + p.refundable, 0);
   const stored = await e.DB.prepare("SELECT plan FROM subscriptions WHERE id=?").bind(sub.id).first<{ plan: string }>();
   const plan = stored ? planById(stored.plan) : null;
-  // The paid period's months of this subscription (window IDs are user:subscription:period start[:month]).
+  // Every month of this subscription (window IDs are user:subscription:period start[:month]): `paid` counts all its
+  // invoices, so after a change between monthly and yearly billing (a new period) the earlier period's use counts too.
   const yearly = sub.items.data[0]?.price.recurring?.interval === "year";
-  const start = sub.items.data[0]?.current_period_start ?? 0;
-  const period = await e.DB.prepare("SELECT COALESCE(SUM(used),0) AS used FROM usage_windows WHERE user_id=? AND (id=? OR id LIKE ?)")
-    .bind(user.id, `${user.id}:${sub.id}:${start}`, `${user.id}:${sub.id}:${start}:%`).first<{ used: number }>();
+  const period = await e.DB.prepare("SELECT COALESCE(SUM(used),0) AS used FROM usage_windows WHERE user_id=? AND instr(id,?)=1")
+    .bind(user.id, `${user.id}:${sub.id}:`).first<{ used: number }>();
   const quota = (plan?.credits ?? 0) * (yearly ? 12 : 1);
   const usage = { used: Math.min(period?.used ?? 0, quota), quota };
   const deadline = sub.start_date + WITHDRAWAL_DAYS * DAY;

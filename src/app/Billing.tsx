@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AlertTriangle, ArrowRight, Check, Clock, CreditCard, Gift, Undo2 } from "lucide-react";
 import { Modal, Spinner, useToast } from "../ui";
-import { errorText, newKey, number, post, timeLeft, useApi, useAuth } from "../lib";
+import { errorText, newKey, number, post, timeLeft, useApi, useAuth, usePageRestored } from "../lib";
 import { PlanCards, CreditPacks } from "../public/Pricing";
 import { PRICE_NOTE, planById, planIncludes, tariffs, type Interval, type PaidPlanId } from "../../shared/plans";
 import { IMMEDIATE_START_TEXT, WITHDRAWAL_DAYS } from "../../shared/withdrawal";
@@ -22,6 +22,8 @@ export function BillingPage() {
   const [syncing, setSyncing] = useState(false);
   // A first checkout asks for the express request to start at once (the server refuses checkout without it).
   const [confirming, setConfirming] = useState<{ plan: PaidPlanId; interval: Interval } | null>(null);
+  // Back from Stripe with the browser's Back button: the page is shown as it was left, still opening checkout.
+  usePageRestored(() => setBusy(null));
 
   // Back from Stripe: re-read the subscription, then the account (once, even in development's double effects).
   const handled = useRef(false);
@@ -138,8 +140,9 @@ export function BillingPage() {
                   : <><Clock size={14} aria-hidden="true" style={{ verticalAlign: -2 }} /> Free trial · {timeLeft(user.trialEndsAt)} (until {formatDate(user.trialEndsAt)})</>
                 : user.renewsAt
                   ? granted
-                    // A free plan's months start full and leave nothing behind (see allowance in server/billing.ts).
-                    ? user.renewsAt < user.periodEnd! ? `New credits on ${formatDate(user.renewsAt)}. Unused credits don't carry over.` : `Your credits last until ${formatDate(user.renewsAt)}.`
+                    // A free plan's months start full; its own credits don't roll over, credit packs bought meanwhile do
+                    // (see allowance in server/billing.ts).
+                    ? user.renewsAt < user.periodEnd! ? `New credits on ${formatDate(user.renewsAt)}. Unused plan credits don't carry over; credit packs do.` : `Your credits last until ${formatDate(user.renewsAt)}.`
                     : `New credits on ${formatDate(user.renewsAt)}. What you don't use rolls over.`
                   : plan.description}
             </p>

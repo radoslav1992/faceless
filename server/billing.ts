@@ -68,6 +68,27 @@ export function periodMonth(start: number, end: number, t: number) {
   return { index, start: at(index), end: Math.min(end, at(index + 1)) };
 }
 
+type UsageRow = { id: string; quota: number; used: number; carried: number; topped: number };
+/**
+ * What a new paid month of `sub` takes over from the previous paid window: what is left of it, at most ROLLOVER_MONTHS
+ * of the plan's credits plus the credit packs bought then. When that window's period of the same subscription was
+ * replaced before its month ended (a change between monthly and yearly billing starts a new period at once, and Stripe
+ * pays back the unused time), the plan's credits of that unused time are not taken over; packs always are.
+ */
+function rolledOver(userId: string, previous: UsageRow, sub: { id: string; period_start: number }, credits: number) {
+  let left = previous.quota - previous.used;
+  const [subscription, start, index = "0"] = previous.id.slice(userId.length + 1).split(":");
+  const from = Number(start), n = Number(index);
+  if (subscription === sub.id && Number.isInteger(from) && Number.isInteger(n) && from !== sub.period_start) {
+    const monthStart = addMonths(from, n), monthEnd = addMonths(from, n + 1);
+    // From the new period's start: that is when Stripe ended the old one and counted the time it pays back.
+    const unused = monthEnd > monthStart ? Math.min(1, Math.max(0, (monthEnd - sub.period_start) / (monthEnd - monthStart))) : 0;
+    const own = previous.quota - previous.carried - previous.topped;
+    left = Math.max(Math.min(left, previous.topped), left - Math.round(own * unused));
+  }
+  return Math.max(0, Math.min(left, credits * ROLLOVER_MONTHS + previous.topped));
+}
+
 export type Allowance = Awaited<ReturnType<typeof allowance>>;
 /**
  * The account's plan and the usage window it spends credits from (`used`/`limit`). Each paid month has its own window
@@ -100,18 +121,36 @@ export async function allowance(e: Env, u: DbUser) {
   const trial = await trialKey(e, u.email);
   const known = !!(await e.DB.prepare("SELECT 1 FROM usage_windows WHERE id=?").bind(window).first());
   // Unused credits roll over into a new paid month: from the month before (within 45 days, so a lapsed plan does not
-  // bring back old credits), at most ROLLOVER_MONTHS of the plan's credits plus the credit packs bought then.
-  // Only paid months take part: a free month (grant) starts with its full plan and leaves nothing behind.
+  // bring back old credits), at most ROLLOVER_MONTHS of the plan's credits plus the credit packs bought then (rolledOver).
+  // A free month (grant) gets its full plan, and its own credits never roll over.
   let carried = 0;
-  if (active && !granted && !known) {
-    const previous = await e.DB.prepare(
-      "SELECT quota,used,topped FROM usage_windows WHERE user_id=? AND id<>? AND plan<>'free' AND instr(id,?)=0 AND created_at>? ORDER BY created_at DESC LIMIT 1",
-    ).bind(u.id, window, `:${GRANT_PREFIX}`, now() - 45 * DAY).first<{ quota: number; used: number; topped: number }>();
-    if (previous) carried = Math.max(0, Math.min(previous.quota - previous.used, plan.credits * ROLLOVER_MONTHS + previous.topped));
+  const moves: D1PreparedStatement[] = [];
+  if (active && !known) {
+    const since = now() - 45 * DAY;
+    if (!granted) {
+      const previous = await e.DB.prepare(
+        "SELECT id,quota,used,carried,topped FROM usage_windows WHERE user_id=? AND id<>? AND plan<>'free' AND instr(id,?)=0 AND created_at>? ORDER BY created_at DESC LIMIT 1",
+      ).bind(u.id, window, `:${GRANT_PREFIX}`, since).first<UsageRow>();
+      if (previous) carried = rolledOver(u.id, previous, sub, plan.credits);
+    }
+    // Credit packs and call credits added in a free month (grant) or the free trial move on to the new window, paid or
+    // free month; the grant's or trial's own credits never do, and count as spent first. They are taken off the old
+    // window, which the account can return to (a grant outlasting a higher paid plan, the trial after a refund), and
+    // only when this window is really new (not just written by a parallel request).
+    const kept = (await e.DB.prepare(
+      "SELECT id,quota,used,carried,topped FROM usage_windows WHERE user_id=? AND id<>? AND (id=? OR instr(id,?)>0) AND created_at>? AND carried+topped>0 AND quota>used",
+    ).bind(u.id, window, `${u.id}:trial`, `:${GRANT_PREFIX}`, since).all<UsageRow>()).results;
+    for (const w of kept) {
+      const moved = Math.min(w.quota - w.used, w.carried + w.topped);
+      carried += moved;
+      moves.push(e.DB.prepare("UPDATE usage_windows SET quota=MAX(used,quota-?1),carried=0,topped=0 WHERE id=?2 AND NOT EXISTS(SELECT 1 FROM usage_windows WHERE id=?3)")
+        .bind(moved, w.id, window));
+    }
   }
   // The plan's own share of an existing window (its quota less what was carried in and bought).
   const base = "(usage_windows.quota-usage_windows.carried-usage_windows.topped)";
   await e.DB.batch([
+    ...moves,
     e.DB.prepare(
       `INSERT INTO usage_windows(id,user_id,plan,quota,carried,used,created_at) VALUES (?1,?2,?3,?4+?5,?5,
         CASE WHEN ?3='free' THEN COALESCE((SELECT used FROM trial_history WHERE email_hash=?6),0) ELSE 0 END,?8)
@@ -123,12 +162,12 @@ export async function allowance(e: Env, u: DbUser) {
     // Storage follows the plan; files over a lower limit stay, new ones wait until there is room.
     e.DB.prepare("INSERT INTO media_limits(user_id,max_bytes) VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET max_bytes=excluded.max_bytes")
       .bind(u.id, plan.storageGb * GB),
-  ]);
-  // The free allowance is once per mailbox: another account of the same address starts with it used up.
-  if (!active && !known)
-    await e.DB.prepare(
+    // The free allowance is once per mailbox: another account of the same address starts with it used up. Written in
+    // the same transaction as the window, so accounts of one mailbox opened at the same moment can't both start fresh.
+    ...(!active && !known ? [e.DB.prepare(
       "INSERT INTO trial_history(email_hash,used,updated_at) VALUES (?,?,?) ON CONFLICT(email_hash) DO UPDATE SET used=MAX(trial_history.used,excluded.used),updated_at=excluded.updated_at",
-    ).bind(trial, plan.credits, now()).run();
+    ).bind(trial, plan.credits, now())] : []),
+  ]);
   const usage = await e.DB.prepare("SELECT used,quota,carried,topped FROM usage_windows WHERE id=?")
     .bind(window).first<{ used: number; quota: number; carried: number; topped: number }>();
   const trialEndsAt = plan.id === "free" ? u.created_at + TRIAL_DAYS * DAY : null;
@@ -284,16 +323,37 @@ export async function creditTopup(e: Env, session: Stripe.Checkout.Session) {
     e.DB.prepare("UPDATE credit_topups SET window_id=? WHERE session_id=? AND window_id IS NULL").bind(a.window, session.id),
   ]);
 }
-/** A refunded credit pack: its credits that are still unused are taken back. */
+/**
+ * A refunded credit pack: its credits that are still unused are taken back once, from the window it was added to and,
+ * when they have rolled over or moved since, from the credits carried into the account's current window. Returns
+ * whether the payment was a credit pack, also when the refund was already applied (Stripe repeats events).
+ */
 async function refundTopup(e: Env, paymentIntent: string) {
-  const t = await e.DB.prepare("SELECT * FROM credit_topups WHERE payment_intent=? AND refunded=0").bind(paymentIntent).first<any>();
+  const t = await e.DB.prepare("SELECT * FROM credit_topups WHERE payment_intent=?").bind(paymentIntent).first<any>();
   if (!t) return false;
+  if (t.refunded) return true;
+  const user = await e.DB.prepare("SELECT * FROM users WHERE id=?").bind(t.user_id).first<DbUser>();
+  const current = user ? (await allowance(e, user)).window : null;
+  const once = "EXISTS(SELECT 1 FROM credit_topups WHERE session_id=?3 AND refunded=0)";
   await e.DB.batch([
-    e.DB.prepare("UPDATE usage_windows SET quota=MAX(used,quota-?1),topped=MAX(0,topped-?1) WHERE id=?2").bind(t.credits, t.window_id),
-    e.DB.prepare("UPDATE credit_topups SET refunded=1 WHERE session_id=?").bind(t.session_id),
+    e.DB.prepare(`UPDATE usage_windows SET quota=MAX(used,quota-MIN(?1,topped)),topped=MAX(0,topped-?1) WHERE id=?2 AND ${once}`)
+      .bind(t.credits, t.window_id, t.session_id),
+    ...(current && current !== t.window_id ? [e.DB.prepare(
+      `UPDATE usage_windows SET quota=MAX(used,quota-MIN(?1,carried)),carried=MAX(0,carried-?1) WHERE id=?2 AND ${once}
+        AND created_at>=(SELECT created_at FROM usage_windows WHERE id=?4)`,
+    ).bind(t.credits, current, t.session_id, t.window_id)] : []),
+    e.DB.prepare("UPDATE credit_topups SET refunded=1 WHERE session_id=? AND refunded=0").bind(t.session_id),
   ]);
   console.log("Credit pack refunded", { session: t.session_id });
   return true;
+}
+/** Whether a payment is one of a subscription's invoices (a Charge itself doesn't say so in this API version). */
+async function subscriptionPayment(s: Stripe, paymentIntent: string) {
+  const { data } = await s.invoicePayments.list({ payment: { type: "payment_intent", payment_intent: paymentIntent }, expand: ["data.invoice"], limit: 10 });
+  return data.some((p) => {
+    const invoice = p.invoice as any;
+    return typeof invoice === "object" && !!(invoice?.parent?.subscription_details?.subscription || invoice?.subscription);
+  });
 }
 /** Re-reads the customer's subscriptions from Stripe (on return from Checkout or the portal). */
 billing.post("/sync", async (c) => {
@@ -501,10 +561,14 @@ export async function webhook(request: Request, e: Env) {
   if (event.type === "charge.refunded" && object.payment_intent)
     await affiliateStep(event, () => reverseCommission(e, customerId(object.payment_intent), Number(object.amount_refunded) || 0, Number(object.amount) || 0));
   const statements: D1PreparedStatement[] = [];
-  // A refunded credit pack takes back its unused credits; a refunded subscription payment ends the plan.
+  // A refunded credit pack takes back its unused credits; a fully refunded subscription payment ends the plan. Any
+  // other charge (or one Stripe can't place) leaves the plan alone: cancelling is not undone by a retry or a mistake.
   if (event.type === "charge.refunded" && object.refunded === true && object.customer) {
     const intent = typeof object.payment_intent === "string" ? object.payment_intent : object.payment_intent?.id;
-    if (!(intent && !object.invoice && await refundTopup(e, intent))) await endPaidAccess(e, customerId(object.customer), "refund");
+    if (!intent || !(await refundTopup(e, intent))) {
+      if (intent && await subscriptionPayment(s, intent)) await endPaidAccess(e, customerId(object.customer), "refund");
+      else console.error("Refunded charge is neither a credit pack nor a subscription payment; check it by hand", { charge: object.id });
+    }
   }
   if (event.type === "charge.dispute.created" && object.charge) {
     const charge = await s.charges.retrieve(customerId(object.charge));

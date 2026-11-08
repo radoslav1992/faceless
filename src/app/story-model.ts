@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { post } from "../lib";
+import { answerOrder, post } from "../lib";
 import { narrationCurrent, type StorySpec } from "../../shared/formats";
 import { estimatedTimings, storyScript, storySegments, storyTiming, textWords, type StoryTiming } from "../../shared/story";
 export { mergeScenes, moveEdge, splitScene, toggleKey } from "../../shared/story";
@@ -22,26 +22,30 @@ export function useUploadTiming(assetId: string | undefined, script: string) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const asked = useRef("");
+  // Another recording (or script) can be chosen before the last one's words arrive: only the newest answer counts.
+  const [order] = useState(() => answerOrder(assetId));
   const load = useCallback(async (withScript: string) => {
     if (!assetId) return;
+    const n = order.ask();
     setBusy(true);
     setError("");
     try {
       const r = await post<UploadTiming>("/story/timing", { assetId, script: withScript });
-      setTiming(r);
+      if (order.fresh(n, assetId)) setTiming(r);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "We couldn't read the words of this recording.");
+      if (order.fresh(n, assetId)) setError(e instanceof Error ? e.message : "We couldn't read the words of this recording.");
     } finally {
       setBusy(false);
     }
-  }, [assetId]);
+  }, [assetId, order]);
   useEffect(() => {
+    order.want(assetId);
     const key = `${assetId}:${script}`;
     if (!assetId || asked.current === key) return;
     asked.current = key;
     setTiming(null);
     void load(script);
-  }, [assetId, script, load]);
+  }, [assetId, script, load, order]);
   // While the recording is still being listened to, ask again.
   useEffect(() => {
     if (!assetId || timing?.speech !== "pending" || timing.source === "script") return;
@@ -83,6 +87,9 @@ export function useStoryClock(spec: StorySpec, upload: UploadTiming | null, rend
   }, [spec.narration.kind, spec.scenes, upload, recorded, renderedSeconds, script]);
 }
 export const segmentsOf = (spec: StorySpec, timing: StoryTiming) => storySegments(timing, spec.scenes.map((s) => s.transition));
+
+/** The selected scene's index, kept on the scenes there are: the whole list can be replaced by fewer (Write again, an undo). */
+export const sceneIndex = (selected: number, count: number) => Math.max(0, Math.min(selected, count - 1));
 
 /** "0:07.5" */
 export const clockText = (seconds: number) => `${Math.floor(Math.max(0, seconds) / 60)}:${(Math.max(0, seconds) % 60).toFixed(1).padStart(4, "0")}`;

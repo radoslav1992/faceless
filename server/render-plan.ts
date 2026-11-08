@@ -47,13 +47,12 @@ function need(ctx: PlanContext, id: string | undefined): Media {
   if (!m) throw new Error("MEDIA_INPUT");
   return m;
 }
-/** A clip repeated (from its start) to fill `duration`: short clips loop instead of freezing. */
+/**
+ * A clip under the whole `duration`: one segment that starts the clip again from its beginning while it is shorter
+ * (the renderer's `loop`), so it covers every second of the voice with no tiny last piece and no cap on repeats.
+ */
 function fillWithClip(input: number, clip: number, duration: number): ComposeSegment[] {
-  const out: ComposeSegment[] = [];
-  const length = clip > 0.5 ? clip : duration;
-  for (let t = 0; t < duration - 0.05 && out.length < 40; t += length)
-    out.push({ kind: "video", input, trim: 0, duration: round(Math.min(length, duration - t)), audio: 0 });
-  return out;
+  return [{ kind: "video", input, trim: 0, duration, audio: 0, ...(clip < duration && { loop: true }) }];
 }
 /** On-screen text shown from `from` to `to`; its entrance animation starts at `from`. */
 function text(ass: string, value: string, look: TextLook, from: number, to: number) {

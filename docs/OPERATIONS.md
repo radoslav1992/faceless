@@ -31,7 +31,7 @@ under `/api/admin` answers 404 to anyone else.
   ElevenLabs, HeyGen, Stripe, billing, token encryption, TikTok, Instagram, YouTube.
 - **Operations**: the last hourly maintenance and its failed stages (a warning when none finished in 2 hours); tiles
   for runs open over an hour, publications publishing over an hour, scheduled posts overdue by 15 minutes and cleanup
-  waiting over a day; failures of the last 24 hours (runs by service and code, publishing by network and message, stats
+  of R2 files waiting over a day (HeyGen copies waiting for deletion are counted apart, under it); failures of the last 24 hours (runs by service and code, publishing by network and message, stats
   reads by network, transcriptions); accounts to reconnect by network; Stripe (the nightly reconciliation, renewals
   overdue, the last webhook event, free plans running); work set aside for a manual check (section 5).
 - **Billing**: *Withdrawal within 14 days* (section 6) and *Give a plan for free* (section 7).
@@ -94,7 +94,8 @@ The cron runs every minute (`server/maintenance.ts`); the hourly part runs at mi
 zero it logs `Maintenance attention` with the counts and e-mails up to 10 valid addresses in `ADMIN_EMAILS` through the
 `EMAIL` binding, from `EMAIL_FROM`:
 
-- at once when the summary differs from the last one sent;
+- at once when the summary differs from the last one sent (for the two cleanup lines only whether they are there
+  counts: their number moves every hour while a queue is worked through, so it alone is no change);
 - otherwise at most once every **6 hours** for an unchanged summary;
 - nothing once everything is back to zero (the next occurrence is reported again at once).
 
@@ -111,7 +112,8 @@ as `Operator alert not sent` and tried again next hour; it never stops maintenan
 | Video stats reads that failed in the last hour | published posts whose last stats read failed, from **5** up | The network's stats API is failing (`Post stats failed`); reads are retried at the next interval |
 | Speech transcriptions that failed in the last hour | uploads whose speech status became failed (among the 5,000 newest files), from **3** up | ElevenLabs Scribe is failing (`Speech not found` with a code): `SPEECH_PERMISSION` means the API key lacks Speech to Text, `SPEECH_CREDITS` the ElevenLabs credits or quota are used up, `SPEECH_UNAVAILABLE` a bad key; the log `Scribe refused` has ElevenLabs' own reason, `SPEECH_BUSY` rate limits, `SPEECH_FILE` an unreadable file; people only lose the transcript |
 | Clips made with Kling in the last 24 hours because HeyGen couldn't make them | AI clips marked `meta.fallback` (among the 5,000 newest files), from **1** up | HeyGen failed, refused or was out of API credits for them (`HeyGen clip not made, making it with Kling` in the logs has the code): top up HeyGen's API credits or check its status, or set `FAL_CLIP_MODEL` back to `kling`. The videos were made |
-| Storage cleanup waiting for more than 1 day | `cleanup_tasks` older than a day | R2 deletes keep failing: look for `Maintenance stage failed` with stage `cleanup` |
+| Storage cleanup waiting for more than 1 day | `cleanup_tasks` of R2 files (not HeyGen copies) older than a day | R2 deletes keep failing: look for `Maintenance stage failed` with stage `cleanup`. Otherwise more was queued than the hourly cleanup deletes (1,000 files a call, for up to 30 seconds or 300 calls a pass): the count in Admin → Operations should fall hour by hour |
+| HeyGen copies of presenter videos and clips not deleted at HeyGen after 1 day | `cleanup_tasks` named `heygen/…` older than a day | Not R2: HeyGen refuses or fails the deletes, or `HEYGEN_API_KEY` is missing (it is required to delete them). Check the key and HeyGen's status. Each is retried hourly and given up after two weeks (`HeyGen copy could not be deleted; remove it in HeyGen`: delete it in HeyGen by hand), also without the key |
 | Work set aside for a manual check in the last 24 hours | rows in `manual_reviews` | Section 5 |
 | Stripe: failed reconciliations, or paid periods overdue for renewal by over 4 days | the last nightly reconciliation's failures, plus active, non-cancelling subscriptions whose period ended over 4 days ago | Webhooks are being missed and the backstop can't read Stripe: check the endpoint, its secret and `STRIPE_SECRET_KEY` |
 | Maintenance stages that failed in the last hour | stage names | Search Workers Logs for `Maintenance stage failed` with that `stage`; the log has the error name, a scrubbed message and the top of the stack |
@@ -170,6 +172,7 @@ video is attached to it); its failure refunds the credits and the Clips page say
 | `MEDIA_PROCESSING_FAILED`, `MEDIA_INVALID`, `MEDIA_NO_AUDIO`, `MEDIA_TOO_LONG`, `MEDIA_CANCELLED` | the renderer refused or failed the job; the workflow log (`Render failed`) has the run ID and FFmpeg's last error line (`detail`) |
 | `MEDIA_INPUT`, `MEDIA_FORMAT`, `MEDIA_TOO_LARGE` | a file of the video is missing or unreadable. Caused by the request |
 | `VIDEO_INVALID` | the stored spec no longer validates. Caused by the request |
+| `STORAGE_FULL` | the owner's storage (the plan's bytes or 5,000 files) filled up while the run worked: the file it couldn't record was deleted from R2 at once. Caused by the request; a run isn't started when the storage is full already |
 | `PROVIDER_REDIRECT`, `PROVIDER_URL`, `PROVIDER_DOWNLOAD` | a provider answered with a redirect or an output on an unexpected host |
 | `INTERNAL` | anything else; the workflow log (`Run failed`) has the run ID |
 
@@ -188,13 +191,16 @@ refused the video), `NOT_CONFIGURED` (app credentials or `TOKEN_ENCRYPTION_KEY` 
 Google account without a YouTube channel), `TIMEOUT` and `INTERRUPTED` (it may have been posted: check the profile
 before retrying), `NOT_READY` and `PROVIDER_ERROR`. TikTok's "only private posts" refusal for apps it has not audited
 gets its own message, as does its limit on drafts waiting in a person's inbox (`spam_risk_too_many_pending_share`). Publications stuck in `publishing` for 2 hours fail with `TIMEOUT`; due posts whose video failed,
-or is still being made 6 hours later, fail with "The video couldn't be made in time".
+or is still being made 6 hours later, fail with "The video couldn't be made in time". Canceled posts keep no message,
+except those canceled by pausing their series ("Canceled while the series was paused."): resuming the series schedules
+those again. A series' episode never goes again by itself to an account where its post was canceled or failed, even
+after an edit makes it again; the owner posts it there by hand (or retries the failed post).
 
 **Stats reads** (`publications.metrics_error`): `scope` (the connection lacks the stats permission; reconnecting fixes
 it), `reconnect`, `not_found` (the post was removed), `failed`.
 
 **Series** keep why their last slot was skipped (`series.blocked`, shown on the series page): `credits`, `trial`,
-`busy` (20 runs active) or `failed` (the writer failed three times).
+`storage` (the owner's storage is full), `busy` (20 runs active) or `failed` (the writer failed three times).
 
 ## 5. Manual checks (provider work that may still bill)
 
@@ -241,14 +247,17 @@ What to do: Admin → **Billing** → Withdrawal within 14 days.
 
 The refund is `floor(paid × (quota − used) / quota)` (`withdrawalRefund` in `shared/withdrawal.ts`), where `quota` is
 the paid period's credits (the month's for a monthly plan, twelve months' worth for a yearly plan) and `used` the
-credits used in that period. Example: Starter monthly, $19.00 paid, 9 of 30 credits used → $13.30. Credit packs are
+credits used in that period (after a change between monthly and yearly billing, in the earlier period too: what was
+paid for it is in `paid`). Example: Starter monthly, $19.00 paid, 9 of 30 credits used → $13.30. Credit packs are
 separate purchases and are not part of it.
 
 Safeguards: one withdrawal per subscription; the amount must still match what the administrator saw (more use since
 then answers 409 "check again"); after 14 days it is refused. If Stripe refuses the refund the plan has still ended,
 the withdrawal shows "Refund by hand" and `Withdrawal refund failed` is logged: refund the rest in Stripe. A full
-refund or a dispute made directly in Stripe also ends the plan by itself (webhook `charge.refunded` /
-`charge.dispute.created`).
+refund of a plan payment, or a dispute, made directly in Stripe also ends the plan by itself (webhook
+`charge.refunded` / `charge.dispute.created`); refunding a credit pack only takes back its unused credits. A full
+refund of anything else leaves the plan as it is and logs `Refunded charge is neither a credit pack nor a subscription
+payment; check it by hand`: look the charge up in Stripe and, if the plan should end, cancel the subscription there.
 
 ## 7. Free plans (plan grants)
 
@@ -256,7 +265,8 @@ Admin → **Billing** → Give a plan for free gives a person a paid plan for 1,
 Stripe: testers, partners, support cases. Type part of their email to find the account (they need one; the results
 show what each pays for and any free plan running), choose it, then the plan and how long. A grant is a
 `subscriptions` row with an ID starting `grant_`, so each of its months gets its own usage window with the plan's full
-credits (unused credits don't carry over), and it ends by itself. Giving a plan again, or **Start again**, replaces a
+credits (its unused credits don't carry over; credit packs bought and call credits given during it do), and it ends
+by itself. Giving a plan again, or **Start again**, replaces a
 running grant with a fresh one; **End now** ends it.
 
 - A running grant wins over a paid plan unless the person pays for a higher one; afterwards they return to their paid
@@ -282,7 +292,9 @@ again by itself.
   found`) only costs transcripts of uploads.
 - **HeyGen** (`AVATAR_*`): check the API key and the account's API credits in HeyGen. A failed run asks HeyGen to
   delete the video it requested; `HeyGen copy will be deleted later` means the delete failed and is retried hourly
-  (`HeyGen copy could not be deleted; remove it in HeyGen` after two weeks: delete it in HeyGen by hand). A presenter
+  (`HeyGen copy could not be deleted; remove it in HeyGen` after two weeks: delete it in HeyGen by hand). Copies
+  waiting over a day have their own line in the hourly summary; with `HEYGEN_API_KEY` removed they cannot be deleted
+  and are given up the same way after two weeks. A presenter
   HeyGen stopped supporting can be hidden in Admin → Presenters (its videos then fail with `AVATAR_GONE` only if they
   need a new presenter video).
 - **HeyGen Video 1 clips** (`heygen-video-1`; `GENERATION_*` like fal's): a passing problem reaching HeyGen (no
@@ -354,8 +366,9 @@ reconciliation re-read doubtful subscriptions. R2 is not part of Time Travel.
 Useful log lines: `Run failed` (code and run ID), `Run dispatch failed; maintenance will retry`, `Episode not
 started`, `Series cannot run: the CONTENT workflow binding is missing`, `Publication failed`, `Publication workflow
 error`, `Publication timed out`, `Social API call failed`, `Social token renewal failed`, `Post stats failed`,
-`Stripe reconciliation failed`, `Subscription price is not a configured plan`, `Paid access ended`, `Credit pack paid by
-an account that no longer exists; review for refund`, `Cancelled subscription of a deleted account; review for refund`,
+`Stripe reconciliation failed`, `Subscription price is not a configured plan`, `Paid access ended`, `Refunded charge is
+neither a credit pack nor a subscription payment; check it by hand`, `Credit pack paid by an account that no longer
+exists; review for refund`, `Cancelled subscription of a deleted account; review for refund`,
 `Contract confirmation failed`, `MCP tool failed`.
 
 ## 12. E-mail deliverability

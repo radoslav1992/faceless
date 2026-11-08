@@ -2,8 +2,8 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { App, DbUser, Env } from "./types";
-import { mediaEnabled, now, uid } from "./types";
-import { dbFailure, json, ownedVideo } from "./db";
+import { MB, mediaEnabled, now, uid } from "./types";
+import { dbFailure, json, ownedVideo, refusal } from "./db";
 import { rate } from "./security";
 import { allowance, type Allowance } from "./billing";
 import { scheduleEpisode } from "./publishing";
@@ -11,7 +11,7 @@ import { voiceUsable } from "./voices";
 import { avatarFor } from "./avatars";
 import { heygenEnabled } from "./providers/heygen";
 import {
-  isHighlight, playedSounds, presenterNeeded, referencedAssets, referencedLibrary, specCredits, specHook, specSchema, visualPart, type HighlightSpec, type Spec, type StorySpec,
+  isHighlight, paidMoment, playedSounds, presenterNeeded, referencedAssets, referencedLibrary, specCredits, specHook, specSchema, visualPart, type HighlightSpec, type Spec, type StorySpec,
 } from "../shared/formats";
 import { storyScript, STORY_MAX_CHARS, STORY_MAX_SECONDS } from "../shared/story";
 import { creditsLabel } from "../shared/credits";
@@ -104,6 +104,18 @@ export function canCreate(a: Allowance, credits = 1) {
   if (a.used + credits > a.limit)
     throw new HTTPException(402, { message: `This needs ${creditsLabel(credits)} and you have ${creditsLabel(Math.max(0, a.limit - a.used))} left. Upgrade or add a credit pack.` });
 }
+/** The least a run keeps: its render and its cover (a few seconds of a real video and one picture take more). */
+const RUN_BYTES = MB, RUN_FILES = 2;
+/**
+ * Whether the owner's storage has no room for a run: the plan's bytes (media_limits) or the 5,000 files the
+ * media_storage_limit and media_file_limit triggers allow. Asked before a run starts, so no AI picture, voice or render
+ * is paid for that its files could not be kept from (a run that fills it anyway stops with STORAGE_FULL, refunded).
+ */
+export async function storageFull(env: Env, userId: string) {
+  const s = await env.DB.prepare("SELECT COALESCE(SUM(bytes),0) AS used,COUNT(*) AS files,(SELECT max_bytes FROM media_limits WHERE user_id=?) AS max FROM media_assets WHERE user_id=?")
+    .bind(userId, userId).first<{ used: number; files: number; max: number | null }>();
+  return !s || s.used + RUN_BYTES > (s.max ?? 0) || s.files + RUN_FILES > 5000;
+}
 /**
  * Creates a video and its first run in one transaction (the video quota and the credits are reserved by the
  * triggers). A series' episode carries its series and slot (one video per slot).
@@ -121,6 +133,7 @@ export async function createVideo(
   from: { seriesId?: string; slotAt?: number | null; approved?: boolean; maxCredits?: number } = {},
 ) {
   requireMedia(env);
+  if (await storageFull(env, user.id)) throw refusal("STORAGE_FULL");
   // A series episode never costs more than the series says it does, however long the writer ran.
   const credits = Math.min(await newVideoCredits(env, user.id, spec), from.maxCredits ?? Infinity);
   const videoId = uid(), runId = uid(), t = now(), approved = from.approved ?? true;
@@ -150,6 +163,7 @@ async function rerun(env: Env, user: DbUser, video: any, spec: Spec, key: string
   const previous = await env.DB.prepare("SELECT video_id FROM runs WHERE user_id=? AND idempotency_key=?").bind(user.id, key).first<{ video_id: string }>();
   if (previous) return { credits: 0 };
   const a = await allowance(env, user);
+  if (await storageFull(env, user.id)) throw refusal("STORAGE_FULL");
   const credits = video.video_asset ? specCredits(spec, false, undefined, before) : await newVideoCredits(env, user.id, spec);
   if (credits > 0) canCreate(a, credits);
   const runId = uid(), t = now();
@@ -225,19 +239,26 @@ videos.post("/", async (c) => {
   canCreate(a, await newVideoCredits(c.env, user.id, spec));
   return c.json(await createVideo(c.env, user, spec, a, d.idempotencyKey), 201);
 });
-/** The browser never sets the recorded voice, the presenter's video or a clip's tracking: only the server's runs do. */
+/**
+ * The browser never sets the recorded voice, the presenter's video, a clip's tracking or the moment it was paid for:
+ * only the server's runs do.
+ */
 function stripGenerated(spec: Spec): Spec {
-  const { generated: _g, presented: _p, tracked: _t, ...rest } = spec as Spec & { generated?: unknown; presented?: unknown; tracked?: unknown };
+  const { generated: _g, presented: _p, tracked: _t, paid: _m, ...rest } = spec as Spec & { generated?: unknown; presented?: unknown; tracked?: unknown; paid?: unknown };
   return rest as Spec;
 }
 /**
  * What the server owns of the stored spec (the paid recording, the presenter's video while the edit keeps a presenter,
- * a clip's tracking), carried into the edit `next`.
+ * a clip's tracking and the moment it was last paid for), carried into the edit `next`. A clip saved before that
+ * moment was kept takes its stored one, so a chain of edits starting from it is priced against one moment too.
  */
 function serverParts(stored: Spec, next: Spec) {
   const s = stored as Spec & { generated?: unknown; presented?: unknown; tracked?: unknown };
   const presenter = !isHighlight(next) && !!next.presenter;
-  return { ...(s.generated ? { generated: s.generated } : {}), ...(s.presented && presenter ? { presented: s.presented } : {}), ...(s.tracked ? { tracked: s.tracked } : {}) };
+  return {
+    ...(s.generated ? { generated: s.generated } : {}), ...(s.presented && presenter ? { presented: s.presented } : {}), ...(s.tracked ? { tracked: s.tracked } : {}),
+    ...(isHighlight(stored) ? { paid: paidMoment(stored) } : {}),
+  };
 }
 videos.get("/:id", async (c) => {
   const user = c.get("user");
@@ -255,7 +276,8 @@ videos.put("/:id", async (c) => {
   const stored = json<Spec>(v.spec, d.spec);
   if ((stored.format || "story") !== d.spec.format) throw new HTTPException(400, { message: "A video can't change its type. Make a new one instead." });
   // The paid recording stays with the video while its words and voice do not change, the presenter's video while its
-  // avatar, quality and recording do not (and a clip's tracking while its moment does not).
+  // avatar, quality and recording do not (and a clip's tracking while its moment does not, its paid moment until a run
+  // that charges for a new one makes it).
   const spec = { ...stripGenerated(d.spec), ...serverParts(stored, d.spec) } as Spec;
   await checkReferences(c.env, user.id, spec, !isHighlight(stored) && stored.narration?.kind === "voice" ? stored.narration.voiceId : null,
     !isHighlight(stored) ? stored.presenter?.avatarId : null);
