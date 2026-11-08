@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import worker from "../server/index";
 import { seal, open } from "../server/crypto";
-import { dispatchDue, refreshAccounts } from "../server/publishing";
+import { dispatchDue, refreshAccounts, scheduleEpisode } from "../server/publishing";
 import { Publication } from "../server/publish-workflow";
 import { videoReady } from "../server/series";
 import { tiktokChunks } from "../server/social/tiktok";
@@ -10,7 +10,7 @@ import { keepYouTubeData } from "../server/youtube-data";
 import { uploadsToday } from "../server/youtube-quota";
 import { specSchema } from "../shared/formats";
 import { seriesSettingsSchema } from "../shared/series";
-import type { Tokens } from "../server/social";
+import { failureMessage, type Tokens } from "../server/social";
 import { SITE, call, signedIn, testEnv } from "./helpers";
 
 // Posting made videos on TikTok, YouTube and Instagram: now, at a chosen time, or (a series' episodes) at their slot.
@@ -375,6 +375,29 @@ describe("series episodes", () => {
       await videoReady(s.env, id);
       expect(publicationsOf(s, id)).toHaveLength(0);
     }
+  });
+
+  it("are never posted again on an account whose post was canceled or failed when they are made again", async () => {
+    const s = setup();
+    const tiktok = await addAccount(s, "tiktok"), youtube = await addAccount(s, "youtube"), instagram = await addAccount(s, "instagram");
+    const series = addSeries(s, { accounts: [tiktok, youtube, instagram], madeForKids: false, notify: false });
+    // Its slot passed a little while ago: it posts at once.
+    const episode = await addVideo(s, { seriesId: series, slotAt: now() - HOUR });
+    expect(await scheduleEpisode(s.env, episode)).toBe(3);
+    const [instagramPost, tiktokPost, youtubePost] = publicationsOf(s, episode);
+    // Instagram posted it, the owner canceled TikTok, and YouTube timed out (it may be live: "check your profile").
+    s.sqlite.prepare("UPDATE publications SET status='published',published_at=? WHERE id=?").run(now(), instagramPost.id);
+    expect((await call(worker, s.env, "DELETE", `/api/publications/${tiktokPost.id}`, undefined, s.user.cookie)).status).toBe(200);
+    s.sqlite.prepare("UPDATE publications SET status='failed',error=? WHERE id=?").run(failureMessage("youtube", "TIMEOUT"), youtubePost.id);
+    // An edit makes the video again: ready again, nothing comes back.
+    s.sqlite.prepare("UPDATE videos SET revision=revision+1 WHERE id=?").run(episode);
+    await videoReady(s.env, episode);
+    expect(publicationsOf(s, episode).map((p) => [p.platform, p.status])).toEqual([["instagram", "published"], ["tiktok", "canceled"], ["youtube", "failed"]]);
+    // An account added to the series since gets it: it never had it.
+    const another = await addAccount(s, "tiktok");
+    s.sqlite.prepare("UPDATE series SET settings=json_set(settings,'$.accounts',json_array(?,?,?,?)) WHERE id=?").run(tiktok, youtube, instagram, another, series);
+    expect(await scheduleEpisode(s.env, episode)).toBe(1);
+    expect(publicationsOf(s, episode).filter((p) => p.status === "scheduled").map((p) => p.account_id)).toEqual([another]);
   });
 
   it("wait for approval when the series asks for review, then go out at their slot", async () => {

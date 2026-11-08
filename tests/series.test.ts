@@ -219,13 +219,38 @@ describe("episodes", () => {
     const { env, user, create, row, videos } = setup();
     const id = (await create()).data.series.id;
     const coming = slots(JSON.parse(row(id).settings).schedule, now(), 3)[2];
-    expect((await call(worker, env, "POST", `/api/series/${id}/episodes`, { slot: coming + 60 }, user.cookie)).status).toBe(400);
-    const r = await call(worker, env, "POST", `/api/series/${id}/episodes`, { slot: coming }, user.cookie);
+    const make = (body: Record<string, unknown>) => call(worker, env, "POST", `/api/series/${id}/episodes`, { idempotencyKey: crypto.randomUUID(), ...body }, user.cookie);
+    expect((await make({ slot: coming + 60 })).status).toBe(400);
+    const r = await make({ slot: coming });
     expect(r.status).toBe(201);
     expect(videos(id).map((v) => v.slot_at)).toEqual([coming]);
+    // That slot has its episode: asked again, the same one comes back.
+    expect((await make({ slot: coming })).data.video.id).toBe(r.data.video.id);
     // An extra episode has no slot.
-    expect((await call(worker, env, "POST", `/api/series/${id}/episodes`, {}, user.cookie)).status).toBe(201);
+    expect((await make({})).status).toBe(201);
     expect(videos(id)).toHaveLength(2);
+  });
+
+  it("makes one now once per click: sent again with the same key, the same episode comes back, charged once", async () => {
+    const { env, sqlite, user, create, videos } = setup();
+    const id = (await create({ first: false })).data.series.id;
+    const used = () => (sqlite.prepare("SELECT SUM(used) AS n FROM usage_windows WHERE user_id=?").get(user.id) as any).n;
+    const make = (idempotencyKey?: string) => call(worker, env, "POST", `/api/series/${id}/episodes`, { idempotencyKey }, user.cookie);
+    // A retry after a timeout sends the click's key again.
+    const key = crypto.randomUUID();
+    const first = await make(key);
+    expect(first.status).toBe(201);
+    const again = await make(key);
+    expect(again.status).toBe(200);
+    expect(again.data.video.id).toBe(first.data.video.id);
+    expect(videos(id)).toHaveLength(1);
+    expect(used()).toBe(1);
+    // A new click has a new key: another episode.
+    expect((await make(crypto.randomUUID())).status).toBe(201);
+    expect(videos(id)).toHaveLength(2);
+    expect(used()).toBe(2);
+    // The browser always sends one.
+    expect((await make()).status).toBe(400);
   });
 });
 
@@ -264,6 +289,96 @@ describe("the cron", () => {
 });
 
 describe("changing a series", () => {
+  const at = (iso: string) => Date.parse(iso) / 1000;
+  /**
+   * 12:00 UTC: a daily 18:00 series posting to two TikTok accounts makes today's episode (it is ready, and scheduled
+   * on both at 18:00).
+   */
+  async function madeAtNoon() {
+    vi.setSystemTime(new Date("2026-11-03T12:00:00Z"));
+    const s = setup();
+    const accounts = [crypto.randomUUID(), crypto.randomUUID()];
+    for (const account of accounts)
+      s.sqlite.prepare("INSERT INTO social_accounts(id,user_id,platform,external_id,name,credentials,status,created_at,updated_at) VALUES (?,?,'tiktok',?,'Channel','x','active',1,1)")
+        .run(account, s.user.id, account);
+    const id = (await s.create({ settings: { schedule: { timezone: "UTC", times: ["18:00"], days: [0, 1, 2, 3, 4, 5, 6] }, accounts } })).data.series.id;
+    expect(s.row(id).next_slot).toBe(at("2026-11-03T18:00:00Z"));
+    await runEpisode(s.env, id, s.row(id).next_slot);
+    const [v] = s.videos(id);
+    s.sqlite.prepare("UPDATE videos SET render_status='ready',video_asset='file',duration=30 WHERE id=?").run(v.id);
+    await videoReady(s.env, v.id);
+    const posts = () => s.sqlite.prepare("SELECT * FROM publications WHERE video_id=? AND status<>'canceled' ORDER BY account_id").all(v.id) as any[];
+    expect(posts().map((p) => p.scheduled_at)).toEqual([at("2026-11-03T18:00:00Z"), at("2026-11-03T18:00:00Z")]);
+    const patch = (body: Record<string, unknown>) => call(worker, s.env, "PATCH", `/api/series/${id}`, body, s.user.cookie);
+    return { ...s, id, video: v.id, posts, patch };
+  }
+
+  it("moves the episode already made to a new posting time, with its posts: never made, charged or posted twice", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const s = await madeAtNoon();
+      const used = () => (s.sqlite.prepare("SELECT SUM(used) AS n FROM usage_windows WHERE user_id=?").get(s.user.id) as any).n;
+      const charged = used();
+      // 13:00: the series now posts at 19:00. Today's episode goes out at 19:00 instead of 18:00.
+      vi.setSystemTime(new Date("2026-11-03T13:00:00Z"));
+      const r = await s.patch({ settings: { schedule: { timezone: "UTC", times: ["19:00"], days: [0, 1, 2, 3, 4, 5, 6] } } });
+      expect(r.status).toBe(200);
+      const seven = at("2026-11-03T19:00:00Z");
+      expect(s.videos(s.id)).toEqual([expect.objectContaining({ id: s.video, slot_at: seven })]);
+      expect(s.posts().map((p) => [p.scheduled_at, p.status])).toEqual([[seven, "scheduled"], [seven, "scheduled"]]);
+      // 19:00 has its episode: the series makes tomorrow's next, and nothing more is written or charged today.
+      expect(r.data.series.nextSlot).toBe(at("2026-11-04T19:00:00Z"));
+      const started = s.env.CONTENT.created.length;
+      await dispatchSeries(s.env);
+      expect(s.env.CONTENT.created).toHaveLength(started);
+      expect(used()).toBe(charged);
+      const page = (await call(worker, s.env, "GET", `/api/series/${s.id}`, undefined, s.user.cookie)).data;
+      expect(page.upcoming[0]).toEqual({ at: seven, made: true });
+      // A time the schedule still has keeps its episode: adding 21:00 moves nothing.
+      await s.patch({ settings: { schedule: { timezone: "UTC", times: ["19:00", "21:00"], days: [0, 1, 2, 3, 4, 5, 6] } } });
+      expect(s.videos(s.id)[0].slot_at).toBe(seven);
+      expect(s.row(s.id).next_slot).toBe(at("2026-11-03T21:00:00Z"));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("resuming posts the episode made before the pause: at its slot, at once when it just passed, never a post canceled by hand", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const s = await madeAtNoon();
+      const six = at("2026-11-03T18:00:00Z");
+      // The owner cancels the post on the second account, then pauses: nothing is left to post.
+      const [kept, dropped] = s.posts();
+      expect((await call(worker, s.env, "DELETE", `/api/publications/${dropped.id}`, undefined, s.user.cookie)).status).toBe(200);
+      vi.setSystemTime(new Date("2026-11-03T13:00:00Z"));
+      await s.patch({ status: "paused" });
+      expect(s.posts()).toHaveLength(0);
+      // 14:00, resumed: today's episode posts at 18:00 again, on the first account only. The series makes tomorrow's next.
+      vi.setSystemTime(new Date("2026-11-03T14:00:00Z"));
+      expect((await s.patch({ status: "active" })).data.series.nextSlot).toBe(at("2026-11-04T18:00:00Z"));
+      expect(s.posts().map((p) => [p.account_id, p.scheduled_at, p.status])).toEqual([[kept.account_id, six, "scheduled"]]);
+      const page = (await call(worker, s.env, "GET", `/api/series/${s.id}`, undefined, s.user.cookie)).data;
+      expect(page.upcoming[0]).toEqual({ at: six, made: true });
+      expect(page.videos[0].publications).toEqual([expect.objectContaining({ scheduledAt: six, status: "scheduled" })]);
+
+      // Paused again before 18:00 and resumed at 19:00: the slot passed less than LATE_GRACE ago, so it posts at once.
+      vi.setSystemTime(new Date("2026-11-03T17:00:00Z"));
+      await s.patch({ status: "paused" });
+      vi.setSystemTime(new Date("2026-11-03T19:00:00Z"));
+      await s.patch({ status: "active" });
+      expect(s.posts().map((p) => [p.account_id, p.scheduled_at])).toEqual([[kept.account_id, now() + MINUTE]]);
+
+      // Resumed longer after its slot: it is left for the owner to post by hand.
+      await s.patch({ status: "paused" });
+      vi.setSystemTime(new Date((six + LATE_GRACE + 60) * 1000));
+      await s.patch({ status: "active" });
+      expect(s.posts()).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("pauses (cancelling what was still to post), resumes from the next slot and keeps its videos when deleted", async () => {
     const { env, sqlite, user, create, row, videos } = setup();
     const id = (await create()).data.series.id;

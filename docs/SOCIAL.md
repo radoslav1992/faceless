@@ -9,7 +9,7 @@ on YouTube, videos on TikTok.
 | --- | --- |
 | Connect / list / disconnect accounts | `server/accounts.ts` (`/api/accounts`) |
 | Post now or later, schedule view, move, cancel, retry | `server/publishing.ts` (`/api/videos/:id/publish`, `/api/publications`, `/api/videos/:id/publications`, `/api/publications/:id`, `/api/publications/:id/retry`) |
-| A series' episode to its accounts at its slot | `scheduleEpisode(env, videoId)` in `server/publishing.ts`, called when an approved episode is ready (`videoReady` in `server/series.ts`) and when one is approved (`/api/videos/:id/review`) |
+| A series' episode to its accounts at its slot | `scheduleEpisode(env, videoId)` in `server/publishing.ts`, called when an approved episode is ready (`videoReady` in `server/series.ts`), when one is approved (`/api/videos/:id/review`) and when its series is resumed (`resumePosts` in `server/series.ts`) |
 | Media links the networks fetch | `server/publishing.ts` (`/api/publish-media/:publication/:n?token=`) |
 | Due posts → workflow (cron, every minute) | `dispatchDue(env)` in `server/publishing.ts`, from `server/maintenance.ts` |
 | Publishing one video | `Publication` workflow, `server/publish-workflow.ts` |
@@ -230,8 +230,11 @@ never stops the others. An expired or revoked token marks the account `expired`,
 
 1. `POST /api/videos/:id/publish` (now or at `at`, optionally `private`) or `scheduleEpisode` for a series' episode
    creates one `publications` row per account, `status='scheduled'`. The `publication_once` index prevents the same
-   video twice on one account. An episode whose slot passed more than 3 hours ago (`LATE_GRACE`) is left for the owner
-   to post by hand.
+   video twice on one account. `scheduleEpisode` runs after every render, an edit's too, so it goes further: it skips
+   an account that ever had a post of the episode, canceled or failed included (a `TIMEOUT` or `INTERRUPTED` post may
+   be live), so a re-render never brings back a post. Only posts canceled by pausing the series (`error` is
+   `PAUSED`) are scheduled again, when the series is resumed. An episode whose slot passed more than 3 hours ago
+   (`LATE_GRACE`) is left for the owner to post by hand.
 2. Every minute `dispatchDue(env)` claims up to 25 due rows whose video is ready (`status='publishing'`, `attempts+1`,
    a random media-link `token`) and creates Workflow instance `pub-<publication>-<attempt>`. If the instance cannot be
    created the row goes back to `scheduled`. A due video that is still being made waits; it fails at once when its
@@ -247,10 +250,12 @@ never stops the others. An expired or revoked token marks the account `expired`,
    again a minute later.
 
 Disconnecting an account cancels what is still scheduled to it and removes it from every series; its published
-history stays ("Disconnected account"). Pausing or deleting a series cancels its scheduled posts. Disconnecting a
-YouTube channel, or deleting the account that owns it, also revokes its refresh token at Google after the response
-(`revokeAccess` in `server/social/credentials.ts`), so the app leaves the person's Google connections list; a failed
-revoke is only logged (`Social access not revoked`), since our copy of the tokens is already deleted.
+history stays ("Disconnected account"). Pausing or deleting a series cancels its scheduled posts; resuming a paused
+series schedules its episodes' posts again (at their slot, or at once when it passed less than 3 hours ago), and
+changing its schedule moves an episode already made, with the posts scheduled at its old time, to the new time.
+Disconnecting a YouTube channel, or deleting the account that owns it, also revokes its refresh token at Google after
+the response (`revokeAccess` in `server/social/credentials.ts`), so the app leaves the person's Google connections
+list; a failed revoke is only logged (`Social access not revoked`), since our copy of the tokens is already deleted.
 
 Provider calls never follow redirects, have timeouts, and log only the platform, publication ID, HTTP status and a
 short code — never tokens, URLs with tokens, or response bodies.

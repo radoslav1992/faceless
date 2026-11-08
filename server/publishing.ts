@@ -218,10 +218,14 @@ publishMedia.get("/:publicationId/:file", async (c) => {
   return new Response(c.req.method === "HEAD" ? null : object.body, { status: range ? 206 : 200, headers });
 });
 
+/** The reason kept on a post canceled by pausing its series: resuming the series schedules it again (scheduleEpisode). */
+export const PAUSED = "Canceled while the series was paused.";
+
 /**
  * An approved, ready episode of a series goes to the series' channels at its slot (at once when the slot passed less
- * than LATE_GRACE ago; a later one is left for the owner to post by hand). Returns how many publications were created;
- * accounts it is already scheduled or published on are skipped.
+ * than LATE_GRACE ago; a later one is left for the owner to post by hand). Returns how many publications were created.
+ * It goes to each account once: one that already had a post of it (scheduled, published, failed or canceled) is
+ * skipped, except a post canceled by pausing the series.
  */
 export async function scheduleEpisode(env: Env, videoId: string): Promise<number> {
   const video = await env.DB.prepare("SELECT * FROM videos WHERE id=?").bind(videoId).first<VideoRow & { series_id: string | null; slot_at: number | null }>();
@@ -233,15 +237,23 @@ export async function scheduleEpisode(env: Env, videoId: string): Promise<number
   const t = now();
   const slot = video.slot_at ?? t;
   if (slot < t - LATE_GRACE) return 0;
-  const accounts = (await accountsById(env, video.user_id, parsed.data.accounts)).filter((a) => !refusal(a, video, parsed.data.private));
+  // Every finished render calls this, an edit's too: it must never bring back a post the owner canceled, or one that
+  // failed (a timed-out one may even be live, and posting it again would post it twice). Only the posts a pause
+  // canceled come back, once the series is resumed. (`error IS ?`: a NULL reason is never PAUSED.)
+  const had = new Set((await env.DB.prepare("SELECT account_id FROM publications WHERE video_id=? AND account_id IS NOT NULL AND NOT (status='canceled' AND error IS ?)")
+    .bind(video.id, PAUSED).all<{ account_id: string }>()).results.map((p) => p.account_id));
+  const accounts = (await accountsById(env, video.user_id, parsed.data.accounts)).filter((a) => !had.has(a.id) && !refusal(a, video, parsed.data.private));
   if (!accounts.length) return 0;
   // A series saved before it asked "made for kids" has no answer: YouTube then applies the channel's own setting.
   return (await insertPublications(env, video, accounts, Math.max(slot, t + LEAD), true, { private: parsed.data.private, madeForKids: parsed.data.madeForKids })).length;
 }
-/** Cancels what a series still had scheduled (paused or deleted). */
-export async function cancelScheduled(env: Env, userId: string, seriesId: string) {
-  await env.DB.prepare("UPDATE publications SET status='canceled',updated_at=? WHERE user_id=? AND status='scheduled' AND video_id IN (SELECT id FROM videos WHERE series_id=?)")
-    .bind(now(), userId, seriesId).run();
+/**
+ * Cancels what a series still had scheduled: paused (`reason` PAUSED, so resuming the series schedules it again) or
+ * deleted.
+ */
+export async function cancelScheduled(env: Env, userId: string, seriesId: string, reason: string | null = null) {
+  await env.DB.prepare("UPDATE publications SET status='canceled',error=?,updated_at=? WHERE user_id=? AND status='scheduled' AND video_id IN (SELECT id FROM videos WHERE series_id=?)")
+    .bind(reason, now(), userId, seriesId).run();
 }
 
 /**

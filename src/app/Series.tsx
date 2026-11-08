@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, CalendarClock, Film, Pause, Play, Plus, Repeat, Settings2, Sparkles, Trash2 } from "lucide-react";
-import { del, errorText, fileUrl, patch, post, useApi, useAuth, usePoll, when, type Account, type Series, type Video } from "../lib";
+import { del, errorText, fileUrl, newKey, patch, post, useApi, useAuth, usePoll, when, type Account, type Series, type Video } from "../lib";
 import { useToast } from "../ui";
 import { StyleArt } from "../art";
 import { ConfirmDialog } from "./pickers";
@@ -72,6 +72,9 @@ export function SeriesPage() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
+  // One idempotency key per "Make now" button, kept until its request succeeds: clicking again after a failure (a
+  // timeout may still have made the episode) gets that episode back instead of writing and charging a second one.
+  const keys = useRef(new Map<string, string>());
   useConnectOutcome();
   usePoll(() => { void reload(); }, 8000, !!data?.videos.some(making));
   if (error) return <div className="page"><p className="notice bad">{error}</p></div>;
@@ -83,6 +86,12 @@ export function SeriesPage() {
     catch (e) { toast(errorText(e), "bad"); }
     finally { setBusy(null); }
   };
+  const make = (key: string, body: { slot?: number }, done: string) => run(key, async () => {
+    const idempotencyKey = keys.current.get(key) ?? newKey();
+    keys.current.set(key, idempotencyKey);
+    await post(`/series/${s.id}/episodes`, { ...body, idempotencyKey });
+    keys.current.delete(key);
+  }, done);
   const bySlot = new Map(data.videos.filter((v) => v.slotAt).map((v) => [v.slotAt!, v]));
   const past = data.videos.filter((v) => !v.slotAt || v.slotAt <= Date.now() / 1000 || !data.upcoming.some((u) => u.at === v.slotAt));
   const editing = settings ?? s.settings;
@@ -95,7 +104,7 @@ export function SeriesPage() {
           <p>{t?.name} · {languageName(s.settings.language)} · {storyStyles[s.settings.style].name} · {lengthName(s.settings.seconds)} · up to {creditsLabel(s.credits)} per video</p>
         </div>
         <div className="toolbar">
-          <button type="button" className="btn" disabled={busy === "make"} onClick={() => run("make", () => post(`/series/${s.id}/episodes`, {}), "Writing a new episode…")}>
+          <button type="button" className="btn" disabled={busy === "make"} onClick={() => make("make", {}, "Writing a new episode…")}>
             {busy === "make" ? <span className="spinner" aria-hidden="true" /> : <Film size={16} aria-hidden="true" />} Make one now
           </button>
           {s.status === "active"
@@ -124,7 +133,7 @@ export function SeriesPage() {
                         <small>{when(u.at)}{v && making(v) ? ` · ${phaseText(v)}…` : !v ? " · made a few hours before" : ""}</small>
                       </div>
                       {v ? <Link className="btn sm" to={`/app/videos/${v.id}`}>Open</Link>
-                        : <button type="button" className="btn sm" disabled={busy === `slot-${u.at}`} onClick={() => run(`slot-${u.at}`, () => post(`/series/${s.id}/episodes`, { slot: u.at }), "Writing this episode now…")}>Make now</button>}
+                        : <button type="button" className="btn sm" disabled={busy === `slot-${u.at}`} onClick={() => make(`slot-${u.at}`, { slot: u.at }, "Writing this episode now…")}>Make now</button>}
                     </div>
                   );
                 })}

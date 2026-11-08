@@ -10,8 +10,8 @@ import { canCreate, checkReferences, createVideo, newVideoCredits, videoView } f
 import { findClips, findSchema, ownedSource, SOURCE_FIELDS, sourceView } from "./highlights";
 import { importLink } from "./imports";
 import { draftVideo, type DraftRequest } from "./story";
-import { nextSlot, seriesSettings } from "./series";
-import { cancelScheduled } from "./publishing";
+import { planFromNow, resumePosts, seriesSettings } from "./series";
+import { cancelScheduled, PAUSED } from "./publishing";
 import { serveObject } from "./storage";
 import { templateIds, templates, type TemplateId } from "../shared/templates";
 import { STORY_MAX_CHARS, storyStyleIds, storyStyles } from "../shared/story";
@@ -137,10 +137,12 @@ async function listSeries(env: Env, user: DbUser) {
 async function setSeriesStatus(env: Env, user: DbUser, id: string, status: "active" | "paused") {
   const s = await env.DB.prepare("SELECT * FROM series WHERE id=? AND user_id=?").bind(id, user.id).first<any>();
   if (!s) throw new HTTPException(404, { message: "Series not found." });
-  // Resuming starts again from the next slot from now, as in the app.
-  const next = status === "active" && s.status !== "active" ? nextSlot(seriesSettings(s), now() + 600) : s.next_slot;
+  // Resuming starts again from now, keeping the episodes already made and posting them again, as in the app.
+  const resumed = status === "active" && s.status !== "active";
+  const next = resumed ? await planFromNow(env, id, seriesSettings(s)) : s.next_slot;
   await env.DB.prepare("UPDATE series SET status=?,next_slot=?,failures=0,blocked=NULL,updated_at=? WHERE id=?").bind(status, next, now(), id).run();
-  if (status === "paused") await cancelScheduled(env, user.id, id);
+  if (status === "paused") await cancelScheduled(env, user.id, id, PAUSED);
+  if (resumed) await resumePosts(env, id);
   return { id, status };
 }
 async function account(env: Env, user: DbUser) {

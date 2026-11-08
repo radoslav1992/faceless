@@ -190,7 +190,10 @@ refused the video), `NOT_CONFIGURED` (app credentials or `TOKEN_ENCRYPTION_KEY` 
 Google account without a YouTube channel), `TIMEOUT` and `INTERRUPTED` (it may have been posted: check the profile
 before retrying), `NOT_READY` and `PROVIDER_ERROR`. TikTok's "only private posts" refusal for apps it has not audited
 gets its own message, as does its limit on drafts waiting in a person's inbox (`spam_risk_too_many_pending_share`). Publications stuck in `publishing` for 2 hours fail with `TIMEOUT`; due posts whose video failed,
-or is still being made 6 hours later, fail with "The video couldn't be made in time".
+or is still being made 6 hours later, fail with "The video couldn't be made in time". Canceled posts keep no message,
+except those canceled by pausing their series ("Canceled while the series was paused."): resuming the series schedules
+those again. A series' episode never goes again by itself to an account where its post was canceled or failed, even
+after an edit makes it again; the owner posts it there by hand (or retries the failed post).
 
 **Stats reads** (`publications.metrics_error`): `scope` (the connection lacks the stats permission; reconnecting fixes
 it), `reconnect`, `not_found` (the post was removed), `failed`.

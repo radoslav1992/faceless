@@ -467,8 +467,12 @@ handling daylight saving time. Plans limit how many series a person has; text to
 
 - **Planning.** A new series points at the first slot at least 10 minutes away; by default its first episode is
   started at once, so the owner sees what it makes before anything posts. Changing the schedule or resuming a paused
-  series starts again from the next slot from now; pausing cancels what was still scheduled; deleting a series keeps
-  its videos.
+  series starts again from the first slot at least 10 minutes away that has no episode (`planFromNow`): episodes
+  already made for coming slots are kept, so no slot is written, charged or posted twice. One whose time the schedule
+  still has stays there; one whose time it dropped (18:00 became 19:00) moves, with the posts scheduled at its old
+  time, to the first coming slot without an episode. Pausing cancels what was still scheduled, with the reason
+  `PAUSED`; resuming schedules those posts again (`resumePosts`): at their slot, or at once when it passed less than
+  3 hours ago (an older one is left for the owner to post by hand). Deleting a series keeps its videos.
 - **Made ahead.** Every minute (when `MEDIA_ENABLED=true`) `dispatchSeries` takes active series whose next slot is
   within `MAKE_AHEAD` (6 hours on autopilot, 24 hours in review mode), at most 10 a minute. Each is **claimed** for
   15 minutes (`attempted_at`) and handed to the workflow as an `episode` job.
@@ -486,13 +490,19 @@ handling daylight saving time. Plans limit how many series a person has; text to
   later ones are left for the owner to post by hand.
 - **Notices.** `videoReady` e-mails once per video (`notified_at`): when it posts, or that it waits for review.
   `videoFailed` e-mails once when an episode could not be made.
-- **"Make one now"** (`POST /api/series/:id/episodes`) makes an extra episode, or the one of a coming slot.
+- **"Make one now"** (`POST /api/series/:id/episodes`) makes an extra episode, or the one of a coming slot. The
+  browser sends an `idempotencyKey`, kept until the request succeeds; an extra episode's run uses
+  `episode:<series>:extra:<key>` (a slot's `episode:<series>:<slot>`), so a retry after a timeout gets the episode
+  already made instead of writing and charging a second one.
 
 ## Publishing
 
 `POST /api/videos/:id/publish` posts a ready video to chosen accounts now (in a minute) or at a time up to 180 days
 ahead, publicly or privately (TikTok and YouTube; Instagram cannot); it approves a video still waiting for review. A
-series' approved episode is scheduled on the series' accounts at its slot (`scheduleEpisode`). Each network's limits
+series' approved episode is scheduled on the series' accounts at its slot (`scheduleEpisode`), once per account: an
+account that already had a post of it, canceled or failed included (a timed-out post may be live), is skipped, so
+making the episode again after an edit never brings a post back. Posts canceled by pausing the series are the
+exception: resuming schedules them again. Each network's limits
 (`shared/social.ts`) are checked first: TikTok 3 s–10 min, YouTube Shorts up to 3 min, Instagram Reels 3 s–15 min.
 
 Every minute `dispatchDue` (`server/publishing.ts`):
