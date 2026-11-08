@@ -49,6 +49,10 @@ npm run db:remote     # wrangler d1 migrations apply faceless --remote
 npx wrangler d1 migrations list faceless --remote   # nothing left to apply
 ```
 
+Or without a computer signed in to Cloudflare: GitHub → Actions → **Migrate** → Run workflow does the same with the
+Deploy secrets (the token needs D1 edit access) and lists what is left before and after. It only runs by hand, so
+each migration is still applied at the moment its note below says.
+
 `0014_unfinished_indexes.sql` adds two small indexes (videos still being made or failed, files not ready) so the
 per-minute publishing and the five-minute and hourly maintenance stop reading every video and file. It only adds
 indexes, so it is safe to apply before or after deploying the code: apply it with the same `npm run db:remote`.
