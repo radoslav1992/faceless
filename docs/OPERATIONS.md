@@ -246,14 +246,17 @@ What to do: Admin → **Billing** → Withdrawal within 14 days.
 
 The refund is `floor(paid × (quota − used) / quota)` (`withdrawalRefund` in `shared/withdrawal.ts`), where `quota` is
 the paid period's credits (the month's for a monthly plan, twelve months' worth for a yearly plan) and `used` the
-credits used in that period. Example: Starter monthly, $19.00 paid, 9 of 30 credits used → $13.30. Credit packs are
+credits used in that period (after a change between monthly and yearly billing, in the earlier period too: what was
+paid for it is in `paid`). Example: Starter monthly, $19.00 paid, 9 of 30 credits used → $13.30. Credit packs are
 separate purchases and are not part of it.
 
 Safeguards: one withdrawal per subscription; the amount must still match what the administrator saw (more use since
 then answers 409 "check again"); after 14 days it is refused. If Stripe refuses the refund the plan has still ended,
 the withdrawal shows "Refund by hand" and `Withdrawal refund failed` is logged: refund the rest in Stripe. A full
-refund or a dispute made directly in Stripe also ends the plan by itself (webhook `charge.refunded` /
-`charge.dispute.created`).
+refund of a plan payment, or a dispute, made directly in Stripe also ends the plan by itself (webhook
+`charge.refunded` / `charge.dispute.created`); refunding a credit pack only takes back its unused credits. A full
+refund of anything else leaves the plan as it is and logs `Refunded charge is neither a credit pack nor a subscription
+payment; check it by hand`: look the charge up in Stripe and, if the plan should end, cancel the subscription there.
 
 ## 7. Free plans (plan grants)
 
@@ -261,7 +264,8 @@ Admin → **Billing** → Give a plan for free gives a person a paid plan for 1,
 Stripe: testers, partners, support cases. Type part of their email to find the account (they need one; the results
 show what each pays for and any free plan running), choose it, then the plan and how long. A grant is a
 `subscriptions` row with an ID starting `grant_`, so each of its months gets its own usage window with the plan's full
-credits (unused credits don't carry over), and it ends by itself. Giving a plan again, or **Start again**, replaces a
+credits (its unused credits don't carry over; credit packs bought and call credits given during it do), and it ends
+by itself. Giving a plan again, or **Start again**, replaces a
 running grant with a fresh one; **End now** ends it.
 
 - A running grant wins over a paid plan unless the person pays for a higher one; afterwards they return to their paid
@@ -361,8 +365,9 @@ reconciliation re-read doubtful subscriptions. R2 is not part of Time Travel.
 Useful log lines: `Run failed` (code and run ID), `Run dispatch failed; maintenance will retry`, `Episode not
 started`, `Series cannot run: the CONTENT workflow binding is missing`, `Publication failed`, `Publication workflow
 error`, `Publication timed out`, `Social API call failed`, `Social token renewal failed`, `Post stats failed`,
-`Stripe reconciliation failed`, `Subscription price is not a configured plan`, `Paid access ended`, `Credit pack paid by
-an account that no longer exists; review for refund`, `Cancelled subscription of a deleted account; review for refund`,
+`Stripe reconciliation failed`, `Subscription price is not a configured plan`, `Paid access ended`, `Refunded charge is
+neither a credit pack nor a subscription payment; check it by hand`, `Credit pack paid by an account that no longer
+exists; review for refund`, `Cancelled subscription of a deleted account; review for refund`,
 `Contract confirmation failed`, `MCP tool failed`.
 
 ## 12. E-mail deliverability

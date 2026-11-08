@@ -29,6 +29,12 @@ function stripeApi(invoices: Record<string, object>) {
     const url = new URL(String(input?.url ?? input));
     const invoice = url.pathname.match(/^\/v1\/invoices\/(\w+)$/);
     if (invoice) return Response.json(invoices[invoice[1]]);
+    // Which invoice a payment belongs to (a refunded charge is placed by it).
+    if (url.pathname === "/v1/invoice_payments") {
+      const intent = url.searchParams.get("payment[payment_intent]");
+      const paid = Object.values(invoices).filter((i: any) => i.payments.data.some((p: any) => p.payment.payment_intent === intent));
+      return Response.json({ object: "list", has_more: false, data: paid.map((i) => ({ object: "invoice_payment", status: "paid", invoice: i, payment: { type: "payment_intent", payment_intent: intent } })) });
+    }
     if (url.pathname === "/v1/subscriptions/sub_1") return Response.json(sub);
     if (url.pathname === "/v1/subscriptions") return Response.json({ object: "list", data: [], has_more: false });
     throw new Error("unexpected Stripe call " + url.pathname);
@@ -36,6 +42,7 @@ function stripeApi(invoices: Record<string, object>) {
 }
 const invoice = (id: string, paid: number, tax = 0) => ({
   id, object: "invoice", customer: "cus_r", status: "paid", amount_paid: paid + tax, currency: "usd", total_taxes: tax ? [{ amount: tax }] : [],
+  parent: { type: "subscription_details", subscription_details: { subscription: "sub_1" } },
   payments: { object: "list", data: [{ status: "paid", payment: { type: "payment_intent", payment_intent: `pi_${id}` } }] },
 });
 async function setup(extra: Record<string, unknown> = {}) {

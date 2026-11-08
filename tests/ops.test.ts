@@ -105,6 +105,10 @@ function stripeApi(o: { started?: number; refundFails?: boolean; subscriptions?:
     if (url.includes("/v1/subscriptions")) return Response.json({ object: "list", has_more: false, data: o.subscriptions ? o.subscriptions() : [sub()] });
     if (url.includes("/v1/invoices")) return Response.json({ object: "list", has_more: false, data: [{ id: "in_1", object: "invoice", created: now() - 3 * DAY, currency: "usd",
       payments: { object: "list", data: [{ status: "paid", amount_paid: amount, payment: { type: "payment_intent", payment_intent: "pi_1" } }] } }] });
+    // Which invoice a payment belongs to: pi_1 pays the subscription's invoice in_1.
+    if (url.includes("/v1/invoice_payments")) return Response.json({ object: "list", has_more: false, data: new URL(url).searchParams.get("payment[payment_intent]") !== "pi_1" ? [] : [{
+      id: "inpay_1", object: "invoice_payment", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_1" },
+      invoice: { id: "in_1", object: "invoice", parent: { type: "subscription_details", subscription_details: { subscription: "sub_1" } } } }] });
     if (url.includes("/v1/payment_intents/pi_1")) return Response.json({ id: "pi_1", object: "payment_intent", latest_charge: { id: "ch_1", amount, amount_refunded: 0 } });
     if (url.includes("/v1/refunds")) {
       if (o.refundFails) return Response.json({ error: { type: "invalid_request_error", message: "No" } }, { status: 400 });
@@ -269,6 +273,15 @@ describe("withdrawal within 14 days", () => {
     expect(quote.data).toMatchObject({ paid: 28800, used: 60, quota: 720, refund: 26400 });
   });
 
+  it("counts the credits used before a change between monthly and yearly billing, whose payment is counted too", async () => {
+    const { env, sqlite, admin, client } = paying();
+    // The subscription's first, monthly period (50 credits used), before yearly billing started a new one at 100.
+    sqlite.prepare("INSERT INTO usage_windows(id,user_id,plan,quota,used) VALUES (?,?,'daily',60,50)").run(`${client.id}:sub_1:40`, client.id);
+    stripeApi({ interval: "year", amount: 28800 });
+    const quote = await call(worker, env, "GET", "/api/admin/withdrawals/quote?email=client@example.com", undefined, admin.cookie);
+    expect(quote.data).toMatchObject({ paid: 28800, used: 65, quota: 720, refund: 26200 });
+  });
+
   it("records a refund Stripe refused for completion by hand, and refuses after 14 days or without a paid plan", async () => {
     const { env, sqlite, admin } = paying();
     stripeApi({ refundFails: true });
@@ -285,6 +298,68 @@ describe("withdrawal within 14 days", () => {
     // An account that never paid has no Stripe customer.
     const free = signedIn(sqlite, "free@example.com");
     expect((await call(worker, env, "GET", `/api/admin/withdrawals/quote?email=${free.email}`, undefined, admin.cookie)).status).toBe(404);
+  });
+});
+
+/* ------------------------------------------------------------------------------------------------ refunds */
+
+describe("refunds made in Stripe", () => {
+  /** A customer in a paid Creator month (period from `start`), who bought a pack of 40 credits. */
+  async function withPack(start = now() - DAY, end = start + 30 * DAY) {
+    const { env, sqlite } = billingEnv();
+    const client = signedIn(sqlite, "client@example.com");
+    sqlite.prepare("UPDATE users SET stripe_customer='cus_1' WHERE id=?").run(client.id);
+    sqlite.prepare("INSERT INTO subscriptions(id,user_id,plan,status,period_start,period_end,cancel_at_period_end,event_created) VALUES ('sub_1',?,'daily','active',?,?,0,1)")
+      .run(client.id, start, end);
+    const calls = stripeApi();
+    await webhook(await event("checkout.session.completed", {
+      id: "cs_pack", object: "checkout.session", mode: "payment", payment_status: "paid", customer: "cus_1", payment_intent: "pi_pack",
+      amount_total: 2800, currency: "usd", metadata: { kind: "topup", pack: "pack40", credits: "40", user_id: client.id },
+    }), env);
+    expect(await me(env, client.cookie)).toMatchObject({ plan: "daily", limit: 100, topped: 40 });
+    return { env, sqlite, client, calls };
+  }
+  const refunded = (intent: string) => ({ id: "ch_" + intent, object: "charge", customer: "cus_1", payment_intent: intent, amount: 2800, amount_refunded: 2800, refunded: true });
+
+  it("take a pack's credits back once, also when Stripe sends the event again, and never end the plan for it", async () => {
+    const { env, sqlite, client, calls } = await withPack();
+    // The refund is applied, then recording the event fails: Stripe sends the same event again later.
+    const prepare = env.DB.prepare;
+    env.DB.prepare = (sql: string) => sql.startsWith("INSERT OR IGNORE INTO billing_events")
+      ? { bind: () => ({ run: async () => { throw new Error("D1 unavailable"); } }) } : prepare(sql);
+    await expect(webhook(await event("charge.refunded", refunded("pi_pack"), "evt_refund"), env)).rejects.toThrow("D1 unavailable");
+    env.DB.prepare = prepare;
+    expect(await me(env, client.cookie)).toMatchObject({ plan: "daily", limit: 60, topped: 0 });
+    await webhook(await event("charge.refunded", refunded("pi_pack"), "evt_refund"), env);
+    expect(await me(env, client.cookie)).toMatchObject({ plan: "daily", limit: 60, topped: 0 });
+    expect(sqlite.prepare("SELECT status FROM subscriptions WHERE id='sub_1'").get()).toEqual({ status: "active" });
+    expect(sqlite.prepare("SELECT COUNT(*) AS n FROM billing_events WHERE id='evt_refund'").get()).toEqual({ n: 1 });
+    // Neither does a full refund of a payment that is not one of the subscription's invoices; only that ends the plan.
+    await webhook(await event("charge.refunded", refunded("pi_other")), env);
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    expect(await me(env, client.cookie)).toMatchObject({ plan: "daily", limit: 60 });
+    await webhook(await event("charge.refunded", refunded("pi_1")), env);
+    expect(calls.filter((c) => c.method === "DELETE").map((c) => new URL(c.url).pathname)).toEqual(["/v1/subscriptions/sub_1"]);
+    expect(await me(env, client.cookie)).toMatchObject({ plan: "free" });
+  });
+
+  it("take a pack's credits back from the month they rolled over into", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const start = Date.UTC(2026, 3, 1) / 1000;
+      vi.setSystemTime((start + HOUR) * 1000);
+      const { env, sqlite, client } = await withPack(start, addMonths(start, 1));
+      sqlite.prepare("UPDATE usage_windows SET used=50 WHERE id=?").run(`${client.id}:sub_1:${start}`);
+      // Renewed a month later: the 50 left (the pack's 40 among them) roll over.
+      vi.setSystemTime((addMonths(start, 1) + HOUR) * 1000);
+      sqlite.prepare("UPDATE sessions SET expires_at=?").run(now() + DAY);
+      sqlite.prepare("UPDATE subscriptions SET period_start=?,period_end=? WHERE id='sub_1'").run(addMonths(start, 1), addMonths(start, 2));
+      expect(await me(env, client.cookie)).toMatchObject({ limit: 110, carried: 50 });
+      await webhook(await event("charge.refunded", refunded("pi_pack")), env);
+      expect(await me(env, client.cookie)).toMatchObject({ plan: "daily", limit: 70, carried: 10 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -402,7 +477,7 @@ describe("plan grants", () => {
     expect(paidWindows()[0].quota).toBeGreaterThan(0);
     stripeApi({ subscriptions: () => [] });
     sqlite.prepare("UPDATE users SET stripe_customer='cus_1' WHERE id=?").run(user.id);
-    await webhook(await event("charge.refunded", { id: "ch_1", object: "charge", customer: "cus_1", refunded: true }), { ...env, STRIPE_WEBHOOK_SECRET: secret });
+    await webhook(await event("charge.refunded", { id: "ch_1", object: "charge", customer: "cus_1", payment_intent: "pi_1", refunded: true }), { ...env, STRIPE_WEBHOOK_SECRET: secret });
     expect(windowOf(sqlite, `${user.id}:${running.id}:${start}`)).toEqual(granted);
     expect(paidWindows()).toEqual([{ used: 0, quota: 0 }]);
     expect(await me(env, user.cookie)).toMatchObject({ plan: "studio", granted: true, limit: granted.quota });

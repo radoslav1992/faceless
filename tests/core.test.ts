@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Stripe from "stripe";
 import worker from "../server/index";
-import { allowance, creditTopup, mailbox, periodMonth, webhook } from "../server/billing";
+import { addMonths, allowance, creditTopup, mailbox, periodMonth, webhook } from "../server/billing";
 import { now } from "../server/types";
+import { CALL_CREDITS } from "../shared/growth";
 import { hashPassword } from "../server/security";
 import { call, signedIn, subscribe, testEnv, SITE } from "./helpers";
 import { slots, nextFreeSlot, zonedTime } from "../shared/schedule";
@@ -98,6 +99,21 @@ describe("plans and usage windows", () => {
     expect(paid).toMatchObject({ plan: "daily", limit: 60, used: 0, carried: 0, trialEndsAt: null, interval: "month" });
     expect(db).toBeTruthy();
   });
+  it("gives the free trial once per mailbox to accounts opened at the same moment", async () => {
+    const { env, sqlite } = testEnv();
+    const a = signedIn(sqlite, "jo.hn@gmail.com"), b = signedIn(sqlite, "john@gmail.com");
+    const row = (id: string) => sqlite.prepare("SELECT * FROM users WHERE id=?").get(id) as any;
+    // The other account's first request is handled in full right after the first account's window is written.
+    const batch = env.DB.batch;
+    let other: Promise<any> | null = null;
+    env.DB.batch = async (statements: any[]) => {
+      const result = await batch(statements);
+      if (!other) await (other = allowance(env, row(b.id)));
+      return result;
+    };
+    expect(await allowance(env, row(a.id))).toMatchObject({ plan: "free", used: 0, limit: 4 });
+    expect(await other).toMatchObject({ plan: "free", used: 4, limit: 4 });
+  });
   it("credit triggers refuse work beyond the quota and refund failed work", async () => {
     const { env, sqlite } = testEnv();
     const a = signedIn(sqlite);
@@ -154,6 +170,99 @@ describe("plans and usage windows", () => {
     // A forged pack size is ignored.
     await creditTopup(env, { ...session, id: "cs_2", metadata: { ...session.metadata, credits: "1000" } });
     expect((await allowance(env, user)).limit).toBe(before + 10);
+  });
+  it("rolls over only the paid share of a month cut short by a change between monthly and yearly billing, however often", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const day = 86400, at = (t: number) => vi.setSystemTime(t * 1000);
+      let t = Date.UTC(2026, 3, 1) / 1000; // April: 30 days
+      at(t);
+      const { env, sqlite } = testEnv();
+      const a = signedIn(sqlite);
+      const user = sqlite.prepare("SELECT * FROM users WHERE id=?").get(a.id) as any;
+      const sub = subscribe(sqlite, a.id, "daily", { startedAgo: 0 });
+      // A new period of the subscription from now (Stripe starts one at once when the interval changes).
+      const period = (months: number) => sqlite.prepare("UPDATE subscriptions SET period_start=?1,period_end=?2 WHERE id=?3").run(t, addMonths(t, months), sub);
+      period(1);
+      expect(await allowance(env, user)).toMatchObject({ limit: 60, carried: 0 });
+      // Half way through the month, nothing used, to yearly billing: Stripe pays back half the month, so half its
+      // credits roll over next to the new month's.
+      t += 15 * day;
+      at(t); period(12);
+      expect(await allowance(env, user)).toMatchObject({ interval: "year", limit: 90, carried: 30 });
+      // Back and forth every hour: each change pays back nearly all of the month before, so nothing piles up.
+      for (const months of [1, 12, 1, 12, 1]) {
+        t += 3600;
+        at(t); period(months);
+        expect(await allowance(env, user)).toMatchObject({ limit: 90, carried: 30 });
+      }
+      // A credit pack bought in a month cut short rolls over whole, even when the plan's credits were all used.
+      await creditTopup(env, { id: "cs_1", payment_status: "paid", amount_total: 800, currency: "usd", payment_intent: "pi_1", metadata: { kind: "topup", pack: "pack10", credits: "10", user_id: a.id } } as any);
+      const bought = await allowance(env, user);
+      expect(bought).toMatchObject({ limit: 100, topped: 10 });
+      sqlite.prepare("UPDATE usage_windows SET used=95 WHERE id=?").run(bought.window);
+      t += 3600;
+      at(t); period(12);
+      expect(await allowance(env, user)).toMatchObject({ limit: 65, carried: 5 });
+      t += 3600;
+      at(t); period(1);
+      expect(await allowance(env, user)).toMatchObject({ limit: 65, carried: 5 });
+      // A renewal starts where the month ended: everything left rolls over, as always.
+      t = addMonths(t, 1);
+      at(t + 3600); period(1);
+      expect(await allowance(env, user)).toMatchObject({ limit: 125, carried: 65 });
+      // So does a month of another subscription.
+      at(t + 10 * day);
+      sqlite.prepare("UPDATE subscriptions SET status='canceled' WHERE id=?").run(sub);
+      subscribe(sqlite, a.id, "daily", { startedAgo: 0 });
+      expect(await allowance(env, user)).toMatchObject({ limit: 185, carried: 125 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("moves credit packs and call credits on from a free month or the free trial, never their own credits", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const at = (t: number) => vi.setSystemTime(t * 1000), start = Date.UTC(2026, 3, 1) / 1000;
+      at(start);
+      const { env, sqlite } = testEnv({ CALL_BOOKING_URL: "https://cal.com/hookstreak/15min" });
+      const admin = signedIn(sqlite, "admin@example.com"), a = signedIn(sqlite);
+      const row = (id: string) => sqlite.prepare("SELECT * FROM users WHERE id=?").get(id) as any;
+      const callDone = async (who: { id: string; cookie: string }) => {
+        await call(worker, env, "POST", "/api/calls", {}, who.cookie);
+        expect((await call(worker, env, "POST", `/api/admin/calls/${who.id}/done`, { notes: "" }, admin.cookie)).status).toBe(200);
+      };
+      // A free Creator plan (60 credits a month) with a pack of 10 bought in its first month; 65 of the 70 used.
+      const grant = (await call(worker, env, "POST", "/api/admin/grants", { email: a.email, plan: "daily", months: 3 }, admin.cookie)).data.id;
+      await creditTopup(env, { id: "cs_1", payment_status: "paid", amount_total: 800, currency: "usd", payment_intent: "pi_1", metadata: { kind: "topup", pack: "pack10", credits: "10", user_id: a.id } } as any);
+      const first = await allowance(env, row(a.id));
+      expect(first).toMatchObject({ granted: true, limit: 70, topped: 10 });
+      sqlite.prepare("UPDATE usage_windows SET used=65 WHERE id=?").run(first.window);
+      // Its second month: the plan's 60 and the pack's 5 left.
+      at(addMonths(start, 1) + 3600);
+      sqlite.prepare("UPDATE sessions SET expires_at=?").run(now() + 86400);
+      const second = await allowance(env, row(a.id));
+      expect(second).toMatchObject({ granted: true, used: 0, limit: 65, carried: 5 });
+      // A call for credits in it; 20 used. Then the free plan ends and the customer subscribes: the pack's and the
+      // call's credits go on (35), what was left of the free month's own credits doesn't.
+      await callDone(a);
+      expect(await allowance(env, row(a.id))).toMatchObject({ limit: 65 + CALL_CREDITS, topped: CALL_CREDITS });
+      sqlite.prepare("UPDATE usage_windows SET used=20 WHERE id=?").run(second.window);
+      sqlite.prepare("UPDATE subscriptions SET period_end=? WHERE id=?").run(now() - 1, grant);
+      subscribe(sqlite, a.id, "starter", { startedAgo: 0 });
+      expect(await allowance(env, row(a.id))).toMatchObject({ plan: "starter", granted: false, limit: 30 + 5 + CALL_CREDITS, carried: 5 + CALL_CREDITS });
+      // Moved, not copied: the free month keeps only its own credits.
+      expect(sqlite.prepare("SELECT quota,carried,topped FROM usage_windows WHERE id=?").get(second.window)).toEqual({ quota: 60, carried: 0, topped: 0 });
+      // A call in the free trial: its credits go on to the first paid month, the trial's own 4 don't.
+      const b = signedIn(sqlite);
+      await callDone(b);
+      expect(await allowance(env, row(b.id))).toMatchObject({ plan: "free", limit: 4 + CALL_CREDITS });
+      subscribe(sqlite, b.id, "starter", { startedAgo: 0 });
+      expect(await allowance(env, row(b.id))).toMatchObject({ plan: "starter", limit: 30 + CALL_CREDITS, carried: CALL_CREDITS });
+      expect(sqlite.prepare("SELECT quota,topped FROM usage_windows WHERE id=?").get(`${b.id}:trial`)).toEqual({ quota: 4, topped: 0 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
