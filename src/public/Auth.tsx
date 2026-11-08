@@ -6,6 +6,7 @@ import { ApiError, errorText, post, useAuth } from "../lib";
 import { Logo, Spinner } from "../ui";
 import { Turnstile } from "../Turnstile";
 import { FormError, usePublicConfig } from "./PublicLayout";
+import { safeNext } from "./safe-next";
 import { PRODUCT } from "../../shared/brand";
 import { plans, TRIAL_DAYS } from "../../shared/plans";
 import "./public.css";
@@ -14,12 +15,6 @@ import "./public.css";
 
 type Mode = "login" | "register" | "forgot" | "reset" | "verify";
 
-/** A path on this site to continue to after signing in; anything else (other sites, the sign-in pages) is ignored. */
-function safeNext(next: string | null) {
-  if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return null;
-  if (/^\/(login|register)(\/|\?|$)/.test(next)) return null;
-  return next;
-}
 const withNext = (path: string, next: string) => (next === "/app" ? path : `${path}${path.includes("?") ? "&" : "?"}next=${encodeURIComponent(next)}`);
 
 function Shell({ title, lead, children, foot }: { title: ReactNode; lead?: ReactNode; children: ReactNode; foot?: ReactNode }) {

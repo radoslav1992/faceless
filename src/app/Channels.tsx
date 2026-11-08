@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Info, Plus, RefreshCw, Unlink } from "lucide-react";
-import { del, errorText, post, useApi, type Account } from "../lib";
+import { del, errorText, post, useApi, usePageRestored, type Account } from "../lib";
 import { Spinner, useToast } from "../ui";
 import { ConfirmDialog } from "./pickers";
 import { PlatformBadge } from "./video-ui";
@@ -56,6 +56,8 @@ export function ChannelsPage() {
   const { data, error, loading, reload } = useApi<Response>("/accounts");
   const [connecting, setConnecting] = useState<PlatformId | null>(null);
   const [confirm, setConfirm] = useState<Account | null>(null);
+  // Back from the consent screen with the browser's Back button: the page is shown as it was left, still connecting.
+  usePageRestored(() => setConnecting(null));
   useConnectOutcome();
   const accounts = data?.accounts || [];
   const limit = data?.limit ?? { max: 1, used: 0 };

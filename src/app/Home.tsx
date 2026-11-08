@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, PenSquare, Repeat, Scissors, Sparkles } from "lucide-react";
 import { useApi, useAuth, usePoll, number, when, type Series, type Video } from "../lib";
@@ -15,7 +16,9 @@ export function Home() {
   const examples = useExamples();
   const videos = useApi<{ videos: Video[]; counts: { making: number; review: number; failed: number; total: number } }>("/videos?limit=12");
   const series = useApi<{ series: Series[] }>("/series");
-  const upcoming = useApi<{ publications: Scheduled[] }>(`/publications?from=${Math.floor(Date.now() / 1000)}`);
+  // Read once when the page opens: a time read on every render would change the address, and each answer would ask again.
+  const [from] = useState(() => Math.floor(Date.now() / 1000));
+  const upcoming = useApi<{ publications: Scheduled[] }>(`/publications?from=${from}`);
   usePoll(() => { void videos.reload(); }, 8000, !!videos.data?.videos.some(making));
   const list = videos.data?.videos || [];
   const review = list.filter((v) => v.status === "pending" && v.renderStatus === "ready");

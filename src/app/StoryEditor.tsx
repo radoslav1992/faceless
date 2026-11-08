@@ -10,7 +10,7 @@ import { StoryStylePicker } from "./StoryStyles";
 import { PresenterSection } from "./presenter-ui";
 import { SceneSound, SoundSection, useSoundLibrary } from "./sound-ui";
 import {
-  clockText, mergeScenes, moveEdge, segmentsOf, splitScene, toggleKey, useStoryClock, useStoryPlayer, type UploadTiming,
+  clockText, mergeScenes, moveEdge, sceneIndex, segmentsOf, splitScene, toggleKey, useStoryClock, useStoryPlayer, type UploadTiming,
 } from "./story-model";
 import { narrationCurrent, pendingMedia, presenterCurrent, presenterNeeded, showsPresenter, specCredits, spokenSeconds, type StorySpec } from "../../shared/formats";
 import { presenterLayoutInfo, presenterQualityInfo } from "../../shared/presenter";
@@ -93,10 +93,13 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
   const player = useStoryPlayer(clock.duration);
   const media = useStoryMedia(spec);
   const sounds = useSoundLibrary();
-  const [selected, setSelected] = useState(0);
+  const [chosen, setSelected] = useState(0);
+  // The scenes can be replaced as a whole by fewer (Write again, an undo): the selection stays on one of them, so the
+  // inspector and its edits act on the scene it shows.
+  const selected = sceneIndex(chosen, spec.scenes.length);
   const [picker, setPicker] = useState<null | "image" | "video" | "library">(null);
   const audio = usePreviewAudio();
-  const scene = spec.scenes[Math.min(selected, spec.scenes.length - 1)];
+  const scene = spec.scenes[selected];
   const timed = clock.timing.scenes;
   const { byId: avatarById } = useAvatars();
   const avatar = spec.presenter ? avatarById(spec.presenter.avatarId) : undefined;
