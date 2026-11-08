@@ -334,7 +334,7 @@ function GrantsCard() {
           <h2 id="grants-title"><Gift size={18} aria-hidden="true" style={{ verticalAlign: -2, marginRight: 6 }} />Give a plan for free</h2>
           <p>
             For testers, partners and support cases: find the account by email, then choose the plan and for how long. Each month comes with the plan's
-            full credits; unused credits don't roll over. Afterwards the person goes back to their paid plan or the free plan. Giving a plan again replaces
+            full credits; unused plan credits don't roll over (credit packs bought meanwhile do). Afterwards the person goes back to their paid plan or the free plan. Giving a plan again replaces
             the running one. Stripe never sees it.
           </p>
         </div>
