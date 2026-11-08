@@ -19,7 +19,7 @@ type Operations = {
   failures: { area: string; code: string; count: number }[];
   active: { runs: number; publishing: number; overdue: number };
   accounts: { platform: string; total: number; recent: number }[];
-  cleanup: { pending: number; overdue: number; oldest: number | null };
+  cleanup: { pending: number; overdue: number; oldest: number | null; heygen: number };
   stripe: { reconciliation: { at: number; checked: number; updated: number; failed: number } | null; renewalsOverdue: number; grants: number; lastWebhook: number | null };
   reviews: { area: "runs" | "cleanup"; ref: string; requestId: string | null; reason: string; createdAt: number }[];
 };
@@ -67,7 +67,7 @@ export function OperationsTab() {
         <Stat label="Runs open over 1 hour" value={data.active.runs} sub="AI or render work; failed and refunded at 3 hours" />
         <Stat label="Publishing over 1 hour" value={data.active.publishing} sub="Given up at 2 hours" />
         <Stat label="Overdue scheduled posts" value={data.active.overdue} sub="Due over 15 minutes ago" />
-        <Stat label="Cleanup waiting over 1 day" value={data.cleanup.overdue} sub={`${number(data.cleanup.pending)} waiting${data.cleanup.oldest ? ` · oldest ${ago(data.cleanup.oldest)}` : ""}`} />
+        <Stat label="Cleanup waiting over 1 day" value={data.cleanup.overdue} sub={`${number(data.cleanup.pending)} waiting${data.cleanup.oldest ? ` · oldest ${ago(data.cleanup.oldest)}` : ""}${data.cleanup.heygen ? ` · ${number(data.cleanup.heygen)} HeyGen copies` : ""}`} />
       </div>
 
       <section className="card" aria-labelledby="ops-failures">

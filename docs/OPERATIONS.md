@@ -31,7 +31,7 @@ under `/api/admin` answers 404 to anyone else.
   ElevenLabs, HeyGen, Stripe, billing, token encryption, TikTok, Instagram, YouTube.
 - **Operations**: the last hourly maintenance and its failed stages (a warning when none finished in 2 hours); tiles
   for runs open over an hour, publications publishing over an hour, scheduled posts overdue by 15 minutes and cleanup
-  waiting over a day; failures of the last 24 hours (runs by service and code, publishing by network and message, stats
+  of R2 files waiting over a day (HeyGen copies waiting for deletion are counted apart, under it); failures of the last 24 hours (runs by service and code, publishing by network and message, stats
   reads by network, transcriptions); accounts to reconnect by network; Stripe (the nightly reconciliation, renewals
   overdue, the last webhook event, free plans running); work set aside for a manual check (section 5).
 - **Billing**: *Withdrawal within 14 days* (section 6) and *Give a plan for free* (section 7).
@@ -94,7 +94,8 @@ The cron runs every minute (`server/maintenance.ts`); the hourly part runs at mi
 zero it logs `Maintenance attention` with the counts and e-mails up to 10 valid addresses in `ADMIN_EMAILS` through the
 `EMAIL` binding, from `EMAIL_FROM`:
 
-- at once when the summary differs from the last one sent;
+- at once when the summary differs from the last one sent (for the two cleanup lines only whether they are there
+  counts: their number moves every hour while a queue is worked through, so it alone is no change);
 - otherwise at most once every **6 hours** for an unchanged summary;
 - nothing once everything is back to zero (the next occurrence is reported again at once).
 
@@ -111,7 +112,8 @@ as `Operator alert not sent` and tried again next hour; it never stops maintenan
 | Video stats reads that failed in the last hour | published posts whose last stats read failed, from **5** up | The network's stats API is failing (`Post stats failed`); reads are retried at the next interval |
 | Speech transcriptions that failed in the last hour | uploads whose speech status became failed (among the 5,000 newest files), from **3** up | ElevenLabs Scribe is failing (`Speech not found` with a code): `SPEECH_PERMISSION` means the API key lacks Speech to Text, `SPEECH_CREDITS` the ElevenLabs credits or quota are used up, `SPEECH_UNAVAILABLE` a bad key; the log `Scribe refused` has ElevenLabs' own reason, `SPEECH_BUSY` rate limits, `SPEECH_FILE` an unreadable file; people only lose the transcript |
 | Clips made with Kling in the last 24 hours because HeyGen couldn't make them | AI clips marked `meta.fallback` (among the 5,000 newest files), from **1** up | HeyGen failed, refused or was out of API credits for them (`HeyGen clip not made, making it with Kling` in the logs has the code): top up HeyGen's API credits or check its status, or set `FAL_CLIP_MODEL` back to `kling`. The videos were made |
-| Storage cleanup waiting for more than 1 day | `cleanup_tasks` older than a day | R2 deletes keep failing: look for `Maintenance stage failed` with stage `cleanup` |
+| Storage cleanup waiting for more than 1 day | `cleanup_tasks` of R2 files (not HeyGen copies) older than a day | R2 deletes keep failing: look for `Maintenance stage failed` with stage `cleanup`. Otherwise more was queued than the hourly cleanup deletes (1,000 files a call, for up to 30 seconds or 300 calls a pass): the count in Admin → Operations should fall hour by hour |
+| HeyGen copies of presenter videos and clips not deleted at HeyGen after 1 day | `cleanup_tasks` named `heygen/…` older than a day | Not R2: HeyGen refuses or fails the deletes, or `HEYGEN_API_KEY` is missing (it is required to delete them). Check the key and HeyGen's status. Each is retried hourly and given up after two weeks (`HeyGen copy could not be deleted; remove it in HeyGen`: delete it in HeyGen by hand), also without the key |
 | Work set aside for a manual check in the last 24 hours | rows in `manual_reviews` | Section 5 |
 | Stripe: failed reconciliations, or paid periods overdue for renewal by over 4 days | the last nightly reconciliation's failures, plus active, non-cancelling subscriptions whose period ended over 4 days ago | Webhooks are being missed and the backstop can't read Stripe: check the endpoint, its secret and `STRIPE_SECRET_KEY` |
 | Maintenance stages that failed in the last hour | stage names | Search Workers Logs for `Maintenance stage failed` with that `stage`; the log has the error name, a scrubbed message and the top of the stack |
@@ -282,7 +284,9 @@ again by itself.
   found`) only costs transcripts of uploads.
 - **HeyGen** (`AVATAR_*`): check the API key and the account's API credits in HeyGen. A failed run asks HeyGen to
   delete the video it requested; `HeyGen copy will be deleted later` means the delete failed and is retried hourly
-  (`HeyGen copy could not be deleted; remove it in HeyGen` after two weeks: delete it in HeyGen by hand). A presenter
+  (`HeyGen copy could not be deleted; remove it in HeyGen` after two weeks: delete it in HeyGen by hand). Copies
+  waiting over a day have their own line in the hourly summary; with `HEYGEN_API_KEY` removed they cannot be deleted
+  and are given up the same way after two weeks. A presenter
   HeyGen stopped supporting can be hidden in Admin → Presenters (its videos then fail with `AVATAR_GONE` only if they
   need a new presenter video).
 - **HeyGen Video 1 clips** (`heygen-video-1`; `GENERATION_*` like fal's): a passing problem reaching HeyGen (no

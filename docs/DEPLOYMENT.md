@@ -49,6 +49,10 @@ npm run db:remote     # wrangler d1 migrations apply faceless --remote
 npx wrangler d1 migrations list faceless --remote   # nothing left to apply
 ```
 
+`0014_unfinished_indexes.sql` adds two small indexes (videos still being made or failed, files not ready) so the
+per-minute publishing and the five-minute and hourly maintenance stop reading every video and file. It only adds
+indexes, so it is safe to apply before or after deploying the code: apply it with the same `npm run db:remote`.
+
 - **R2**: add a lifecycle rule to *abort incomplete multipart uploads after 1 day*. Do **not** add an object-expiry
   rule; the app deletes its files itself.
 - **Renderer image**: Python 3.12 on Debian bookworm with its FFmpeg (libass, x264) and Noto fonts, plus the bundled

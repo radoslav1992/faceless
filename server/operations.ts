@@ -76,11 +76,16 @@ const labels: Record<string, string> = {
   transcription: "Speech transcriptions that failed in the last hour",
   clipFallback: "Clips made with Kling in the last 24 hours because HeyGen couldn't make them (check HeyGen's API credits and status, or set FAL_CLIP_MODEL back to kling)",
   cleanup: "Storage cleanup waiting for more than 1 day",
+  heygenCleanup: "HeyGen copies of presenter videos and clips not deleted at HeyGen after 1 day (check HEYGEN_API_KEY and HeyGen's status; each is given up after 14 days)",
   review: "Work set aside for a manual check in the last 24 hours (provider work that may still bill, or a refused cleanup)",
   stripe: "Stripe: failed reconciliations in the last nightly run, or paid periods overdue for renewal by over 4 days",
   stages: "Maintenance stages that failed in the last hour",
 };
 const burst = (n: number, from: number) => (n >= from ? n : 0);
+// Queues whose count moves every hour while the same problem lasts (cleanup being worked through, or new files joining
+// one that is stuck): the alert's repeat key holds only that they are waiting, so the same state is e-mailed again
+// after 6 hours rather than every hour.
+const BACKLOGS = new Set(["cleanup", "heygenCleanup"]);
 
 /** Everything overdue or suspicious right now; all zero means nothing to report. */
 export async function attention(e: Env) {
@@ -96,7 +101,8 @@ export async function attention(e: Env) {
         AND json_extract(meta,'$.speech.status')='failed' AND json_extract(meta,'$.speech.at')>?4) transcription,
       (SELECT COUNT(*) FROM media_assets WHERE rowid>(SELECT COALESCE(MAX(rowid),0) FROM media_assets)-5000 AND kind='ai_clip' AND created_at>?5
         AND json_valid(meta) AND json_extract(meta,'$.fallback')=1) clipFallback,
-      (SELECT COUNT(*) FROM cleanup_tasks WHERE created_at<?5) cleanup,
+      (SELECT COUNT(*) FROM cleanup_tasks WHERE created_at<?5 AND prefix NOT LIKE 'heygen/%') cleanup,
+      (SELECT COUNT(*) FROM cleanup_tasks WHERE created_at<?5 AND prefix LIKE 'heygen/%') heygenCleanup,
       (SELECT COUNT(*) FROM manual_reviews WHERE created_at>?5) review,
       (SELECT COUNT(*) FROM subscriptions WHERE substr(id,1,6)<>?7 AND status='active' AND cancel_at_period_end=0 AND period_end<?8) renewals`,
   ).bind(t - RUN_OVERDUE, t - PUBLISH_OVERDUE, t - 7 * DAY, t - HOUR, t - DAY, t - 31 * DAY, GRANT_PREFIX, t - RENEWAL_GRACE - DAY)
@@ -122,7 +128,9 @@ export async function attention(e: Env) {
     metrics: burst(n("metrics"), METRICS_BURST),
     transcription: burst(n("transcription"), FAILURE_BURST),
     clipFallback: n("clipFallback"),
+    // R2 files of ours, and HeyGen's copies apart: a missing key or a HeyGen outage is not an R2 problem.
     cleanup: n("cleanup"),
+    heygenCleanup: n("heygenCleanup"),
     review: n("review"),
     stripe: n("renewals") + (stripe && stripe.at > t - 26 * HOUR ? Number(stripe.failed) || 0 : 0),
     stages: stages.length,
@@ -133,14 +141,14 @@ export async function attention(e: Env) {
 /** ADMIN_EMAILS as valid, unique, lower-case addresses (at most 10). */
 export const recipients = (list?: string) =>
   [...new Set((list || "").split(",").map((s) => s.trim().toLowerCase()).filter((s) => /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(s)))].slice(0, 10);
-/** The summary's lines, as e-mailed (codes are our own short codes, never provider text). */
+/** The summary's lines as [count key, line e-mailed] (codes are our own short codes, never provider text). */
 function attentionLines({ counts, services, stages }: Awaited<ReturnType<typeof attention>>) {
-  return Object.entries(counts).filter(([, n]) => n > 0).map(([k, n]) => {
+  return Object.entries(counts).filter(([, n]) => n > 0).map(([k, n]): [string, string] => {
     if (k in serviceNames) {
       const by = Object.entries(services[k as ServiceArea]).sort((a, b) => b[1] - a[1]).map(([code, c]) => `${code} ${c}`).join(", ");
-      return `- ${serviceNames[k as ServiceArea]}: ${n} failed runs in the last hour (${by})`;
+      return [k, `- ${serviceNames[k as ServiceArea]}: ${n} failed runs in the last hour (${by})`];
     }
-    return `- ${labels[k] || k}: ${n}${k === "stages" ? ` (${stages.join(", ")})` : ""}`;
+    return [k, `- ${labels[k] || k}: ${n}${k === "stages" ? ` (${stages.join(", ")})` : ""}`];
   });
 }
 /**
@@ -149,14 +157,15 @@ function attentionLines({ counts, services, stages }: Awaited<ReturnType<typeof 
  */
 export async function reportAttention(e: Env) {
   const summary = await attention(e);
-  const lines = attentionLines(summary);
+  const keyed = attentionLines(summary), lines = keyed.map(([, line]) => line);
   if (!lines.length) {
     // Resolved: the same problem coming back later is news again.
     await e.DB.prepare("DELETE FROM operations_state WHERE key='alert'").run();
     return;
   }
   console.error("Maintenance attention", Object.fromEntries(Object.entries(summary.counts).filter(([, n]) => n > 0)));
-  const hash = await sha(JSON.stringify(lines));
+  // What makes a summary "changed": every line as sent, but only the presence of a backlog (BACKLOGS).
+  const hash = await sha(JSON.stringify(keyed.map(([k, line]) => (BACKLOGS.has(k) ? k : line))));
   const previous = await readState<{ hash: string; at: number }>(e, "alert");
   if (previous?.hash === hash && previous.at > now() - 6 * HOUR) return;
   const to = recipients(e.ADMIN_EMAILS);
@@ -246,9 +255,10 @@ export async function operationsSnapshot(e: Env) {
       (SELECT COUNT(*) FROM runs WHERE status IN ('queued','running') AND created_at<?1) runs,
       (SELECT COUNT(*) FROM publications WHERE status='publishing' AND COALESCE(claimed_at,updated_at)<?1) publishing,
       (SELECT COUNT(*) FROM publications WHERE status='scheduled' AND scheduled_at<?3) overdue,
-      (SELECT COUNT(*) FROM cleanup_tasks) cleanup,
-      (SELECT COUNT(*) FROM cleanup_tasks WHERE created_at<?2) cleanupOverdue,
-      (SELECT MIN(created_at) FROM cleanup_tasks) cleanupOldest,
+      (SELECT COUNT(*) FROM cleanup_tasks WHERE prefix NOT LIKE 'heygen/%') cleanup,
+      (SELECT COUNT(*) FROM cleanup_tasks WHERE created_at<?2 AND prefix NOT LIKE 'heygen/%') cleanupOverdue,
+      (SELECT MIN(created_at) FROM cleanup_tasks WHERE prefix NOT LIKE 'heygen/%') cleanupOldest,
+      (SELECT COUNT(*) FROM cleanup_tasks WHERE prefix LIKE 'heygen/%') heygenCopies,
       (SELECT COUNT(*) FROM subscriptions WHERE substr(id,1,6)<>?4 AND status='active' AND cancel_at_period_end=0 AND period_end<?5) renewals,
       (SELECT COUNT(*) FROM subscriptions WHERE substr(id,1,6)=?4 AND period_end>?6) grants,
       (SELECT MAX(created_at) FROM billing_events) lastWebhook`,
@@ -267,7 +277,8 @@ export async function operationsSnapshot(e: Env) {
     failures: failures.sort((a, b) => b.count - a.count || a.area.localeCompare(b.area) || a.code.localeCompare(b.code)),
     active: { runs: n("runs"), publishing: n("publishing"), overdue: n("overdue") },
     accounts: accounts.map((a) => ({ platform: a.platform, total: Number(a.total), recent: Number(a.recent) || 0 })),
-    cleanup: { pending: n("cleanup"), overdue: n("cleanupOverdue"), oldest: r?.cleanupOldest ?? null },
+    // R2 files; HeyGen's copies waiting for deletion are counted apart (deleteHeyGenCopies).
+    cleanup: { pending: n("cleanup"), overdue: n("cleanupOverdue"), oldest: r?.cleanupOldest ?? null, heygen: n("heygenCopies") },
     stripe: {
       reconciliation: await readState<{ at: number; checked: number; updated: number; failed: number }>(e, "stripe"),
       renewalsOverdue: n("renewals"), grants: n("grants"), lastWebhook: r?.lastWebhook ?? null,

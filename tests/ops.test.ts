@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Stripe from "stripe";
 import worker from "../server/index";
-import { maintenance, drainCleanup } from "../server/maintenance";
+import { maintenance, drainCleanup, CLEANUP_CALLS } from "../server/maintenance";
 import { addMonths, confirmPendingContracts, reconcileStripe, webhook } from "../server/billing";
 import { applyRetention } from "../server/retention";
-import { attention, operationsSnapshot, reviewRuns } from "../server/operations";
+import { attention, operationsSnapshot, reportAttention, reviewRuns } from "../server/operations";
 import { countUpload, quotaDay, reportUploads, uploadsToday } from "../server/youtube-quota";
 import { IMMEDIATE_START_TEXT, IMMEDIATE_START_VERSION, withdrawalRefund } from "../shared/withdrawal";
 import { now, DAY, HOUR } from "../server/types";
@@ -511,6 +511,102 @@ describe("retention", () => {
   });
 });
 
+/* ------------------------------------------------------------------------------------------------ storage cleanup */
+
+describe("storage cleanup", () => {
+  /** Counts the R2 calls cleanup makes, and the keys each delete asks for. */
+  function watched(env: any) {
+    const calls = { lists: 0, deletes: [] as number[] };
+    const list = env.MEDIA.list, del = env.MEDIA.delete;
+    env.MEDIA.list = async (o: any) => { calls.lists++; return list(o); };
+    env.MEDIA.delete = async (keys: string | string[]) => { calls.deletes.push([keys].flat().length); return del(keys); };
+    return calls;
+  }
+  const waiting = (sqlite: any) => (sqlite.prepare("SELECT COUNT(*) n FROM cleanup_tasks").get() as { n: number }).n;
+
+  it("deletes a deleted account's 5,000 files in one pass, 1,000 keys a call, and what was queued after it", async () => {
+    const { env, sqlite } = testEnv();
+    const gone = signedIn(sqlite), other = signedIn(sqlite);
+    const file = sqlite.prepare("INSERT INTO media_assets(id,user_id,kind,name,object_key,mime,created_at,updated_at) VALUES (?,?,'upload','f',?,'video/mp4',1,1)");
+    sqlite.exec("BEGIN");
+    for (let i = 0; i < 5000; i++) {
+      const id = crypto.randomUUID(), key = `media/${gone.id}/${id}.mp4`;
+      file.run(id, gone.id, key);
+      env.MEDIA.objects.set(key, { bytes: new Uint8Array(1) });
+    }
+    sqlite.exec("COMMIT");
+    const kept = `media/${other.id}/kept.mp4`, deleted = `media/${other.id}/deleted.mp4`;
+    file.run("kept", other.id, kept);
+    file.run("deleted", other.id, deleted);
+    await env.MEDIA.put(kept, "x");
+    await env.MEDIA.put(deleted, "x");
+    // The account goes (its folder and one task per file), then someone else deletes a file.
+    sqlite.prepare("DELETE FROM users WHERE id=?").run(gone.id);
+    sqlite.prepare("DELETE FROM media_assets WHERE id='deleted'").run();
+    expect(waiting(sqlite)).toBe(5002);
+    const calls = watched(env);
+    await drainCleanup(env);
+    expect(waiting(sqlite)).toBe(0);
+    expect([...env.MEDIA.objects.keys()]).toEqual([kept]);
+    expect(Math.max(...calls.deletes)).toBeLessThanOrEqual(1000);
+    expect(calls.lists + calls.deletes.length).toBeLessThan(20);
+  });
+
+  it("keeps each pass within its time and calls, and the next pass goes on", async () => {
+    const { env, sqlite } = testEnv();
+    const queue = sqlite.prepare("INSERT INTO cleanup_tasks(prefix,created_at) VALUES (?,1)");
+    sqlite.exec("BEGIN");
+    for (let i = 0; i < 3000; i++) queue.run(`media/u/${crypto.randomUUID()}.mp4`);
+    sqlite.exec("COMMIT");
+    // R2 answering slowly: each call takes 20 seconds, so a pass ends after its second batch.
+    let clock = Date.now();
+    const slow = vi.spyOn(Date, "now").mockImplementation(() => clock);
+    const calls = watched(env), del = env.MEDIA.delete;
+    env.MEDIA.delete = async (keys: string[]) => { clock += 20_000; return del(keys); };
+    await drainCleanup(env);
+    expect(waiting(sqlite)).toBe(1000);
+    await drainCleanup(env);
+    expect(waiting(sqlite)).toBe(0);
+    expect(calls.deletes).toEqual([1000, 1000, 1000]);
+
+    // Folders are listed one by one: a pass stops at its share of calls and leaves the rest for the next.
+    slow.mockRestore();
+    sqlite.exec("BEGIN");
+    for (let i = 0; i < 200; i++) {
+      queue.run(`library/item${i}/`);
+      env.MEDIA.objects.set(`library/item${i}/file.mp3`, { bytes: new Uint8Array(1) });
+    }
+    sqlite.exec("COMMIT");
+    calls.lists = 0;
+    calls.deletes = [];
+    await drainCleanup(env);
+    expect(calls.lists + calls.deletes.length).toBeLessThanOrEqual(CLEANUP_CALLS);
+    expect(waiting(sqlite)).toBeGreaterThan(0);
+    await drainCleanup(env);
+    expect(waiting(sqlite)).toBe(0);
+    expect(env.MEDIA.objects.size).toBe(0);
+  });
+});
+
+describe("maintenance queries", () => {
+  it("find unfinished videos and uploads through their small indexes, never by reading every row", async () => {
+    const { env, sqlite } = testEnv();
+    const statements = new Set<string>(), prepare = env.DB.prepare;
+    env.DB.prepare = (sql: string) => { statements.add(sql); return prepare(sql); };
+    // An hourly pass (publishing runs every minute, uploads are checked hourly) and a five-minute one (interrupted videos).
+    await maintenance(env, HOURLY);
+    await maintenance(env, Date.UTC(2026, 9, 9, 12, 20));
+    const plan = (sql: string) => (sqlite.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...Array(sql.split("?").length - 1).fill(0)) as { detail: string }[])
+      .map((r) => r.detail).join("; ");
+    const plans = [...statements].filter((sql) => /WHERE render_status|FROM media_assets WHERE status=/.test(sql)).map(plan);
+    // "The video couldn't be made in time" (publishing), interrupted videos, and unfinished, unchecked and failed uploads.
+    expect(plans).toHaveLength(5);
+    for (const p of plans) expect(p).not.toMatch(/SCAN (videos|media_assets)\b/);
+    expect(plans.filter((p) => p.includes("USING INDEX videos_unfinished"))).toHaveLength(2);
+    expect(plans.filter((p) => /USING (COVERING )?INDEX media_unfinished/.test(p))).toHaveLength(3);
+  });
+});
+
 /* ------------------------------------------------------------------------------------------------ operations */
 
 describe("YouTube upload allowance", () => {
@@ -660,12 +756,57 @@ describe("operations summary", () => {
     expect(alert(sqlite)).toBeUndefined();
   });
 
+  it("reminds of a cleanup backlog every 6 hours while it is worked through, not every hour as its count moves", async () => {
+    const { env, sqlite, run } = ops();
+    const queue = (n: number) => {
+      for (let i = 0; i < n; i++) sqlite.prepare("INSERT INTO cleanup_tasks(prefix,created_at) VALUES (?,?)").run(`media/u/${crypto.randomUUID()}.mp4`, now() - 2 * DAY);
+    };
+    queue(3);
+    await reportAttention(env);
+    expect(env.EMAIL.sent).toHaveLength(2);
+    expect(env.EMAIL.sent[0].text).toContain("Storage cleanup waiting for more than 1 day: 3");
+    // Hours later fewer are left, then more joined: the same problem, no new mail.
+    sqlite.prepare("DELETE FROM cleanup_tasks WHERE rowid IN (SELECT rowid FROM cleanup_tasks LIMIT 2)").run();
+    await reportAttention(env);
+    queue(5);
+    await reportAttention(env);
+    expect(env.EMAIL.sent).toHaveLength(2);
+    // After 6 hours: a reminder, with the count then.
+    sqlite.prepare("UPDATE operations_state SET value=json_set(value,'$.at',?) WHERE key='alert'").run(now() - 7 * HOUR);
+    await reportAttention(env);
+    expect(env.EMAIL.sent).toHaveLength(4);
+    expect(env.EMAIL.sent[2].text).toContain("Storage cleanup waiting for more than 1 day: 6");
+    // Anything else is news at once.
+    run("running", { created: now() - 4 * HOUR });
+    await reportAttention(env);
+    expect(env.EMAIL.sent).toHaveLength(6);
+  });
+
+  it("counts HeyGen's copies waiting for deletion apart from storage cleanup, and gives them up after two weeks without a key", async () => {
+    const { env, sqlite } = ops();
+    expect(env.HEYGEN_API_KEY).toBeUndefined();
+    sqlite.prepare("INSERT INTO cleanup_tasks(prefix,created_at) VALUES ('heygen/video/vid_1',?),('heygen/video/vid_2',?)").run(now() - 2 * DAY, now() - 15 * DAY);
+    const fetched: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => { fetched.push(url); return Response.json({}); });
+    // The summary goes out first, then the HeyGen stage.
+    await maintenance(env, HOURLY);
+    expect(env.EMAIL.sent).toHaveLength(2);
+    expect(env.EMAIL.sent[0].text).toContain("HeyGen copies of presenter videos and clips not deleted at HeyGen after 1 day");
+    expect(env.EMAIL.sent[0].text).not.toContain("Storage cleanup");
+    // Nothing could be asked of HeyGen: the copy two weeks old is given up (to delete in HeyGen by hand), the other waits.
+    expect(fetched).toEqual([]);
+    expect(console.error).toHaveBeenCalledWith("HeyGen copy could not be deleted; remove it in HeyGen", { task: "heygen/video/vid_2" });
+    expect(sqlite.prepare("SELECT prefix FROM cleanup_tasks").all()).toEqual([{ prefix: "heygen/video/vid_1" }]);
+    expect((await attention(env)).counts).toMatchObject({ cleanup: 0, heygenCleanup: 1 });
+    expect((await operationsSnapshot(env)).cleanup).toEqual({ pending: 0, overdue: 0, oldest: null, heygen: 1 });
+  });
+
   it("never lets a mail failure or a failing stage stop maintenance; both are reported next hour", async () => {
     const { env, sqlite, run } = ops();
     run("running", { created: now() - 4 * HOUR });
     env.EMAIL.send = async () => { throw new Error("mail down"); };
     sqlite.prepare("INSERT INTO cleanup_tasks(prefix,created_at) VALUES ('media/u/old.jpg',?)").run(now() - 2 * DAY);
-    env.MEDIA.list = async () => { throw new Error("R2 down"); };
+    env.MEDIA.delete = async () => { throw new Error("R2 down"); };
     sqlite.prepare("INSERT INTO sessions(token_hash,user_id,expires_at) SELECT 'expired',id,1 FROM users").run();
     await maintenance(env, HOURLY);
     expect(console.error).toHaveBeenCalledWith("Operator alert not sent", { recipients: 2 });
