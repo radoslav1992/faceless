@@ -146,7 +146,7 @@ needs a `SITE_URL` that the container and fal can reach. Everything else works w
 | --- | --- |
 | `npm run dev` | Vite dev server for the client (proxies `/api` to the Worker on :8787) |
 | `npm run preview` | `build`, then `wrangler dev` |
-| `npm run build` | Type check, then `vite build` into `dist/` |
+| `npm run build` | Type check, `vite build` into `dist/`, then render every public page into `dist/_pages/` (`src/prerender.tsx`, `scripts/prerender.mjs`) |
 | `npm run deploy` | `build`, then `wrangler deploy` (Worker, assets and the renderer image) |
 | `npm run db:local` / `db:remote` | Apply `migrations/` to the local / remote D1 database `faceless` |
 | `npm run check` | `tsc --noEmit` |

@@ -125,3 +125,13 @@ describe("sceneIndex", () => {
     expect(sceneIndex(-1, 6)).toBe(0);
   });
 });
+
+describe("a mashup passed to Create", () => {
+  it("fills the animal and the object from the tool page's form and its ideas", async () => {
+    const { mashupParts } = await import("../src/app/Create");
+    expect(mashupParts("Shark + Sneaker")).toEqual({ animal: "Shark", object: "Sneaker" });
+    expect(mashupParts("A shark + a sneaker")).toEqual({ animal: "shark", object: "sneaker" });
+    expect(mashupParts("An octopus + an umbrella")).toEqual({ animal: "octopus", object: "umbrella" });
+    expect(mashupParts("just a prompt")).toEqual({ animal: "", object: "" });
+  });
+});
