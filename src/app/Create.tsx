@@ -62,9 +62,15 @@ type Form = {
 };
 /** Text that reads like a whole story rather than a topic: long, or several lines. */
 const storyLike = (text: string) => text.trim().length >= 280 || text.trim().split(/\n\s*\n|\n/).filter(Boolean).length >= 4;
+/** A mashup's animal and object from "A shark + a sneaker" (how the tool page and its ideas pass them). */
+export function mashupParts(prompt: string): { animal: string; object: string } {
+  const [animal = "", object = ""] = prompt.split("+").map((part) => part.trim().replace(/^(an?|the)\s+/i, "").slice(0, 60));
+  return prompt.includes("+") ? { animal, object } : { animal: "", object: "" };
+}
 const formFor = (id: TemplateId, prompt = ""): Form => {
   const t = templates[id];
-  return { prompt, script: "", title: "", animal: "", object: "", seconds: t.seconds, language: "en", voiceId: t.voice, style: t.style, music: t.music, musicTrackId: null, subject: "", sounds: true };
+  const mashup = t.kind === "mashup" ? mashupParts(prompt) : { animal: "", object: "" };
+  return { prompt, script: "", title: "", ...mashup, seconds: t.seconds, language: "en", voiceId: t.voice, style: t.style, music: t.music, musicTrackId: null, subject: "", sounds: true };
 };
 
 export function Create() {

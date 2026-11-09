@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Env } from "./types";
 import { origin } from "./security";
 import { pageMeta, publicPages } from "../shared/seo";
+import { jsonLd, structuredData } from "../shared/structured-data";
 import { PRODUCT } from "../shared/brand";
 
 /** Crawler files and the single-page app document with per-page metadata. */
@@ -35,12 +36,23 @@ pages.get("/manifest.webmanifest", async (c) => {
 });
 pages.get("/offline.html", (c) => c.env.ASSETS.fetch(c.req.raw));
 const escapeAttr = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+/** Where a page's document comes from: a public page's own HTML, rendered at build (scripts/prerender.mjs writes it
+ *  to dist/_pages/<route>/index.html), so its words are there for crawlers that run no JavaScript; every other path
+ *  gets the app shell. Without a prerendered file (local development), the assets' single-page fallback answers with
+ *  the shell too. The prerendered files themselves are not pages of the site. */
+export function documentPath(path: string): string | null {
+  const meta = pageMeta(path);
+  if (meta.indexable && meta.route) return `/_pages${meta.route === "/" ? "" : meta.route}/`;
+  return path === "/_pages" || path.startsWith("/_pages/") ? "/" : null;
+}
 pages.get("*", async (c) => {
   const meta = pageMeta(c.req.path);
-  const r = await c.env.ASSETS.fetch(c.req.raw);
+  const from = documentPath(c.req.path);
+  const r = await c.env.ASSETS.fetch(from ? new Request(new URL(from, c.req.url), c.req.raw) : c.req.raw);
   if (!r.headers.get("content-type")?.includes("text/html")) return r;
   const base = origin(c.env, c.req.raw);
   const url = base + (meta.route || c.req.path);
+  const image = `${base}/og-image.png`;
   const head = meta.indexable
     ? [
         `<link rel="canonical" href="${escapeAttr(url)}">`,
@@ -49,7 +61,11 @@ pages.get("*", async (c) => {
         `<meta property="og:title" content="${escapeAttr(meta.title)}">`,
         `<meta property="og:description" content="${escapeAttr(meta.description)}">`,
         `<meta property="og:url" content="${escapeAttr(url)}">`,
-        `<meta name="twitter:card" content="summary">`,
+        `<meta property="og:image" content="${escapeAttr(image)}">`,
+        `<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">`,
+        `<meta name="twitter:card" content="summary_large_image">`,
+        `<meta name="twitter:image" content="${escapeAttr(image)}">`,
+        ...structuredData(c.req.path, base).map((thing) => `<script type="application/ld+json">${jsonLd(thing)}</script>`),
       ].join("")
     : '<meta name="robots" content="noindex,nofollow">';
   // HTMLRewriter is part of the Workers runtime; outside it (tests) the document is served unchanged.

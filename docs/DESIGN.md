@@ -87,8 +87,11 @@ heading receives focus and the title updates; icons beside text are `aria-hidden
   four CSS-animated backgrounds) that carries the draft into Create, after sign-up if needed; the gallery of faceless
   styles; *Why creators switch*, comparing hiring editors and making every video yourself with Hookstreak Shorts; the plan
   cards; FAQ; a call-to-action band.
-- **Tools** (`/tools`, `/tools/:slug`): one page per template with a `tool` entry (text to video, scary story, story,
-  POV, brainrot mashup, storytime), each a hero with a short form that opens Create with that style.
+- **Tools** (`/tools`, `/tools/:slug`): one page per template with a `tool` entry (18: text to video, scary story,
+  story, POV, brainrot mashup, storytime, motivation, bedtime stories, myths, history, unsolved mysteries, fun facts,
+  space, animals, psychology, explainers, philosophy, life tips), each a hero with a short form that opens Create with
+  that style, then *How it works*, *Ideas to start with* (each opens Create with it), its questions and three more tools
+  (the words in `shared/tool-pages.ts`).
 - **Styles** (`/styles`): the faceless styles by category and the 15 art styles as drawn samples.
 - **Pricing** (`/pricing`): a Monthly / Annual toggle with "2 months free" (yearly is ten months' price, `shared/plans.ts`),
   the four paid plans (yearly shows the monthly equivalent and the yearly amount), credit packs, *What credits buy*
@@ -100,7 +103,8 @@ heading receives focus and the title updates; icons beside text are `aria-hidden
 - **Sign-in pages** (`/login`, `/register`, `/forgot`, `/reset`, `/verify`): a centred card on the dark stage, a
   password show/hide toggle, Turnstile where needed.
 - **Metadata**: titles and descriptions per public page in `shared/seo.ts`; the Worker writes them, canonical and Open
-  Graph tags into the HTML, and `sitemap.xml` lists the public pages.
+  Graph tags, the share image (`public/og-image.png`, 1200 × 630) and JSON-LD into the HTML, and `sitemap.xml` lists the
+  public pages. Each public page is prerendered at build, so its words are in the HTML.
 
 ## App (`src/app/`)
 

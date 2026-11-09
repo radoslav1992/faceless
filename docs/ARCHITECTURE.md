@@ -37,8 +37,14 @@ Each request passes, in order:
    (administrators only; others get 404).
 10. Unknown `/api/*` paths answer 404 JSON. Other paths go to `server/pages.ts`: `robots.txt`, `sitemap.xml`, the
     installable app's files (`/sw.js` with `Cache-Control: no-cache`, `/manifest.webmanifest` with its own type,
-    `/offline.html` with a 200) and the single-page app document with each public page's title, description and
-    canonical/Open Graph tags (`shared/seo.ts`); unknown paths get the app's not-found page with a real 404.
+    `/offline.html` with a 200) and the single-page app document with each public page's title, description,
+    canonical/Open Graph tags and share image (`shared/seo.ts`, `public/og-image.png`) and its schema.org JSON-LD
+    (`shared/structured-data.ts`: the product and its plans on the home and pricing pages, FAQs, breadcrumbs); unknown
+    paths get the app's not-found page with a real 404. A public page's document is its own HTML, rendered at build
+    (`npm run build` builds `src/prerender.tsx` for the server and `scripts/prerender.mjs` writes every public page into
+    `dist/_pages/<route>/index.html`, which `documentPath` serves), so crawlers that run no JavaScript read its words;
+    the browser then takes over that markup (`hydrateRoot` in `src/main.tsx`). Signed-in pages get the empty app shell,
+    and so does a public page without a prerendered file (local development).
 
 **Installable app (PWA).** `index.html` links the manifest (`public/manifest.webmanifest`: name, icons, `start_url`
 `/app`, standalone display, shortcuts) and the Apple touch icon. `src/install.ts` registers `public/sw.js` in

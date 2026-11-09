@@ -1,13 +1,18 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowRight, BookOpen, Bot, Building2, CalendarClock, Clapperboard, Eye, FileText, Ghost, Globe2, KeyRound, Layers, MessageSquare, Plus, ShieldCheck, Sparkles, Users, Wand2 } from "lucide-react";
+import {
+  ArrowRight, BookOpen, Bot, Brain, Building2, CalendarClock, Clapperboard, Eye, FileText, Flame, Ghost, Globe2, GraduationCap, KeyRound, Landmark, Layers, Lightbulb,
+  MessageSquare, Moon, PawPrint, Plus, Rocket, Scroll, Search, ShieldCheck, Sparkles, Swords, Users, Wand2, Wrench,
+} from "lucide-react";
 import { useAuth } from "../lib";
 import { StyleArt } from "../art";
 import { SamplePhone } from "./Phone";
 import { useExamples } from "../examples";
-import { Faq, StyleGallery, homeFaq } from "./Landing";
+import { Faq, StyleGallery } from "./Landing";
+import { faqPage } from "../../shared/faq-page";
 import { NotFound } from "./NotFound";
 import { categories, templates, tools, toolBySlug, type TemplateId } from "../../shared/templates";
+import { toolPageCopy } from "../../shared/tool-pages";
 import { storyStyleIds, storyStyles } from "../../shared/story";
 import { languages } from "../../shared/series";
 import { PRODUCT } from "../../shared/brand";
@@ -16,7 +21,10 @@ import { SECONDS_PER_CREDIT } from "../../shared/credits";
 // The public pages beside the home page: video tools (one generator page each), art styles, FAQ, about, business and
 // the MCP / API page. All copy is our own.
 
-const icons: Record<string, typeof Ghost> = { ghost: Ghost, "book-open": BookOpen, eye: Eye, sparkles: Sparkles, "file-text": FileText, "message-square": MessageSquare };
+const icons: Record<string, typeof Ghost> = {
+  ghost: Ghost, "book-open": BookOpen, eye: Eye, sparkles: Sparkles, "file-text": FileText, "message-square": MessageSquare, flame: Flame, moon: Moon, swords: Swords,
+  landmark: Landmark, search: Search, lightbulb: Lightbulb, rocket: Rocket, "paw-print": PawPrint, brain: Brain, "graduation-cap": GraduationCap, scroll: Scroll, wrench: Wrench,
+};
 /** Where a "Try this" goes: Create with the template (after sign-up when signed out), with the prompt kept. */
 function useStart() {
   const { user } = useAuth();
@@ -30,7 +38,8 @@ function useStart() {
 const toolFilters = [
   { id: "all", name: "All tools", match: () => true },
   { id: "text", name: "From text", match: (id: TemplateId) => templates[id].kind === "script" },
-  { id: "story", name: "Story videos", match: (id: TemplateId) => templates[id].kind === "story" || templates[id].kind === "backdrop" },
+  { id: "story", name: "Story videos", match: (id: TemplateId) => (templates[id].kind === "story" && templates[id].category !== "facts") || templates[id].kind === "backdrop" },
+  { id: "facts", name: "Facts & explainers", match: (id: TemplateId) => templates[id].category === "facts" },
   { id: "trending", name: "Trending videos", match: (id: TemplateId) => templates[id].kind === "mashup" },
   { id: "pov", name: "POV videos", match: (id: TemplateId) => templates[id].kind === "pov" },
 ] as const;
@@ -42,7 +51,7 @@ export function Tools() {
       <div className="pub-wrap">
         <div className="pub-head center">
           <h1 className="title">AI <span className="glow-text">video tools</span> for faceless creators</h1>
-          <p className="lead">Turn a script, a story idea or a wild prompt into a narrated vertical video for TikTok, YouTube Shorts and Instagram Reels. Pick a tool to start.</p>
+          <p className="lead">Turn a script, a story idea, a history moment or a wild prompt into a narrated vertical video for TikTok, YouTube Shorts and Instagram Reels. Pick a tool to start.</p>
         </div>
         <div className="filters" role="group" aria-label="Filter tools" style={{ justifyContent: "center", marginBottom: 36 }}>
           {toolFilters.map((f) => {
@@ -97,6 +106,9 @@ export function ToolPage() {
   if (!tool) return <NotFound />;
   const t = templates[tool.id];
   const Icon = icons[tool.icon] || Sparkles;
+  const copy = toolPageCopy[tool.id];
+  // Other tools of the same kind first, then the rest, so every tool page links on to a few others.
+  const related = [...tools.filter((o) => o.id !== tool.id && templates[o.id].category === t.category), ...tools.filter((o) => templates[o.id].category !== t.category)].slice(0, 3);
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     start(tool.id, t.kind === "mashup" ? [animal, object].filter(Boolean).join(" + ") : prompt);
@@ -147,6 +159,53 @@ export function ToolPage() {
           </div>
         </div>
       </section>
+      {copy && (
+        <section className="pub-section tight">
+          <div className="pub-wrap tool-about">
+            <div>
+              <h2 className="title" style={{ marginTop: 0 }}>How it works</h2>
+              <p className="lead">{copy.intro}</p>
+            </div>
+            <div>
+              <h2 className="title" style={{ marginTop: 0 }}>{t.kind === "script" ? "What you can turn into a video" : "Ideas to start with"}</h2>
+              <ul className="idea-list">
+                {copy.ideas.map((idea) => (
+                  <li key={idea}>
+                    {t.kind === "script" ? <span>{idea}</span>
+                      : <button type="button" className="text-link" onClick={() => start(tool.id, idea)}>{idea} <ArrowRight size={15} aria-hidden="true" /></button>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </section>
+      )}
+      {copy && (
+        <section className="pub-section tight">
+          <div className="pub-wrap faq-split">
+            <h2 className="title" style={{ marginTop: 0 }}>Questions about this tool</h2>
+            <Faq items={copy.faq as [string, string][]} />
+          </div>
+        </section>
+      )}
+      <section className="pub-section tight">
+        <div className="pub-wrap">
+          <div className="row between" style={{ marginBottom: 16 }}><h2 style={{ fontSize: 26 }}>More video tools</h2><Link className="text-link" to="/tools">All tools <ArrowRight size={16} aria-hidden="true" /></Link></div>
+          <div className="tools">
+            {related.map((o) => {
+              const OtherIcon = icons[o.icon] || Sparkles;
+              return (
+                <Link key={o.slug} to={`/tools/${o.slug}`} className="tool-card">
+                  <span className="pub-icon"><OtherIcon size={22} aria-hidden="true" /></span>
+                  <h3>{o.title}</h3>
+                  <p>{o.description}</p>
+                  <span className="text-link">Try this tool <ArrowRight size={16} aria-hidden="true" /></span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      </section>
     </>
   );
 }
@@ -175,14 +234,7 @@ export function FaqPage() {
   return (
     <div className="pub-wrap">
       <div className="pub-head center"><h1 className="title">Frequently asked questions</h1><p className="lead">How {PRODUCT.name} makes your videos on your schedule.</p></div>
-      <Faq items={[
-        ...homeFaq,
-        ["Which languages can the narration use?", `${languages.length} languages, from English, Spanish and Portuguese to German, Polish, Turkish, Greek and Ukrainian. Subtitles follow the narration.`],
-        ["Who owns the videos?", "You do. You can use everything you make commercially, on any channel. The scripts and pictures are generated new for each video."],
-        ["Are the videos marked as AI-generated?", "Yes, where the networks ask for it: the files carry AI metadata, and TikTok and YouTube get their AI-content labels when we post for you."],
-        ["How long does a video take?", "Usually a few minutes: the script, the voice, a picture for every scene, then the render. Series episodes are made hours ahead of their slot."],
-        ["Can I cancel any time?", "Yes, in Billing. Your plan runs to the end of the period you paid for, and your videos stay downloadable."],
-      ]} />
+      <Faq items={faqPage} />
       <div className="cta-band" style={{ marginTop: 40 }}>
         <div><h2>Still have a question?</h2><p>We read every message.</p></div>
         <Link className="btn primary" to="/contact">Contact us</Link>

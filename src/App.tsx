@@ -61,15 +61,6 @@ function RouteChange() {
   }, [pathname]);
   return null;
 }
-// A deploy replaces hashed chunks: reload once to fetch the new ones instead of showing a blank page.
-window.addEventListener("vite:preloadError", (event) => {
-  try {
-    if (Date.now() - Number(sessionStorage.getItem("hss-chunk-reload") || 0) < 60_000) return;
-    sessionStorage.setItem("hss-chunk-reload", String(Date.now()));
-  } catch { /* storage unavailable */ }
-  event.preventDefault();
-  window.location.reload();
-});
 class ErrorBoundary extends Component<{ children: ReactNode; resetKey: string }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }

@@ -3,11 +3,11 @@ import { tools } from "./templates";
 
 // Titles and descriptions per public page; the Worker puts them into the HTML for crawlers and link previews, and the
 // app updates them on navigation.
-const UPDATED = "2026-11-04";
+const UPDATED = "2026-11-09";
 const toolPages = Object.fromEntries(tools.map((t) => [`/tools/${t.slug}`, { title: `${t.title} — ${PRODUCT.name}`, description: t.description, updated: UPDATED }]));
 export const publicPages: Record<string, { title: string; description: string; updated: string }> = {
   "/": { title: `${PRODUCT.name} — ${PRODUCT.tagline}`, description: PRODUCT.pitch, updated: UPDATED },
-  "/tools": { title: `AI video tools for faceless creators — ${PRODUCT.name}`, description: "Text to video, scary stories, POV, storytime and brainrot mashups: narrated vertical videos for TikTok, Shorts and Reels.", updated: UPDATED },
+  "/tools": { title: `AI video tools for faceless creators — ${PRODUCT.name}`, description: "Text to video, scary stories, history, fun facts, POV, bedtime stories, storytime and more: narrated vertical videos for TikTok, Shorts and Reels.", updated: UPDATED },
   ...toolPages,
   "/styles": { title: `Faceless video styles — ${PRODUCT.name}`, description: "Ready-made faceless video styles and art styles: scary stories, history, fun facts, POV, bedtime stories and more.", updated: UPDATED },
   "/pricing": { title: `Pricing — ${PRODUCT.name}`, description: "Start free. Starter, Creator, Pro and Studio plans for faceless videos on autopilot; unused credits roll over.", updated: UPDATED },
