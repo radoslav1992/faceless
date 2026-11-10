@@ -161,7 +161,13 @@ export async function submitFal(e: Env, kind: "image" | "clip", prompt: string, 
 /** "pending" while queued or running, "done" when the result can be read. */
 export async function falStatus(e: Env, ticket: FalTicket): Promise<"pending" | "done"> {
   const r = await providerFetch(falQueueUrl(ticket.status_url), { headers: auth(e), signal: AbortSignal.timeout(45000) });
-  if (!r.ok) throw new ProviderError(r.status >= 500 ? "GENERATION_STATUS" : await failureCode(r, "GENERATION"));
+  // fal busy or briefly down says nothing about the job, which is already paid for: asked again on the next round
+  // (the caller's rounds are counted, so a job that never answers still ends).
+  if (r.status === 429 || r.status >= 500) {
+    await r.body?.cancel();
+    return "pending";
+  }
+  if (!r.ok) throw new ProviderError(await failureCode(r, "GENERATION"));
   const status = ((await r.json()) as any)?.status;
   if (status === "COMPLETED") return "done";
   if (status === "IN_QUEUE" || status === "IN_PROGRESS") return "pending";

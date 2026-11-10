@@ -151,11 +151,11 @@ video is attached to it); its failure refunds the credits and the Clips page say
 | `GENERATION_REJECTED` | fal's content filter refused a clip, or a picture twice (the operator's model, then Nano Banana 2). Caused by the request; never counted as an outage |
 | `GENERATION_UNAVAILABLE` | fal refused the key, plan or balance (401/402/403, or `FAL_KEY` missing) |
 | `GENERATION_BUSY` | fal rate limit (429) |
-| `GENERATION_FAILED`, `GENERATION_STATUS`, `GENERATION_RESULT` | fal failed the request, its status check or its result; or the output was not a readable picture |
+| `GENERATION_FAILED`, `GENERATION_STATUS`, `GENERATION_RESULT` | fal failed the request or its result (a busy or briefly down status check is asked again); HeyGen's clip status stayed unreachable; or the output was not a readable picture |
 | `GENERATION_TIMEOUT` | fal did not finish in time (150 status checks) |
 | `GENERATION_UNCERTAIN` | a fal request was claimed but its answer was lost: it may have been accepted (section 5) |
 | `VOICE_UNAVAILABLE` | ElevenLabs refused the key or plan (401/402), or the key or voice is missing |
-| `VOICE_BUSY` | ElevenLabs rate or concurrency limit (429) |
+| `VOICE_BUSY` | ElevenLabs rate or concurrency limit (429), still busy after four more tries over about two minutes |
 | `VOICE_FAILED` | the narration failed, or a retried step found a claimed voice without its result |
 | `AVATAR_UNAVAILABLE` | HeyGen refused the key or the account has no API credits left (401/402/403, or `HEYGEN_API_KEY` missing) |
 | `AVATAR_BUSY` | HeyGen rate limit (429) |

@@ -264,8 +264,9 @@ short code — never tokens, URLs with tokens, or response bodies.
 
 - The Channels page reads `?connected=<platform>` or `?error=` with `expired`, `denied`, `permissions`,
   `no_channel`, `unavailable`, `limit` or `failed`.
-- Avatar URLs point to the networks' CDNs, which the Content-Security-Policy (`img-src 'self' data: blob:`) blocks:
-  show initials, or proxy/allow those hosts.
+- The Channels page shows each channel's initial, not its picture: avatar URLs point to the networks' CDNs, which the
+  Content-Security-Policy (`img-src 'self' data: blob:`) blocks (and TikTok's and Instagram's expire). To show the
+  pictures, proxy them or allow those hosts.
 - TikTok audit UX (privacy level, interaction toggles, commercial content disclosure per account or post) needs a place
   to store the choices; the schema has none yet.
 - The leftover photo/carousel branches in the TikTok and Instagram clients can go.

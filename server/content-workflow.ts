@@ -656,12 +656,15 @@ async function resolveContext(e: Env, run: RunInfo, spec: Spec): Promise<PlanCon
 
 /** Submits the render (to a free container), waits for it and returns its final status. */
 async function renderJob(e: Env, step: WorkflowStep, run: RunInfo, part: Plan["compose"], phase: Phase): Promise<RenderStatus> {
-  const payload = await step.do("compose-payload", async () => {
+  // The step keeps only the job's id and its links: the plan itself (with the whole subtitle script, over a megabyte
+  // for a long video or a busy caption style) is more than a step may return (1 MiB), and is the same on every replay.
+  const links = await step.do("compose-payload", async () => {
     const urls: string[] = [];
     for (const key of part.keys) urls.push(await inputUrl(e, run.id, key));
-    const { keys: _keys, ...rest } = part;
-    return { ...rest, id: (await readState(e, run.id)).jobs!.compose, urls } as unknown as RenderPayload;
+    return { id: (await readState(e, run.id)).jobs!.compose, urls };
   });
+  const { keys: _keys, ...rest } = part;
+  const payload = { ...rest, ...links } as unknown as RenderPayload;
   // Up to ~40 minutes: renders take a minute or two, plus waiting for a free container.
   for (let i = 0; i < 240; i++) {
     const status = await step.do(`compose-render-${i}`, { retries: { limit: 2, delay: "10 seconds" }, timeout: "2 minutes" }, async (): Promise<RenderStatus> => {

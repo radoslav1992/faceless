@@ -293,6 +293,8 @@ videos.put("/:id", async (c) => {
 });
 videos.post("/:id/render", async (c) => {
   const user = c.get("user");
+  // Making a made video again is free: without a limit one account could keep the renderers busy.
+  await rate(c, "video-render", 60, 3600, user.id);
   const v = await ownedVideo(c.env, user.id, c.req.param("id"));
   const { idempotencyKey } = z.object({ idempotencyKey: z.uuid() }).parse(await c.req.json());
   if (["queued", "running"].includes(v.render_status)) throw new HTTPException(409, { message: "This video is already being made." });

@@ -120,8 +120,8 @@ export async function allowance(e: Env, u: DbUser) {
     ? Math.min(1, Math.max(0, (month!.end - now()) / (month!.end - month!.start))) : 1;
   const trial = await trialKey(e, u.email);
   const known = !!(await e.DB.prepare("SELECT 1 FROM usage_windows WHERE id=?").bind(window).first());
-  // Unused credits roll over into a new paid month: from the month before (within 45 days, so a lapsed plan does not
-  // bring back old credits), at most ROLLOVER_MONTHS of the plan's credits plus the credit packs bought then (rolledOver).
+  // Unused credits roll over into a new paid month: from the paid month before (of another subscription only within
+  // 45 days, so a lapsed plan does not bring back old credits), at most ROLLOVER_MONTHS of the plan's credits plus the credit packs bought then (rolledOver).
   // A free month (grant) gets its full plan, and its own credits never roll over.
   let carried = 0;
   const moves: D1PreparedStatement[] = [];
@@ -129,9 +129,11 @@ export async function allowance(e: Env, u: DbUser) {
     const since = now() - 45 * DAY;
     if (!granted) {
       const previous = await e.DB.prepare(
-        "SELECT id,quota,used,carried,topped FROM usage_windows WHERE user_id=? AND id<>? AND plan<>'free' AND instr(id,?)=0 AND created_at>? ORDER BY created_at DESC LIMIT 1",
-      ).bind(u.id, window, `:${GRANT_PREFIX}`, since).first<UsageRow>();
-      if (previous) carried = rolledOver(u.id, previous, sub, plan.credits);
+        "SELECT id,quota,used,carried,topped,created_at FROM usage_windows WHERE user_id=? AND id<>? AND plan<>'free' AND instr(id,?)=0 ORDER BY created_at DESC LIMIT 1",
+      ).bind(u.id, window, `:${GRANT_PREFIX}`).first<UsageRow & { created_at: number }>();
+      // The 45 days are for a plan that lapsed. A month of this same subscription rolls over however long ago it was
+      // first used: its window is written when the account is next seen, which may be weeks into the new month.
+      if (previous && (previous.id.startsWith(`${u.id}:${sub.id}:`) || previous.created_at > since)) carried = rolledOver(u.id, previous, sub, plan.credits);
     }
     // Credit packs and call credits added in a free month (grant) or the free trial move on to the new window, paid or
     // free month; the grant's or trial's own credits never do, and count as spent first. They are taken off the old
@@ -232,7 +234,9 @@ billing.post("/checkout", async (c) => {
     for (const session of open.data) await s.checkout.sessions.expire(session.id);
     intent.plan = requested;
     intent.intent_id = uid();
-    await c.env.DB.prepare("UPDATE checkout_intents SET plan=?,intent_id=? WHERE user_id=?").bind(intent.plan, intent.intent_id, u.id).run();
+    // A new checkout session, so a new expiry: Stripe wants it at least 30 minutes ahead, which the first choice's no longer is.
+    intent.expires_at = now() + 1860;
+    await c.env.DB.prepare("UPDATE checkout_intents SET plan=?,intent_id=?,expires_at=? WHERE user_id=?").bind(intent.plan, intent.intent_id, intent.expires_at, u.id).run();
   }
   const [plan, every] = String(intent.plan).split(":") as [PaidPlanId, Interval];
   id = priceIds(c.env, every)[plan];

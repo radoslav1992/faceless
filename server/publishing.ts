@@ -305,7 +305,8 @@ export async function dispatchDue(env: Env): Promise<void> {
  */
 export async function refreshAccounts(env: Env): Promise<void> {
   const t = now();
-  await env.DB.prepare("UPDATE social_accounts SET status='expired',updated_at=? WHERE status='active' AND expires_at IS NOT NULL AND expires_at<?").bind(t, t).run();
+  const ended = await env.DB.prepare("SELECT id FROM social_accounts WHERE status='active' AND expires_at IS NOT NULL AND expires_at<? LIMIT 200").bind(t).all<{ id: string }>();
+  for (const account of ended.results) await markExpired(env, account.id);
   const due = await env.DB.prepare("SELECT * FROM social_accounts WHERE status='active' AND platform='instagram' AND expires_at<? ORDER BY expires_at LIMIT 50")
     .bind(t + 10 * DAY).all<AccountRow>();
   for (const account of due.results) {

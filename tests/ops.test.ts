@@ -214,6 +214,35 @@ describe("checkout with the request for immediate start", () => {
     expect(env.EMAIL.sent[0].text).toContain("renews every year");
   });
 
+  it("gives a changed choice a new checkout with a new expiry, at least the 30 minutes ahead Stripe asks for", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { env, sqlite } = billingEnv();
+      const a = signedIn(sqlite, "client@example.com");
+      const calls = stripeApi({ subscriptions: () => [] });
+      const fetch = globalThis.fetch;
+      // No checkout of the earlier choice is still open at Stripe.
+      vi.stubGlobal("fetch", async (input: string, init: any = {}) =>
+        String(input).includes("/v1/checkout/sessions?") ? Response.json({ object: "list", has_more: false, data: [] }) : fetch(input, init));
+      const sent = () => calls.filter((c) => c.method === "POST" && c.url.endsWith("/v1/checkout/sessions"));
+      const expiry = (c: StripeCall) => Number(new URLSearchParams(c.body).get("expires_at"));
+      expect((await call(worker, env, "POST", "/api/billing/checkout", { plan: "daily", immediateStart: true }, a.cookie)).status).toBe(200);
+      // Five minutes later they pick yearly billing instead.
+      vi.setSystemTime(Date.now() + 5 * 60 * 1000);
+      expect((await call(worker, env, "POST", "/api/billing/checkout", { plan: "daily", interval: "year", immediateStart: true }, a.cookie)).status).toBe(200);
+      expect(sent()).toHaveLength(2);
+      expect(sent()[1].key).not.toBe(sent()[0].key);
+      expect(expiry(sent()[1]) - now()).toBeGreaterThanOrEqual(1800);
+      // The same choice again is the same checkout: same key and expiry, so Stripe answers with the session it made.
+      vi.setSystemTime(Date.now() + 5 * 60 * 1000);
+      expect((await call(worker, env, "POST", "/api/billing/checkout", { plan: "daily", interval: "year", immediateStart: true }, a.cookie)).status).toBe(200);
+      expect(sent()[2].key).toBe(sent()[1].key);
+      expect(expiry(sent()[2])).toBe(expiry(sent()[1]));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("refuses a price Stripe no longer sells at the plan's amount", async () => {
     const { env, sqlite } = billingEnv();
     const a = signedIn(sqlite);
