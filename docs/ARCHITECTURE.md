@@ -367,7 +367,8 @@ D1 batch, so the credits are reserved by the triggers before any work starts. It
    asks HeyGen to delete its copy (`DELETE /v3/videos/{id}`; a failed delete waits in `cleanup_tasks` as
    `heygen/video/<id>` and the hourly maintenance retries it for two weeks).
 4. **Render**: `planRender` (`server/render-plan.ts`) turns the spec into a `compose` payload and the workflow submits
-   it to a container and polls it (every 8 s, up to about 40 minutes).
+   it to a container and polls it (every 8 s, up to about 40 minutes). The payload is built outside the steps: with
+   its subtitle script it can exceed the 1 MiB a Workflows step may return, so the step keeps only the job id and links.
 5. **Save**: the MP4 and its JPEG **cover** are stored as `render` and `cover` assets, the video becomes `ready`, and
    files of earlier versions it no longer uses are deleted (R2 cleanup follows).
 6. **Ready** (`videoReady`): an approved series episode is scheduled on its series' accounts, and the owner is
@@ -375,7 +376,9 @@ D1 batch, so the credits are reserved by the triggers before any work starts. It
 
 **Paid calls are made once.** Before each fal, ElevenLabs or HeyGen call a claim is stored in `runs.provider`, and the
 ticket right after; a retried step polls the existing job instead of paying again, and a claim without a ticket (the
-answer was lost) fails the run (`GENERATION_UNCERTAIN`, `VOICE_FAILED`, `AVATAR_UNCERTAIN`). On any failure the workflow stops the render, marks
+answer was lost) fails the run (`GENERATION_UNCERTAIN`, `VOICE_FAILED`, `AVATAR_UNCERTAIN`). A refusal that was
+certainly not billed is asked again: ElevenLabs answering 429 (busy) up to four more times over about two minutes
+before `VOICE_BUSY`; and a status check that fal or HeyGen answers with 429 or a 5xx counts as still pending. On any failure the workflow stops the render, marks
 the run failed with a short code (the trigger refunds its credits), stores a plain message on the video and, for a
 series episode, e-mails the owner once. Maintenance re-dispatches runs whose workflow never started and fails (and
 refunds) runs older than 3 hours.
@@ -531,6 +534,11 @@ post public, so a replayed step resumes by polling instead of posting twice. Ref
 outages) are started again after 1, 5 and 15 minutes; then it polls every 15 seconds for up to 30 minutes and records
 the URL. A run that cannot tell whether the post went out fails with a message asking the person to check their
 profile before retrying. Failures are stored as plain-English messages; an `AUTH_EXPIRED` marks the account expired.
+
+**Notices** (`server/notices.ts`): an autopilot must not fail in silence. When a post fails for good its owner is
+e-mailed once with the reason and a link to post it again (an episode's only when its series sends notices); when a
+channel turns expired (a refused token, an ended connection, the weekly channel check) its owner is e-mailed once to
+reconnect it, with the running series that post to it.
 
 - **TikTok**: Content Posting API, the file uploaded in chunks from R2 (`FILE_UPLOAD`). By default as a draft to the
   person's TikTok inbox (`/post/publish/inbox/video/init/`): done once TikTok reports `SEND_TO_USER_INBOX`, recorded

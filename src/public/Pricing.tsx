@@ -38,7 +38,7 @@ export function PlanCards({ current, currentInterval, onChoose, busy }: {
                   {busy === id ? <span className="spinner" aria-hidden="true" /> : null}{mine ? "Your plan" : `Get ${p.name}`}
                 </button>
               ) : (
-                <Link className={`btn block${p.popular ? " primary" : ""}`} to={user ? "/app/billing" : "/register"}>Get {p.name}</Link>
+                <Link className={`btn block${p.popular ? " primary" : ""}`} to={user ? "/app/billing" : `/register?plan=${id}`}>Get {p.name}</Link>
               )}
             </div>
           );

@@ -35,8 +35,9 @@ and the maintenance cron.
   (30, 45, 60 or 90 s), music mood, sound effects, subtitles, the connected accounts it posts to and a schedule (times per day on
   chosen weekdays, in its time zone). For every slot an episode is written and made ahead of time (6 hours before;
   24 hours in review mode) and posted at the slot, or it waits for approval when the series asks for review. When the
-  series sends notices, the owner is e-mailed when an episode is ready or could not be made, and when slots start being
-  skipped for lack of credits or because the trial ended.
+  series sends notices, the owner is e-mailed when an episode is ready, could not be made or could not be posted, and
+  when slots start being skipped for lack of credits or because the trial ended; and always when a connected channel
+  has to be reconnected.
 - **Editing.** Any video can be changed before it posts: the words of each scene (on a timeline of the voice, with
   draggable scene edges, split and merge), each scene's picture (a new AI picture, an AI clip made from it, the owner's
   own image or video, or a clip or picture searched in the shared library), transitions, the on-screen title,

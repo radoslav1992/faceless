@@ -119,7 +119,8 @@ export function ChannelsPage() {
                   const active = a.status === "active";
                   return (
                     <div key={a.id} className="account-row">
-                      {a.avatarUrl ? <img src={a.avatarUrl} alt="" referrerPolicy="no-referrer" /> : <span className="avatar" style={{ background: platforms[id].color }} aria-hidden="true">{a.name.slice(0, 1).toUpperCase()}</span>}
+                      {/* The channel's initial, never its picture: that lives on the network's CDN, which the page's policy (img-src 'self') blocks, and TikTok's and Instagram's links to it expire. */}
+                      <span className="avatar" style={{ background: platforms[id].color }} aria-hidden="true">{a.name.slice(0, 1).toUpperCase()}</span>
                       <div className="grow" style={{ minWidth: 0 }}>
                         <strong className="truncate" style={{ display: "block", maxWidth: "none" }}>{a.name}</strong>
                         <span className="small muted">{a.handle ? `@${a.handle}` : platforms[id].name}</span>
