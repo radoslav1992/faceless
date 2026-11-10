@@ -80,6 +80,8 @@ describe("starting a series", () => {
     sqlite.prepare("UPDATE series SET next_slot=? WHERE id=?").run(now() + 3600, s.id);
     await dispatchSeries(env);
     expect(env.CONTENT.created).toHaveLength(1);
+    // (Back to the planned slot: within an hour before a slot, the hour ahead set above lies past it.)
+    sqlite.prepare("UPDATE series SET next_slot=? WHERE id=?").run(s.next_slot, s.id);
     // The page shows the coming slots (none made yet); nobody else sees the series.
     const page = (await call(worker, env, "GET", `/api/series/${s.id}`, undefined, user.cookie)).data;
     expect(page.upcoming[0]).toEqual({ at: s.next_slot, made: false });

@@ -7,7 +7,7 @@ import { ConfirmDialog, CreditBlockNotice, DropZone, FileButton, ACCEPT, UploadL
 import { CaptionStylePicker, EditorSection } from "./CaptionPickers";
 import { ClipPreview } from "./ClipPreview";
 import { LayoutPicker, scoreLine, scoreTone, useClipSource } from "./clip-editor";
-import { PlatformBadge, VideoCard, making } from "./video-ui";
+import { MadeForKids, PlatformBadge, VideoCard, making } from "./video-ui";
 import { specSchema, type HighlightSpec } from "../../shared/formats";
 import { creditsLabel, highlightCredits } from "../../shared/credits";
 import {
@@ -441,8 +441,11 @@ function ScheduleClips({ clips, onClose, onDone }: { clips: Video[]; onClose: ()
   const [videos, setVideos] = useState<string[]>(() => unposted.map((c) => c.id));
   const [first, setFirst] = useState(() => { const d = new Date(Date.now() + 86400000); d.setHours(18, 0, 0, 0); return local(Math.floor(d.getTime() / 1000)); });
   const [hours, setHours] = useState<number>(24);
+  const [kids, setKids] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const usable = (accounts.data?.accounts || []).filter((a) => a.status === "active");
+  // YouTube's audience question is asked once for the batch and sent with every clip (the server refuses a YouTube post without it).
+  const toYouTube = usable.some((a) => a.platform === "youtube" && chosen.includes(a.id));
   const order = clips.filter((c) => videos.includes(c.id));
   const start = Math.floor(new Date(first).getTime() / 1000);
   const send = async () => {
@@ -450,7 +453,7 @@ function ScheduleClips({ clips, onClose, onDone }: { clips: Video[]; onClose: ()
     let ok = 0;
     for (const [i, v] of order.entries()) {
       try {
-        await post(`/videos/${v.id}/publish`, { accountIds: chosen, at: start + i * hours * 3600 });
+        await post(`/videos/${v.id}/publish`, { accountIds: chosen, at: start + i * hours * 3600, ...(toYouTube && { madeForKids: kids }) });
         ok++;
       } catch (e) {
         toast(`${v.title || "A clip"}: ${errorText(e)}`, "bad");
@@ -463,7 +466,7 @@ function ScheduleClips({ clips, onClose, onDone }: { clips: Video[]; onClose: ()
     <Modal title="Schedule clips" onClose={onClose} wide footer={
       <>
         <button type="button" className="btn" onClick={onClose}>Cancel</button>
-        <button type="button" className="btn primary" disabled={busy || !chosen.length || !order.length || !(start > Date.now() / 1000 + 60)} onClick={send}>
+        <button type="button" className="btn primary" disabled={busy || !chosen.length || !order.length || !(start > Date.now() / 1000 + 60) || (toYouTube && kids === null)} onClick={send}>
           {busy ? <Spinner label="Scheduling" /> : <CalendarClock size={16} aria-hidden="true" />}Schedule {order.length} clip{order.length === 1 ? "" : "s"}
         </button>
       </>
@@ -484,6 +487,7 @@ function ScheduleClips({ clips, onClose, onDone }: { clips: Video[]; onClose: ()
             ))}
           </div>
         )}
+        {toYouTube && <MadeForKids episodes noun="clips" value={kids} onChange={setKids} />}
         <div className="find-grid">
           <label className="field"><span className="small">First post</span>
             <input type="datetime-local" className="input" value={first} onChange={(e) => setFirst(e.target.value)} />

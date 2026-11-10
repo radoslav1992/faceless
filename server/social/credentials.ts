@@ -4,6 +4,7 @@ import type { PlatformId } from "../../shared/social";
 import { open, seal } from "../crypto";
 import { platformFor } from "./index";
 import { SocialError } from "./errors";
+import { accountExpiredNotice } from "../notices";
 import type { Tokens } from "./types";
 
 export type AccountRow = {
@@ -97,5 +98,7 @@ export const accountLabel = (a: Pick<AccountRow, "name" | "handle">) => (a.handl
 
 /** The person has to connect the account again (tokens expired, revoked or unreadable). */
 export async function markExpired(env: Env, accountId: string) {
-  await env.DB.prepare("UPDATE social_accounts SET status='expired',updated_at=? WHERE id=? AND status='active'").bind(now(), accountId).run();
+  const changed = await env.DB.prepare("UPDATE social_accounts SET status='expired',updated_at=? WHERE id=? AND status='active'").bind(now(), accountId).run();
+  // Told once, when it turns expired: a series posting to it would otherwise go on making episodes nobody sees.
+  if (changed.meta.changes) await accountExpiredNotice(env, accountId);
 }

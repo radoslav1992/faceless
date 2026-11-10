@@ -5,6 +5,7 @@ import { dispatchDue, refreshAccounts, scheduleEpisode } from "../server/publish
 import { Publication } from "../server/publish-workflow";
 import { videoReady } from "../server/series";
 import { tiktokChunks } from "../server/social/tiktok";
+import { markExpired } from "../server/social/credentials";
 import { dueForStats } from "../server/metrics";
 import { keepYouTubeData } from "../server/youtube-data";
 import { uploadsToday } from "../server/youtube-quota";
@@ -755,6 +756,26 @@ describe("publishing", () => {
     const p = await publish(s, pubId);
     expect(p).toMatchObject({ status: "failed", ticket: null, token: null });
     expect(p.error).toBe("Instagram didn't accept this post. Check that it meets Instagram's requirements.");
+    // The owner is told once, with the reason and where to post it again.
+    expect(s.env.EMAIL.sent).toHaveLength(1);
+    expect(s.env.EMAIL.sent[0]).toMatchObject({ to: s.user.email, subject: expect.stringContaining("wasn't posted to Instagram") });
+    expect(s.env.EMAIL.sent[0].text).toContain(p.error);
+    expect(s.env.EMAIL.sent[0].text).toContain(`/app/videos/${p.video_id}`);
+  });
+
+  it("keeps a failed episode's notice to series that send notices", async () => {
+    const s = setup();
+    const account = await addAccount(s, "instagram", { externalId: "555" });
+    const refuse = () => mockFetch([["POST", "https://graph.instagram.com/v23.0/555/media", () => ok({ error: { message: "No", type: "OAuthException", code: 352, error_subcode: 2207026 } }, { status: 400 })]]);
+    const quiet = addSeries(s, { accounts: [account], notify: false });
+    refuse();
+    expect(await publish(s, addPublication(s, await addVideo(s, { seriesId: quiet }), account, "instagram"))).toMatchObject({ status: "failed" });
+    expect(s.env.EMAIL.sent).toHaveLength(0);
+    const telling = addSeries(s, { accounts: [account] });
+    refuse();
+    expect(await publish(s, addPublication(s, await addVideo(s, { seriesId: telling }), account, "instagram"))).toMatchObject({ status: "failed" });
+    expect(s.env.EMAIL.sent).toHaveLength(1);
+    expect(s.env.EMAIL.sent[0].text).toContain("An episode of your series “Kitchen facts” could not be posted to Instagram.");
   });
 
   it("uploads a YouTube Short with a refreshed token", async () => {
@@ -865,6 +886,23 @@ describe("publishing", () => {
     expect(p).toMatchObject({ status: "failed", token: null });
     expect(p.error).toBe("Reconnect your TikTok account, then try again.");
     expect((s.sqlite.prepare("SELECT status FROM social_accounts WHERE id=?").get(account) as any).status).toBe("expired");
+    // One e-mail, about the channel (not a second one about the post).
+    expect(s.env.EMAIL.sent).toHaveLength(1);
+    expect(s.env.EMAIL.sent[0]).toMatchObject({ to: s.user.email, subject: "Reconnect your TikTok channel “tiktok account”" });
+    expect(s.env.EMAIL.sent[0].text).toContain("/app/channels");
+  });
+
+  it("names the running series that post to a channel that has to be reconnected, once", async () => {
+    const s = setup();
+    const account = await addAccount(s, "youtube"), other = await addAccount(s, "tiktok");
+    addSeries(s, { accounts: [account] });
+    addSeries(s, { accounts: [other] });
+    addSeries(s, { accounts: [account] }, "paused");
+    await markExpired(s.env, account);
+    await markExpired(s.env, account);
+    expect(s.env.EMAIL.sent).toHaveLength(1);
+    expect(s.env.EMAIL.sent[0].text).toContain("Your series “Kitchen facts” posts to it.");
+    expect(s.env.EMAIL.sent[0].text).toContain("within 14 days");
   });
 
   it("retries a start the network refused for a while, then gives up with a plain message", async () => {

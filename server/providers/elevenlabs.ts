@@ -39,20 +39,35 @@ export function wav(pcm: Uint8Array, rate: number) {
   return out;
 }
 
+/** Seconds waited before asking a busy ElevenLabs again (plus up to half as much, so waiting runs spread out). */
+const BUSY_WAITS = [5, 15, 30, 60];
+/** ElevenLabs' language codes are ours: two letters, except Filipino ("fil": cut to two it would be Finnish). */
+export const languageCode = (language: string) => (language === "fil" ? "fil" : language.slice(0, 2));
+
 /**
- * Speaks `text` once (no automatic retries: each call is billed). Returns a WAV, its length and word timings: of the
+ * Speaks `text` once (no automatic retries of a call that may have been billed; only a busy refusal is asked again). Returns a WAV, its length and word timings: of the
  * normalized text (numbers read out; captions of what is heard), or of the `original` text (a narrated video's scenes
  * are counted in the words as written).
  */
-export async function speak(e: Env, voiceId: string, text: string, language = "en", timing: "normalized" | "original" = "normalized"): Promise<{ audio: Uint8Array; seconds: number; words: CaptionWord[] }> {
+export async function speak(e: Env, voiceId: string, text: string, language = "en", timing: "normalized" | "original" = "normalized", busyWaits = BUSY_WAITS): Promise<{ audio: Uint8Array; seconds: number; words: CaptionWord[] }> {
   const voice = await providerVoiceId(e, voiceId);
   if (!e.ELEVENLABS_API_KEY?.trim() || !voice) throw new ProviderError("VOICE_UNAVAILABLE");
   // The REST call itself (not ElevenLabs' SDK: its thousands of modules made the Worker too slow to start).
   const url = `${SPEECH_URL}/${encodeURIComponent(voice)}/with-timestamps?output_format=pcm_24000`;
-  const r = await providerFetch(url, {
-    method: "POST", headers: { "xi-api-key": e.ELEVENLABS_API_KEY.trim(), "Content-Type": "application/json" },
-    body: JSON.stringify({ text, model_id: SPEECH_MODEL, language_code: language.slice(0, 2) }), signal: AbortSignal.timeout(240000),
+  const key = e.ELEVENLABS_API_KEY.trim();
+  const ask = () => providerFetch(url, {
+    method: "POST", headers: { "xi-api-key": key, "Content-Type": "application/json" },
+    body: JSON.stringify({ text, model_id: SPEECH_MODEL, language_code: languageCode(language) }), signal: AbortSignal.timeout(240000),
   }).catch((error) => { throw error instanceof ProviderError ? error : new ProviderError("VOICE_FAILED"); });
+  // Too many requests at once (429) is refused before anything is spoken or billed, so it alone is asked again, a
+  // little later each time: episodes of many series reach the voice in the same minute.
+  let r = await ask();
+  for (const seconds of busyWaits) {
+    if (r.status !== 429) break;
+    await r.body?.cancel();
+    await new Promise((done) => setTimeout(done, (seconds + Math.random() * seconds / 2) * 1000));
+    r = await ask();
+  }
   if (!r.ok) {
     await r.body?.cancel();
     throw new ProviderError(r.status === 401 || r.status === 402 ? "VOICE_UNAVAILABLE" : r.status === 429 ? "VOICE_BUSY" : "VOICE_FAILED");

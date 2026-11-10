@@ -562,8 +562,8 @@ minutes after posting, every 3 hours for two days, then daily. A number a networ
   can be made for 7 days after sign-up;
 - a renewing subscription keeps its last paid period for 3 days while Stripe collects the invoice;
 - an upgrade inside a month adds only the unused share of the difference; a downgrade uses the new plan's credits;
-- **rollover**: a new paid month starts with the credits left in the previous paid month (if it was created within
-  45 days), capped at three months of the plan's credits (`ROLLOVER_MONTHS`) plus the credit packs bought in it. When
+- **rollover**: a new paid month starts with the credits left in the previous paid month (a month of the same
+  subscription always; one of an earlier subscription only if it was created within 45 days), capped at three months of the plan's credits (`ROLLOVER_MONTHS`) plus the credit packs bought in it. When
   that month's period of the same subscription was replaced before the month ended (a change between monthly and
   yearly billing starts a new period at once, and Stripe pays back the unused time), the plan's credits of the unused
   share stay behind (counted from the new period's start); its credit packs never do. Free months (grants) and the

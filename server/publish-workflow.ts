@@ -8,6 +8,7 @@ import { describeError } from "./error-report";
 import { isPlatform, type PlatformId } from "../shared/social";
 import { socialPlatforms, SocialError, failureMessage, nothingPosted, type FailureCode, type PublishContext, type PublishResult, type Ticket } from "./social";
 import { freshTokens, markExpired, type AccountRow } from "./social/credentials";
+import { postFailedNotice } from "./notices";
 import { postText, synthetic, unfit, type VideoRow } from "./social/post";
 
 // Publishes one publication (claimed by dispatchDue in publishing.ts) on its network, exactly once.
@@ -184,10 +185,13 @@ export async function fail(env: Env, id: string, attempts: number | null, code: 
   const pub = await env.DB.prepare("SELECT platform,account_id,attempts FROM publications WHERE id=?").bind(id).first<{ platform: string; account_id: string; attempts: number }>();
   if (!pub) return;
   const platform = isPlatform(pub.platform) ? pub.platform : null;
-  await env.DB.prepare("UPDATE publications SET status='failed',error=?,token=NULL,updated_at=? WHERE id=? AND status='publishing' AND attempts=?")
-    .bind(failureMessage(platform, code, detail), now(), id, attempts ?? pub.attempts)
+  const reason = failureMessage(platform, code, detail);
+  const changed = await env.DB.prepare("UPDATE publications SET status='failed',error=?,token=NULL,updated_at=? WHERE id=? AND status='publishing' AND attempts=?")
+    .bind(reason, now(), id, attempts ?? pub.attempts)
     .run();
+  // The owner hears about it once (a channel to reconnect has its own notice): nobody watches an autopilot's posts.
   if (code === "AUTH_EXPIRED") await markExpired(env, pub.account_id);
+  else if (changed.meta.changes) await postFailedNotice(env, id, reason);
 }
 
 const DB_STEP = { retries: { limit: 3, delay: "10 seconds", backoff: "exponential" }, timeout: "2 minutes" } as const;

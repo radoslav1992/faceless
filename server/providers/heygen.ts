@@ -127,7 +127,15 @@ export async function submitAvatarVideo(env: Env, key: string, lookId: string, e
 }
 /** An avatar video's state: still being made, or done with its download link. */
 export async function avatarVideoStatus(env: Env, videoId: string): Promise<{ done: false } | { done: true; url: string }> {
-  const body = await (await call(env, `/videos/${validId(videoId)}`)).json() as any;
+  // HeyGen busy or briefly down says nothing about the video, which is already paid for: asked again on the next round.
+  const r = await providerFetch(`${API}/videos/${validId(videoId)}`, { headers: headers(env), signal: AbortSignal.timeout(45000) })
+    .catch((e) => { throw e instanceof ProviderError ? e : new ProviderError("AVATAR_FAILED"); });
+  if (r.status === 429 || r.status >= 500) {
+    await r.body?.cancel();
+    return { done: false };
+  }
+  if (!r.ok) throw await failure(r);
+  const body = await r.json() as any;
   const data = body?.data;
   if (body?.error || !data || data.id !== videoId) throw new ProviderError("AVATAR_FAILED");
   if (["waiting", "pending", "processing"].includes(data.status)) return { done: false };

@@ -26,11 +26,11 @@ export function StatusChip({ video }: { video: Video }) {
   return <span className="chip green">Ready</span>;
 }
 /** YouTube's audience question, answered by the creator (never for them) whenever a video or a series posts to YouTube. */
-export function MadeForKids({ value, onChange, episodes = false }: { value: boolean | null; onChange: (v: boolean) => void; episodes?: boolean }) {
+export function MadeForKids({ value, onChange, episodes = false, noun = "episodes" }: { value: boolean | null; onChange: (v: boolean) => void; episodes?: boolean; noun?: string }) {
   const id = useId();
   return (
     <div className="stack" style={{ gap: 6 }} role="radiogroup" aria-labelledby={`${id}-q`} aria-describedby={`${id}-hint`}>
-      <span id={`${id}-q`} className="small"><strong>YouTube: {episodes ? "are the episodes" : "is it"} made for kids?</strong></span>
+      <span id={`${id}-q`} className="small"><strong>YouTube: {episodes ? `are the ${noun}` : "is it"} made for kids?</strong></span>
       <label className="check"><input type="radio" name={id} checked={value === false} onChange={() => onChange(false)} /> No, {episodes ? "they're" : "it's"} not made for kids</label>
       <label className="check"><input type="radio" name={id} checked={value === true} onChange={() => onChange(true)} /> Yes, {episodes ? "they're" : "it's"} made for kids</label>
       <p id={`${id}-hint`} className="hint">

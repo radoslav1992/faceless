@@ -4,11 +4,12 @@ import { ContentGeneration } from "../server/content-workflow";
 import { planRender, type PlanContext } from "../server/render-plan";
 import { acceptScenePlan, acceptStory, conceptToSpec, OWNER_RULE, storyShape } from "../server/story";
 import { acceptNewSounds, acceptSounds, rankSounds } from "../server/sounds";
-import { alignedWords, ALIGNMENT_URL, forcedAlignment, speak, SPEECH_MODEL } from "../server/providers/elevenlabs";
+import { alignedWords, ALIGNMENT_URL, forcedAlignment, languageCode, speak, SPEECH_MODEL } from "../server/providers/elevenlabs";
 import { adminClipModels, clipModelFor, falRequest, referenceModel, referencePrompt, submitFal } from "../server/providers/fal";
 import { heygenClipRequest, heygenRetry } from "../server/providers/heygen";
 import { attention } from "../server/operations";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
+import { languages } from "../shared/series";
 import { estimatedSeconds, narrationCurrent, pendingMedia, pictureSheets, specCredits, specSchema, storySpec, type StorySpec } from "../shared/formats";
 import {
   AUTO_TRANSITIONS, clipFor, estimatedTimings, mergeScenes, moveEdge, narrationKey, placeOf, splitScene, toggleKey, resolveTransition, scenePrompt, scenesFromCounts, splitScenes, storyScript, storySegments,
@@ -508,6 +509,28 @@ describe("the AI voice", () => {
     expect(r.words.map((w) => w.text)).toEqual(["Hi", "there."]);
     expect(r.words.at(-1)!.end).toBe(1);
   });
+
+  it("asks a busy ElevenLabs again (nothing was spoken or billed), and gives up with VOICE_BUSY when it stays busy", async () => {
+    let asked = 0, busy = 2;
+    vi.stubGlobal("fetch", async () => {
+      asked++;
+      if (asked <= busy) return Response.json({ detail: { status: "too_many_concurrent_requests" } }, { status: 429 });
+      const characters = [..."Hi there."];
+      return Response.json({ audio_base64: Buffer.from(new Uint8Array(48000)).toString("base64"),
+        alignment: { characters, character_start_times_seconds: characters.map((_, i) => i * 0.1), character_end_times_seconds: characters.map((_, i) => (i + 1) * 0.1) } });
+    });
+    const env = testEnv({ ELEVENLABS_API_KEY: "el" }).env;
+    expect((await speak(env, "george", "Hi there.", "en", "original", [0, 0, 0])).seconds).toBe(1);
+    expect(asked).toBe(3);
+    asked = 0; busy = 99;
+    await expect(speak(env, "george", "Hi there.", "en", "original", [0, 0])).rejects.toThrow("VOICE_BUSY");
+    expect(asked).toBe(3);
+  });
+
+  it("names Filipino to ElevenLabs as Filipino, not Finnish", () => {
+    expect(languageCode("fil")).toBe("fil");
+    expect(languages.map((l) => languageCode(l[0]))).toEqual(languages.map((l) => l[0]));
+  });
 });
 
 describe("forced alignment", () => {
@@ -817,6 +840,19 @@ describe("narrated videos in the content run", () => {
     expect(alignmentWords({ characters: chars, characterStartTimesSeconds: chars.map((_, i) => i / 10), characterEndTimesSeconds: chars.map((_, i) => (i + 1) / 10) }).map((w) => w.text))
       .toEqual(["Hi", "there"]);
     expect(specSchema.safeParse({ ...video.spec, scenes: video.spec.scenes.map((s: any) => ({ ...s, tone: "shouting" })) }).success).toBe(false);
+  });
+
+  it("keeps the render's plan (its whole subtitle script) out of what a workflow step returns", async () => {
+    const { env, user, spec } = await setup();
+    providers();
+    expect((await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie)).status).toBe(201);
+    // Workflows refuse a step result over 1 MiB: a long video's subtitles alone are more.
+    const returned: Record<string, unknown> = {};
+    const recording = { do: async (name: string, a: any, b?: any) => (returned[name] = await (b ?? a)()), sleep: async () => {} };
+    for (const c of env.CONTENT.created.splice(0)) await new ContentGeneration({} as any, env).run({ payload: c.params } as any, recording as any);
+    expect(Object.keys(returned["compose-payload"] as object).sort()).toEqual(["id", "urls"]);
+    expect(Object.values(returned).some((v) => JSON.stringify(v ?? null).includes("[Script Info]"))).toBe(false);
+    expect(Math.max(...Object.values(returned).map((v) => JSON.stringify(v ?? null).length))).toBeLessThan(200_000);
   });
 
   it("draws every picture from its own text when FAL_REFERENCE_MODEL is off", async () => {

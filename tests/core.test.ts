@@ -171,6 +171,24 @@ describe("plans and usage windows", () => {
     await creditTopup(env, { ...session, id: "cs_2", metadata: { ...session.metadata, credits: "1000" } });
     expect((await allowance(env, user)).limit).toBe(before + 10);
   });
+  it("rolls a month of the same subscription over however late the account is next seen; a lapsed plan's only within 45 days", async () => {
+    const { env, sqlite } = testEnv();
+    const day = 86400;
+    const fresh = (email: string) => { const a = signedIn(sqlite, email); return sqlite.prepare("SELECT * FROM users WHERE id=?").get(a.id) as any; };
+    // A Starter subscriber left 25 credits last month and first opens the app 16 days into this one: the old month's
+    // window was written when it was first used, 47 days ago.
+    const user = fresh("late@example.com");
+    const sub = subscribe(sqlite, user.id, "starter", { startedAgo: 16 * day });
+    const window = (id: string, sub: string, start: number, ago: number) =>
+      sqlite.prepare("INSERT INTO usage_windows(id,user_id,plan,quota,used,carried,topped,created_at) VALUES (?,?,'starter',30,5,0,0,?)").run(`${id}:${sub}:${start}`, id, now() - ago);
+    window(user.id, sub, now() - 47 * day, 47 * day);
+    expect(await allowance(env, user)).toMatchObject({ plan: "starter", limit: 55, carried: 25 });
+    // A plan that ended long ago brings nothing back to a new subscription.
+    const back = fresh("back@example.com");
+    window(back.id, "sub_old", now() - 77 * day, 77 * day);
+    subscribe(sqlite, back.id, "starter", { startedAgo: 16 * day });
+    expect(await allowance(env, back)).toMatchObject({ plan: "starter", limit: 30, carried: 0 });
+  });
   it("rolls over only the paid share of a month cut short by a change between monthly and yearly billing, however often", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
