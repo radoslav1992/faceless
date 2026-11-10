@@ -67,7 +67,8 @@ handler runs `maintenance()` every minute.
 video), `0006_example_previews.sql` (the examples' short previews), `0007_library_categories.sql` (library items'
 genre or category), `0008_avatars.sql` (the presenters' avatars), `0009_growth.sql` (affiliates, commissions,
 payouts and calls for credits), `0010_tiktok_drafts.sql`, `0011_youtube_data.sql` (YouTube channel details' age, the
-"made for kids" answer) and `0012_sound_effects.sql` (library sound effects); D1 always enforces foreign keys.
+"made for kids" answer), `0012_sound_effects.sql` (library sound effects) and `0015_series_character.sql` (a series'
+main character as drawn); D1 always enforces foreign keys.
 
 | Area | Tables |
 | --- | --- |
@@ -489,6 +490,17 @@ handling daylight saving time. Plans limit how many series a person has; text to
   time, to the first coming slot without an episode. Pausing cancels what was still scheduled, with the reason
   `PAUSED`; resuming schedules those posts again (`resumePosts`): at their slot, or at once when it passed less than
   3 hours ago (an older one is left for the owner to post by hand). Deleting a series keeps its videos.
+- **One main character** (`server/characters.ts`, `series.character_asset` and `character_key`). A video draws its
+  recurring characters on a reference sheet first and every scene from that sheet, which keeps them the same within
+  the video; a sheet drawn anew for each episode would be the same words with another face. So the sheet of the first
+  episode that draws the series' character (the `subject` of its settings) is copied to a file of the series' own
+  (`media_assets` with no video, `meta.series`), and `makeSheets` gives every later episode that file instead of
+  drawing one. The sheet is found by its key, the fingerprint of the description and the art style
+  (`characterSheetKey`): after either changes the next episode draws a new sheet, which replaces the old one; an
+  episode whose own character was edited keeps its own sheet. `DELETE /api/series/:id/character` ("New look") forgets
+  the drawing (refused while an episode of the series is being made); deleting the series deletes it (a trigger).
+  The copy is never needed to make an episode: when it cannot be kept (storage full, the migration not applied yet)
+  the episode is drawn from its own sheet as before.
 - **Made ahead.** Every minute (when `MEDIA_ENABLED=true`) `dispatchSeries` takes active series whose next slot is
   within `MAKE_AHEAD` (6 hours on autopilot, 24 hours in review mode), at most 10 a minute. Each is **claimed** for
   15 minutes (`attempted_at`) and handed to the workflow as an `episode` job.

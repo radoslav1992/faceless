@@ -74,7 +74,7 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
       ) : (
         <Section title={`Art style · ${storyStyles[settings.style].name}`} hint="Every picture of every episode in one style.">
           <StoryStylePicker value={settings.style} onChange={(style) => set({ style })} />
-          <label className="field"><span className="small">Main character <span className="muted">(optional, drawn the same in every picture)</span></span>
+          <label className="field"><span className="small">Main character <span className="muted">(optional: drawn once, then the same in every episode)</span></span>
             <input className="input" maxLength={300} value={settings.subject} placeholder="A small robot with a round blue head and one antenna" onChange={(e) => set({ subject: e.target.value })} />
           </label>
           <label className="field"><span className="small">Animated scenes per episode</span>

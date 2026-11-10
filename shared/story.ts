@@ -418,6 +418,8 @@ const bare = (text: string) => text.trim().replace(/[.!?]$/, "");
  */
 export const characterSheetPrompt = (subject: string, style: StoryStyle) =>
   `Character reference sheet: ${bare(subject)}. Each recurring character once, full body with the face clearly visible, standing in a relaxed neutral pose, side by side on a plain light grey background, with no scenery and nobody else. Style: ${storyStyles[style].prompt}.`.slice(0, 1600);
+/** What names a character sheet: its description and art style. A series keeps the sheet drawn for its key (server/characters.ts). */
+export const characterSheetKey = (subject: string, style: StoryStyle) => `sheet:${fingerprint(characterSheetPrompt(subject, style))}`;
 export const placeSheetPrompt = (place: StoryPlace, style: StoryStyle, look = "") =>
   `Establishing shot of ${bare(place.label)}: ${bare(place.description)}. A wide view of the whole place, empty, with no people or animals.${look.trim() ? ` The world of the video: ${bare(look)}.` : ""} Style: ${storyStyles[style].prompt}. Vertical 9:16 frame.`.slice(0, 1600);
 /** The description sent to the clip model with the scene's picture: gentle motion, the picture kept as it is. */

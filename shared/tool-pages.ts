@@ -31,7 +31,7 @@ export const toolPageCopy: Partial<Record<TemplateId, ToolPageCopy>> = {
     ideas: ["A lighthouse keeper's last night", "The robot that learned to lie", "A letter delivered 50 years late", "The last dragon applies for a job", "A town where every shadow runs late", "Two strangers who share the same dream"],
     faq: [
       ["Which genres can it write?", "Any you ask for: fantasy, mystery, adventure, sci-fi or heartwarming. Name the genre and tone in your idea, and pick an art style to match."],
-      ["Do the characters look the same in every scene?", "As far as AI pictures allow, yes: a video's recurring characters and places get reference sheets first, and every scene is drawn from them, so the story looks like one film."],
+      ["Do the characters look the same in every scene?", "As far as AI pictures allow, yes: a video's recurring characters and places get reference sheets first, and every scene is drawn from them, so the story looks like one film. In a series, the main character you describe is drawn once and every episode is drawn from that same picture."],
     ],
   },
   bedtime: {

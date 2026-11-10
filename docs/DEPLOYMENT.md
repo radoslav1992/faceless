@@ -57,6 +57,10 @@ each migration is still applied at the moment its note below says.
 per-minute publishing and the five-minute and hourly maintenance stop reading every video and file. It only adds
 indexes, so it is safe to apply before or after deploying the code: apply it with the same `npm run db:remote`.
 
+`0015_series_character.sql` adds where a series keeps its main character's drawing (two columns and a trigger that
+deletes the drawing with its series). Also safe before or after the code: until it is applied each episode draws its
+own character, as before, and a warning `Series character not kept` is logged per episode.
+
 - **R2**: add a lifecycle rule to *abort incomplete multipart uploads after 1 day*. Do **not** add an object-expiry
   rule; the app deletes its files itself.
 - **Renderer image**: Python 3.12 on Debian bookworm with its FFmpeg (libass, x264) and Noto fonts, plus the bundled
