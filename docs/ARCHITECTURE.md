@@ -67,8 +67,8 @@ handler runs `maintenance()` every minute.
 video), `0006_example_previews.sql` (the examples' short previews), `0007_library_categories.sql` (library items'
 genre or category), `0008_avatars.sql` (the presenters' avatars), `0009_growth.sql` (affiliates, commissions,
 payouts and calls for credits), `0010_tiktok_drafts.sql`, `0011_youtube_data.sql` (YouTube channel details' age, the
-"made for kids" answer), `0012_sound_effects.sql` (library sound effects) and `0015_series_character.sql` (a series'
-main character as drawn); D1 always enforces foreign keys.
+"made for kids" answer), `0012_sound_effects.sql` (library sound effects), `0015_series_character.sql` (a series'
+main character as drawn) and `0016_voice_clones.sql` (customers' cloned voices); D1 always enforces foreign keys.
 
 | Area | Tables |
 | --- | --- |
@@ -154,6 +154,27 @@ fetch the new one. `GET /api/public/voices` lists the offered voices (the app's 
 chosen one with its sample, `VoicePicker` every voice with a play button, filtered by gender and accent; the API's
 `/types` and `list_video_types`). A new video or series must use an offered voice; one that already has a voice keeps
 it once hidden (`voiceUsable` with the kept voice), and a template whose voice was hidden gets the default.
+
+**Cloned voices** (`server/voice-clones.ts`, `shared/voices.ts`, tables `voice_clones`, `voice_removals` and
+`voice_consents`; `CloneVoiceDialog` in `src/app/voice-clone.tsx`, "Your voices" in Settings and "Your own voice" in
+the voice picker). A customer's own voice for their narration, off unless the operator sets `VOICE_CLONES`: every
+clone takes one of the ElevenLabs account's voice slots, so that number is the room for all customers together
+(clones plus voices still waiting to be deleted there), and a plan's `voices` how many each customer may have (none
+on the free trial). `POST /api/voices` takes one of the person's audio uploads (30 seconds to 5 minutes, at most
+10 MB), a name and their statement that the voice is theirs to use (`CLONE_CONSENT_TEXT`, in its current
+`CLONE_CONSENT_VERSION`), sends the recording to ElevenLabs Instant Voice Cloning (`POST /v1/voices/add`,
+`cloneVoice`), and saves the clone with the statement (`voice_consents`: who, when, which version; nothing of the
+voice). A voice ElevenLabs wants its speaker to verify is deleted there again and refused. A sample spoken by the
+clone is kept in the owner's folder and served to them alone (`GET /api/voices/:id/preview`); the app deletes the
+uploaded recording once the voice is made.
+A clone is a row of its own table, never of `voices`, with an ID no administrator's voice can have (`clone-` and 12
+hex digits): nothing that lists or manages the voices everyone has can show one, the ElevenLabs list in Admin → Voices
+leaves customers' clones out, and importing one is refused. `voiceUsable` and `providerVoiceId` take the user: a
+clone is usable, and speaks (`speak` in the content workflow), only for its owner. `DELETE /api/voices/:id` is refused
+while a series of the owner uses the voice or a video is being narrated in it; videos narrated in it keep their
+recordings. A deleted clone, and a deleted account's clones, are queued in `voice_removals` by triggers and deleted
+at ElevenLabs at once and then hourly (`removeClonedVoices`) until ElevenLabs confirms: never given up, and reported
+in the logs after a week. The statements stay 5 years after the voice is gone, then retention removes them.
 
 **Affiliates** (`shared/growth.ts`, `server/affiliates.ts`, "Earn 30%" in `src/app/Affiliate.tsx`, Admin → Growth in
 `src/app/AdminGrowth.tsx`). A verified user joins with a PayPal address and the affiliate terms (Terms › Affiliate

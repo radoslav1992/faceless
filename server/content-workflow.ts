@@ -610,7 +610,7 @@ async function makeNarration(e: Env, step: WorkflowStep, run: RunInfo, spec: Sto
     if (s.claims?.voice) throw new Error("VOICE_FAILED");
     await patchState(e, run.id, (s) => { (s.claims ||= {}).voice = true; });
     await phase("voice");
-    const result = await speak(e, voiceId, voiced, spec.language || "en", "original");
+    const result = await speak(e, voiceId, voiced, spec.language || "en", "original", undefined, run.user_id);
     const assetId = uid(), key = mediaKey(run.user_id, assetId, "wav");
     await e.MEDIA.put(key, result.audio, { httpMetadata: { contentType: "audio/wav" } });
     await recordFile(e, key, e.DB.prepare(

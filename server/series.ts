@@ -103,7 +103,7 @@ const createSchema = z.object({
 /** `keptVoice`: the series' voice before an edit, which it keeps even once that voice is no longer offered. */
 async function checkSettings(env: Env, user: DbUser, template: TemplateId, settings: SeriesSettings, keptVoice: string | null = null) {
   if (!validZone(settings.schedule.timezone)) throw new HTTPException(400, { message: "Choose a valid time zone." });
-  if (!(await voiceUsable(env, settings.voiceId, keptVoice))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
+  if (!(await voiceUsable(env, settings.voiceId, keptVoice, user.id))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
   if (template === "custom" && settings.prompt.length < 3) throw new HTTPException(400, { message: "Describe what the videos of this series are about." });
   if (settings.accounts.length) {
     const rows = (await env.DB.prepare(`SELECT id,platform FROM social_accounts WHERE user_id=? AND id IN (${settings.accounts.map(() => "?").join(",")})`)

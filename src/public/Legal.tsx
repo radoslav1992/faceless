@@ -197,6 +197,7 @@ function terms(op: Operator): Section[] {
               impersonate any person or organisation, imitate a real person's voice or likeness, or suggest an endorsement or affiliation that doesn't
               exist;
             </li>
+            <li>clone a voice other than your own, unless its speaker has given you permission to clone it and to use it in your videos;</li>
             <li>
               present AI-made pictures, clips or narration as real footage or real events in a way that misleads people — such as made-up news, invented
               quotes from real people, fake testimonials or reviews, or misleading election content;
@@ -236,6 +237,13 @@ function terms(op: Operator): Section[] {
             that offers an AI-content disclosure through its API (currently TikTok and YouTube), we switch it on. A TikTok draft can't carry it: turn on
             TikTok's AI-generated content label when you post it. Where a platform or the law asks you to label AI content yourself, you must do so.
             Don't remove or hide these markers to make AI content look real.
+          </p>
+          <p>
+            <strong>Cloned voices.</strong> Where we offer it, you can have your videos narrated in a voice cloned from a recording you upload. You may
+            clone only your own voice, or a voice whose speaker has given you permission to clone it and to use it in your videos, and you confirm
+            this each time you clone one. The voice is made from your recording by ElevenLabs and kept there for you alone: nobody else can choose it
+            or have anything narrated in it. You can delete it at any time in Settings, which deletes it at ElevenLabs too. Narration in a cloned
+            voice is AI narration like any other, and is marked and disclosed as such.
           </p>
         </>
       ),
@@ -488,6 +496,11 @@ function privacy(op: Operator): Section[] {
             posting schedule and the accounts it posts to, and your choices such as review and email notices.
           </li>
           <li>
+            <strong>Cloned voices:</strong> if you clone a voice, the recording you upload for it (deleted from your files once the voice is made),
+            the voice ElevenLabs makes from it, its name and a short sample spoken by it, and your statement that the voice is yours to use (when
+            you gave it and which wording you agreed to). The voice is used only to narrate your videos, never to identify anyone.
+          </li>
+          <li>
             <strong>Uploads:</strong> pictures, videos and audio you upload, such as your own narration recording or a long video you make clips from
             (or import from a link: we keep the link only until the video is downloaded);
             for uploads with speech, the words and their timings, when each speaker talks (speakers are numbered, never identified) and sounds such as
@@ -597,9 +610,10 @@ function privacy(op: Operator): Section[] {
                 </tr>
                 <tr>
                   <th scope="row">ElevenLabs</th>
-                  <td>AI narration, word timings for subtitles, transcription, and sound effects</td>
+                  <td>AI narration, word timings for subtitles, transcription, sound effects, and cloned voices</td>
                   <td>The narration text, and audio whose words are timed or transcribed — the AI narration, or a recording or video with sound that you upload; for a
-                    sound effect, a few generic words describing the sound (written by our AI, never your words)</td>
+                    sound effect, a few generic words describing the sound (written by our AI, never your words); and, if you clone a voice, the
+                    recording you upload for it, from which ElevenLabs makes the voice and keeps it until you delete it</td>
                 </tr>
                 <tr>
                   <th scope="row">HeyGen</th>
@@ -705,6 +719,11 @@ function privacy(op: Operator): Section[] {
             <li>
               Your acceptance of the terms and your request at checkout to start straight away: while you have an account and 5 years after it is deleted,
               as evidence of the contract. Withdrawals: 5 years.
+            </li>
+            <li>
+              Cloned voices: until you delete the voice or your account. The voice is then deleted at ElevenLabs as well, straight away or, if
+              ElevenLabs can't be reached, within the following hours. Your statement that the voice is yours to use: 5 years after the voice is
+              deleted, as evidence; it holds nothing of the voice.
             </li>
             <li>Billing records: as long as tax and accounting law requires. Stripe keeps its own records under its policies.</li>
             <li>

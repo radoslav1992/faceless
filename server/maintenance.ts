@@ -12,6 +12,7 @@ import { refreshMetrics } from "./metrics";
 import { keepYouTubeData } from "./youtube-data";
 import { reportUploads } from "./youtube-quota";
 import { applyRetention } from "./retention";
+import { removeClonedVoices } from "./voice-clones";
 import { describeError } from "./error-report";
 import { flagForReview, recordMaintenanceRun, recordStageFailures, reportAttention, reviewRuns } from "./operations";
 
@@ -44,6 +45,7 @@ export async function maintenance(e: Env, at = Date.now()) {
   if (hourly) {
     await stage("cleanup", () => drainCleanup(e));
     await stage("heygen", () => deleteHeyGenCopies(e));
+    await stage("voices", () => removeClonedVoices(e));
     await stage("uploads", () => expireUploads(e));
     await stage("reviews", () => reviewRuns(e));
     await stage("retention", () => applyRetention(e));

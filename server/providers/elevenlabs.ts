@@ -11,6 +11,7 @@ import { failureCode, providerFetch, ProviderError } from "./http";
 export const SPEECH_MODEL = "eleven_v4";
 export const ALIGNMENT_URL = "https://api.elevenlabs.io/v1/forced-alignment";
 const SPEECH_URL = "https://api.elevenlabs.io/v1/text-to-speech";
+const VOICES_URL = "https://api.elevenlabs.io/v1/voices";
 export const SOUND_URL = "https://api.elevenlabs.io/v1/sound-generation";
 /** Lengths ElevenLabs makes sound effects of (seconds). */
 export const SOUND_EFFECT_SECONDS = { min: 0.5, max: 30 } as const;
@@ -49,8 +50,11 @@ export const languageCode = (language: string) => (language === "fil" ? "fil" : 
  * normalized text (numbers read out; captions of what is heard), or of the `original` text (a narrated video's scenes
  * are counted in the words as written).
  */
-export async function speak(e: Env, voiceId: string, text: string, language = "en", timing: "normalized" | "original" = "normalized", busyWaits = BUSY_WAITS): Promise<{ audio: Uint8Array; seconds: number; words: CaptionWord[] }> {
-  const voice = await providerVoiceId(e, voiceId);
+export async function speak(
+  e: Env, voiceId: string, text: string, language = "en", timing: "normalized" | "original" = "normalized", busyWaits = BUSY_WAITS, userId?: string,
+): Promise<{ audio: Uint8Array; seconds: number; words: CaptionWord[] }> {
+  // `userId`: whose video it is; a cloned voice speaks only for its owner.
+  const voice = await providerVoiceId(e, voiceId, userId);
   if (!e.ELEVENLABS_API_KEY?.trim() || !voice) throw new ProviderError("VOICE_UNAVAILABLE");
   // The REST call itself (not ElevenLabs' SDK: its thousands of modules made the Worker too slow to start).
   const url = `${SPEECH_URL}/${encodeURIComponent(voice)}/with-timestamps?output_format=pcm_24000`;
@@ -176,4 +180,56 @@ export async function forcedAlignment(e: Env, file: Blob, text: string, duration
   const words = alignedWords(await r.json().catch(() => null), duration);
   if (!words.length) throw new ProviderError("ALIGN_FAILED");
   return words;
+}
+
+/** What ElevenLabs says went wrong, as its short status word ("voice_limit_reached"); never its message. */
+async function refusal(r: Response) {
+  const body = (await r.json().catch(() => null)) as any;
+  const status = typeof body?.detail?.status === "string" ? body.detail.status : typeof body?.detail?.code === "string" ? body.detail.code : "";
+  return /^[a-z0-9_]{1,60}$/.test(status) ? status : "";
+}
+/**
+ * Clones a voice from one recording (ElevenLabs Instant Voice Cloning, POST /v1/voices/add) and returns the new
+ * voice's ElevenLabs ID. Making the voice is not billed, but it takes one of the account's voice slots.
+ * VOICE_UNAVAILABLE: the key, the plan (no instant cloning) or the slots; VOICE_REJECTED: ElevenLabs won't clone this
+ * recording (too short or unclear, or a voice it asks the speaker to verify, which the API cannot do).
+ */
+export async function cloneVoice(e: Env, name: string, sample: { bytes: ArrayBuffer; mime: string; filename: string }): Promise<string> {
+  const key = e.ELEVENLABS_API_KEY?.trim();
+  if (!key) throw new ProviderError("VOICE_UNAVAILABLE");
+  const form = new FormData();
+  form.append("name", name);
+  form.append("files", new Blob([sample.bytes], { type: sample.mime }), sample.filename);
+  const r = await providerFetch(VOICES_URL + "/add", { method: "POST", headers: { "xi-api-key": key }, body: form, signal: AbortSignal.timeout(120000) })
+    .catch((error) => { throw error instanceof ProviderError ? error : new ProviderError("VOICE_FAILED"); });
+  if (!r.ok) {
+    const status = await refusal(r);
+    console.warn("Voice not cloned", { http: r.status, status });
+    if (r.status === 429) throw new ProviderError("VOICE_BUSY");
+    if ([401, 402, 403].includes(r.status) || /limit|subscription|can_not_use|permission|quota/.test(status)) throw new ProviderError("VOICE_UNAVAILABLE");
+    throw new ProviderError(r.status === 400 || r.status === 422 ? "VOICE_REJECTED" : "VOICE_FAILED");
+  }
+  const made = (await r.json().catch(() => null)) as any;
+  const id = typeof made?.voice_id === "string" && /^[A-Za-z0-9]{10,40}$/.test(made.voice_id) ? made.voice_id as string : null;
+  if (!id) throw new ProviderError("VOICE_FAILED");
+  if (made.requires_verification === true) {
+    // A voice ElevenLabs wants its speaker to verify cannot be used through the API: it goes again.
+    await deleteVoice(e, id).catch(() => {});
+    throw new ProviderError("VOICE_REJECTED");
+  }
+  return id;
+}
+/** Deletes a voice of the ElevenLabs account (one already gone counts as deleted). */
+export async function deleteVoice(e: Env, providerVoice: string) {
+  const key = e.ELEVENLABS_API_KEY?.trim();
+  if (!key || !/^[A-Za-z0-9]{10,40}$/.test(providerVoice)) throw new ProviderError("VOICE_UNAVAILABLE");
+  const r = await providerFetch(`${VOICES_URL}/${providerVoice}`, { method: "DELETE", headers: { "xi-api-key": key }, signal: AbortSignal.timeout(20000) })
+    .catch((error) => { throw error instanceof ProviderError ? error : new ProviderError("VOICE_FAILED"); });
+  if (r.ok || r.status === 404) {
+    await r.body?.cancel();
+    return;
+  }
+  // ElevenLabs also answers 400 "voice_does_not_exist" (or "voice_not_found") for a voice that is gone.
+  if ((r.status === 400 || r.status === 422) && /not_found|does_not_exist/.test(await refusal(r))) return;
+  throw new ProviderError("VOICE_FAILED");
 }

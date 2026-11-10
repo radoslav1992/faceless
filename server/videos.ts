@@ -53,7 +53,7 @@ export async function checkReferences(env: Env, userId: string, spec: Spec, kept
   if (isHighlight(spec)) return checkSource(env, userId, spec);
   // An AI voice reads at most STORY_MAX_CHARS; an own voiceover is a recording with sound, up to the render's three minutes.
   if (spec.narration.kind === "voice") {
-    if (!(await voiceUsable(env, spec.narration.voiceId, keptVoice))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
+    if (!(await voiceUsable(env, spec.narration.voiceId, keptVoice, userId))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
     if (storyScript(spec.scenes).length > STORY_MAX_CHARS) throw new HTTPException(400, { message: `The script can be up to ${STORY_MAX_CHARS.toLocaleString("en-US")} characters (about ${Math.round(STORY_MAX_CHARS / 15)} seconds).` });
   } else {
     const a = await env.DB.prepare("SELECT mime,duration,meta FROM media_assets WHERE id=? AND user_id=?").bind(spec.narration.assetId, userId).first<{ mime: string; duration: number; meta: string }>();

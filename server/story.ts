@@ -419,7 +419,7 @@ export async function draftVideo(env: Env, userId: string, input: DraftRequest, 
   const d = draftSchema.parse(input);
   const t = templateOf(d.template);
   // A voice asked for must be offered; the template's own is replaced by the default voice when it was hidden.
-  if (d.voiceId && !(await voiceUsable(env, d.voiceId))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
+  if (d.voiceId && !(await voiceUsable(env, d.voiceId, null, userId))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
   const style = d.style || t.style, voiceId = d.voiceId || (await offeredVoice(env, t.voice));
   const catalog = d.musicTrackId ? await chosenTrack(env, d.musicTrackId) : await musicCatalog(env, d.music === "auto" ? t.music : d.music);
   const backdropId = t.kind === "backdrop" ? await backdropFor(env, null) : null;

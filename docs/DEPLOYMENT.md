@@ -61,6 +61,11 @@ indexes, so it is safe to apply before or after deploying the code: apply it wit
 deletes the drawing with its series). Also safe before or after the code: until it is applied each episode draws its
 own character, as before, and a warning `Series character not kept` is logged per episode.
 
+`0016_voice_clones.sql` adds customers' cloned voices (three tables and two triggers). The code works without it
+while voice cloning is off; apply it before setting `VOICE_CLONES`. Before turning cloning on, have the terms' and
+privacy policy's "Cloned voices" passages checked for the places you sell in: a voice clone is personal data, and
+some laws treat a voiceprint as biometric data.
+
 - **R2**: add a lifecycle rule to *abort incomplete multipart uploads after 1 day*. Do **not** add an object-expiry
   rule; the app deletes its files itself.
 - **Renderer image**: Python 3.12 on Debian bookworm with its FFmpeg (libass, x264) and Noto fonts, plus the bundled
@@ -119,6 +124,7 @@ the Worker reads (`Env` in `server/types.ts`); `.dev.vars.example` lists them fo
 | `FAL_REFERENCE_MODEL` | text | Optional: the model a video's scene pictures are drawn with from its reference sheets (its characters, and each place shown twice), so the scenes keep the same characters, colours, style and places. Default `fal-ai/nano-banana-2/edit`, or `google/nano-banana-2.1/edit` when `FAL_IMAGE_MODEL` is `google/nano-banana-2.1` (another Nano Banana edit endpoint works, e.g. `fal-ai/nano-banana-pro/edit`); `off` draws every picture from its text alone |
 | `FAL_IMAGE_QUALITY` | text | Optional GPT Image 2.5 quality: `low`, `medium`, `high` (default), `xhigh` or `max`. Each step up costs more per picture |
 | `ELEVENLABS_API_KEY` | secret | Narration (`eleven_v4` with timestamps), forced alignment, and Scribe v2 transcription of uploads (the files are uploaded to ElevenLabs from storage, so nothing there depends on ElevenLabs reaching `SITE_URL`). Admin → Voices lists the account's voices to import, so the key needs the Voices read permission (and Text to Speech, Speech to Text, Forced Alignment, and Sound Effects for Admin → Library's **Make a sound effect**). A key without Speech to Text shows as `SPEECH_PERMISSION` under Admin → Operations |
+| `VOICE_CLONES` | text | Optional: turns voice cloning on, and says how many cloned voices your ElevenLabs account has room for, for all customers together (for example `50`). Unset or `0`: off. Every clone takes one of the account's voice slots, and the ElevenLabs plan must include Instant Voice Cloning through the API. Apply `0016_voice_clones.sql` first. Plans say how many each customer may have (`voices` in `shared/plans.ts`). |
 | `SOUND_AUTO_DAILY` | text | Optional: how many sound effects may be made with ElevenLabs for videos a day, for everyone, when a scene needs a sound the library lacks (default 40, at most 6 a person; each is billed to the ElevenLabs account, about 20–40 credits a second, and waits for review in Admin → Library). `0` switches it off |
 | `CALL_BOOKING_URL` | text | Optional. The https scheduling page (Cal.com, Calendly…) where customers book a 15-minute call for 30 credits; the app fills in their name and email. Without it the offer isn't shown |
 | `HEYGEN_API_KEY` | secret | Optional. On-screen presenters: HeyGen API v3 lip-syncs an avatar to the video's ElevenLabs voice (Avatar IV for regular quality, Avatar V for high), and Admin → Presenters lists HeyGen's stock avatars and links the account's own. HeyGen reads the voice through a capability link on `SITE_URL`. Without it presenters aren't offered. The account's API credits pay for each presenter video (about $0.04 a second with Avatar IV, $0.12 with Avatar V). The same key makes HeyGen Video 1 clips when `FAL_CLIP_MODEL` or `FAL_CLIP_MODEL_ADMIN` names `heygen-video-1` (a paid API key; HeyGen's copy of each clip is deleted once ours is saved) |

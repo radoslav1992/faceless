@@ -16,7 +16,10 @@ export const CONTACT_DAYS = 365;
 export const UNCONFIRMED_DAYS = 30;
 /** A trial identifier nobody needed for this long (no new trial, no sign-in) is removed. */
 export const TRIAL_HISTORY_DAYS = 730;
-/** Terms acceptances and checkout consents of a deleted account, and withdrawals: the general 5-year limitation period. */
+/**
+ * Terms acceptances and checkout consents of a deleted account, the statements given for cloned voices that were
+ * deleted since, and withdrawals: the general 5-year limitation period.
+ */
 export const EVIDENCE_DAYS = 5 * 365;
 /** Processed Stripe event IDs (webhook de-duplication; no personal data). */
 export const BILLING_EVENT_DAYS = 90;
@@ -58,6 +61,8 @@ export async function applyRetention(e: Env, t = now()) {
     e.DB.prepare("DELETE FROM checkout_consents WHERE confirmed_at IS NULL AND completed_at IS NULL AND created_at<?").bind(t - ABANDONED_CONSENT_DAYS * DAY),
     e.DB.prepare("DELETE FROM withdrawals WHERE created_at<?").bind(t - EVIDENCE_DAYS * DAY),
   ]);
+  // The statements given for cloned voices that are gone (migrations/0016; nothing to do before it is applied).
+  await e.DB.prepare("DELETE FROM voice_consents WHERE ended_at<?").bind(t - EVIDENCE_DAYS * DAY).run().catch(() => {});
   await deleteUnconfirmed(e, t);
 }
 

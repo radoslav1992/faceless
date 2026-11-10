@@ -41,6 +41,9 @@ FAL_IMAGE_QUALITY=
 ELEVENLABS_API_KEY=
 # Optional JSON replacing the ElevenLabs voice behind a public voice, e.g. {"george":"<voice id>"} (server/voices.ts).
 ELEVENLABS_VOICES=
+# Optional: voice cloning. How many cloned voices the ElevenLabs account has room for, for all customers together
+# (each takes a voice slot there; the plan must include Instant Voice Cloning). Unset or 0: off (server/voice-clones.ts).
+VOICE_CLONES=
 # Optional: on-screen AI presenters (HeyGen API v3, Admin → Presenters); none are offered without it.
 HEYGEN_API_KEY=
 # Optional: a scheduling page (Cal.com, Calendly…) for calls with customers in exchange for credits (server/calls.ts).

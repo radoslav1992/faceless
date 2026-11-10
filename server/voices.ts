@@ -2,7 +2,7 @@ import { HTTPException } from "hono/http-exception";
 import type { Env } from "./types";
 import { MB, now } from "./types";
 import { providerFetch } from "./providers/http";
-import { FALLBACK_VOICE, VOICE_ID, type Voice } from "../shared/voices";
+import { FALLBACK_VOICE, VOICE_ID, isCloneId, type Voice } from "../shared/voices";
 
 // Narration voices (table `voices`, migrations/0003_voices.sql), chosen by administrators in Admin → Voices: imported
 // from the ElevenLabs account by voice ID with ElevenLabs' own name, description, labels and sample, then renamed,
@@ -32,17 +32,31 @@ export const voiceView = (r: VoiceRow): Voice => {
 export async function activeVoices(env: Env): Promise<Voice[]> {
   return (await env.DB.prepare("SELECT * FROM voices WHERE active=1 ORDER BY sort, name").all<VoiceRow>()).results.map(voiceView);
 }
-/** The ElevenLabs voice behind a public voice ID (offered or hidden: videos and series keep theirs), or null. */
-export async function providerVoiceId(env: Env, id: string): Promise<string | null> {
+/**
+ * A person's cloned voice (server/voice-clones.ts, table `voice_clones`): its ElevenLabs voice, for its owner alone.
+ * Null for anyone else, for a clone deleted since, and while migrations/0016 is not applied (no clones exist then).
+ */
+async function cloneProviderId(env: Env, id: string, userId?: string | null): Promise<string | null> {
+  if (!userId) return null;
+  const row = await env.DB.prepare("SELECT provider_id FROM voice_clones WHERE id=? AND user_id=?").bind(id, userId).first<{ provider_id: string }>().catch(() => null);
+  return row?.provider_id ?? null;
+}
+/**
+ * The ElevenLabs voice behind a public voice ID (offered or hidden: videos and series keep theirs), or null. `userId`
+ * is whose video it speaks in: a cloned voice speaks only for its owner.
+ */
+export async function providerVoiceId(env: Env, id: string, userId?: string | null): Promise<string | null> {
   if (!VOICE_ID.test(id)) return null;
+  if (isCloneId(id)) return cloneProviderId(env, id, userId);
   return (await env.DB.prepare("SELECT provider_id FROM voices WHERE id=?").bind(id).first<{ provider_id: string }>())?.provider_id ?? null;
 }
 /**
- * Whether a voice may be used: one offered to everyone, or `kept`, the voice a video or series already has (a voice
- * hidden since keeps working for them).
+ * Whether a voice may be used by `userId`: one offered to everyone; `kept`, the voice a video or series already has
+ * (a voice hidden since keeps working for them); or that person's own cloned voice.
  */
-export async function voiceUsable(env: Env, id: string, kept?: string | null) {
+export async function voiceUsable(env: Env, id: string, kept?: string | null, userId?: string | null) {
   if (!VOICE_ID.test(id)) return false;
+  if (isCloneId(id)) return !!(await cloneProviderId(env, id, userId));
   const r = await env.DB.prepare("SELECT active FROM voices WHERE id=?").bind(id).first<{ active: number }>();
   return !!r && (r.active === 1 || id === kept);
 }
@@ -103,7 +117,10 @@ export async function accountVoices(env: Env, search = "") {
   const q = new URLSearchParams({ page_size: "100", ...(search.trim() && { search: search.trim().slice(0, 100) }) });
   // https://elevenlabs.io/docs/api-reference/voices/search
   const found = await eleven(env, `/v2/voices?${q}`);
-  const voices = (Array.isArray(found?.voices) ? found.voices : []).map(elevenVoice).filter(Boolean) as ElevenVoice[];
+  // Customers' cloned voices live in the same ElevenLabs account: they are theirs alone, never listed for import.
+  const cloned = new Set((await env.DB.prepare("SELECT provider_id FROM voice_clones UNION SELECT provider_id FROM voice_removals").all<{ provider_id: string }>().catch(() => ({ results: [] })))
+    .results.map((r) => r.provider_id));
+  const voices = ((Array.isArray(found?.voices) ? found.voices : []).map(elevenVoice).filter(Boolean) as ElevenVoice[]).filter((v) => !cloned.has(v.providerId));
   const imported = new Map(voices.length
     ? (await env.DB.prepare(`SELECT id,provider_id FROM voices WHERE provider_id IN (${voices.map(() => "?").join(",")})`).bind(...voices.map((v) => v.providerId)).all<{ id: string; provider_id: string }>())
       .results.map((r) => [r.provider_id, r.id] as const)
@@ -115,7 +132,7 @@ async function freeId(env: Env, name: string) {
   const base = (name.normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "voice").padEnd(2, "0");
   for (let n = 1; n < 100; n++) {
     const id = n === 1 ? base : `${base}-${n}`;
-    if (!(await env.DB.prepare("SELECT 1 FROM voices WHERE id=?").bind(id).first())) return id;
+    if (!isCloneId(id) && !(await env.DB.prepare("SELECT 1 FROM voices WHERE id=?").bind(id).first())) return id;
   }
   throw new HTTPException(409, { message: "Choose another ID for this voice." });
 }
@@ -146,11 +163,14 @@ export async function importVoice(env: Env, providerId: string, id?: string): Pr
   if (!/^[A-Za-z0-9]{10,40}$/.test(providerId)) throw new HTTPException(400, { message: "Paste an ElevenLabs voice ID (letters and digits)." });
   if (await env.DB.prepare("SELECT 1 FROM voices WHERE provider_id=?").bind(providerId).first())
     throw new HTTPException(409, { message: "This ElevenLabs voice is already in the list." });
+  if (await env.DB.prepare("SELECT 1 FROM voice_clones WHERE provider_id=?").bind(providerId).first().catch(() => null))
+    throw new HTTPException(409, { message: "This is a customer's cloned voice: it is theirs alone and can't be offered to everyone." });
   // https://elevenlabs.io/docs/api-reference/voices/get
   const v = elevenVoice(await eleven(env, `/v1/voices/${providerId}`));
   if (!v) throw new HTTPException(502, { message: "ElevenLabs answered with something that isn't a voice." });
   if (id !== undefined) {
     if (!VOICE_ID.test(id)) throw new HTTPException(400, { message: "Use lowercase letters, digits and dashes for the ID (2 to 40 characters)." });
+    if (isCloneId(id)) throw new HTTPException(400, { message: "IDs like this one are kept for people's cloned voices. Choose another." });
     if (await env.DB.prepare("SELECT 1 FROM voices WHERE id=?").bind(id).first()) throw new HTTPException(409, { message: "Another voice already has this ID." });
   }
   const publicId = id ?? (await freeId(env, v.name));
