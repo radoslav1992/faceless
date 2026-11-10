@@ -9,10 +9,10 @@ import { adminClipModels, clipModelFor, falRequest, referenceModel, referencePro
 import { heygenClipRequest, heygenRetry } from "../server/providers/heygen";
 import { attention } from "../server/operations";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
-import { languages } from "../shared/series";
+import { languages, seriesSettingsSchema } from "../shared/series";
 import { estimatedSeconds, narrationCurrent, pendingMedia, pictureSheets, specCredits, specSchema, storySpec, type StorySpec } from "../shared/formats";
 import {
-  AUTO_TRANSITIONS, clipFor, estimatedTimings, mergeScenes, moveEdge, narrationKey, placeOf, splitScene, toggleKey, resolveTransition, scenePrompt, scenesFromCounts, splitScenes, storyScript, storySegments,
+  AUTO_TRANSITIONS, characterSheetKey, clipFor, estimatedTimings, mergeScenes, moveEdge, narrationKey, placeOf, splitScene, toggleKey, resolveTransition, scenePrompt, scenesFromCounts, splitScenes, storyScript, storySegments,
   storyStyleIds, storyStyles, storyTiming, textWords, timedScript, transitionInfo, transitionKinds, voicedScript, FPS, STORY_MAX_SCENES,
 } from "../shared/story";
 import { captionTimeline } from "../shared/caption-scene";
@@ -853,6 +853,75 @@ describe("narrated videos in the content run", () => {
     expect(Object.keys(returned["compose-payload"] as object).sort()).toEqual(["id", "urls"]);
     expect(Object.values(returned).some((v) => JSON.stringify(v ?? null).includes("[Script Info]"))).toBe(false);
     expect(Math.max(...Object.values(returned).map((v) => JSON.stringify(v ?? null).length))).toBeLessThan(200_000);
+  });
+
+  it("draws a series' main character once, and every later episode from that drawing", async () => {
+    const { env, sqlite, user, spec, run } = await setup();
+    const calls = providers();
+    const seriesId = crypto.randomUUID();
+    const save = (settings: Record<string, unknown>) => JSON.stringify(seriesSettingsSchema.parse({ subject: spec.subject, style: spec.style, ...settings }));
+    sqlite.prepare("INSERT INTO series(id,user_id,name,template,settings,status,created_at,updated_at) VALUES (?,?,'Reef tales','facts',?,'active',1,1)").run(seriesId, user.id, save({}));
+    const series = () => sqlite.prepare("SELECT character_asset,character_key FROM series WHERE id=?").get(seriesId) as any;
+    const view = async () => (await call(worker, env, "GET", `/api/series/${seriesId}`, undefined, user.cookie)).data.series;
+    const kept = () => sqlite.prepare("SELECT id,object_key FROM media_assets WHERE video_id IS NULL AND json_extract(meta,'$.series')=?").all(seriesId) as any[];
+    /** An episode of the series (optionally of another spec), made; the pictures fal was asked for. */
+    const episode = async (of: StorySpec = spec, make = true) => {
+      const created = await call(worker, env, "POST", "/api/videos", { spec: of, idempotencyKey: crypto.randomUUID() }, user.cookie);
+      expect(created.status).toBe(201);
+      sqlite.prepare("UPDATE videos SET series_id=? WHERE id=?").run(seriesId, created.data.id);
+      const before = calls.length;
+      if (make) await run();
+      const pictures = calls.slice(before).filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/") && !c.url.includes("/kling-video/"));
+      const inputs: string[] = JSON.parse((sqlite.prepare("SELECT provider FROM runs WHERE video_id=?").get(created.data.id) as any).provider).inputs ?? [];
+      return { id: created.data.id as string, inputs, sheets: pictures.filter((c) => String(c.body.prompt).startsWith("Character reference sheet")).length, drawn: pictures.filter((c) => c.body.image_urls) };
+    };
+    expect((await view()).characterAssetId).toBeNull();
+    // The first episode draws the octopus, and the series keeps a copy that belongs to no video.
+    const first = await episode();
+    expect(first.sheets).toBe(1);
+    const look = series();
+    expect(look.character_key).toBe(characterSheetKey(spec.subject!, spec.style));
+    expect(look.character_key).toBe(pictureSheets(spec)[0].key);
+    expect(kept().map((a) => a.id)).toEqual([look.character_asset]);
+    expect((await view()).characterAssetId).toBe(look.character_asset);
+    expect((await call(worker, env, "GET", `/api/media/${look.character_asset}/file`, undefined, user.cookie)).status).toBe(200);
+    // The second draws no sheet: its scenes are drawn from the series' drawing.
+    const second = await episode();
+    expect(second.sheets).toBe(0);
+    expect(second.drawn.length).toBeGreaterThan(0);
+    expect(second.inputs).toContain(kept()[0].object_key);
+    const link = new RegExp(`/api/render-inputs/[0-9a-f-]{36}/${second.inputs.indexOf(kept()[0].object_key)}\\?token=`);
+    expect(second.drawn.every((c) => link.test(c.body.image_urls[0]))).toBe(true);
+    expect(series()).toEqual(look);
+    // The first episode's own sheet stays its own: deleting that episode leaves the series' drawing.
+    expect((await call(worker, env, "DELETE", `/api/videos/${first.id}`, undefined, user.cookie)).status).toBe(200);
+    expect(kept().map((a) => a.id)).toEqual([look.character_asset]);
+    // An episode whose character was changed in the editor is not the series' character.
+    const squid = await episode({ ...spec, subject: "a tall green squid" });
+    expect(squid.sheets).toBe(1);
+    expect(series()).toEqual(look);
+    // A new art style is a new drawing: the page shows none until the next episode draws it, which replaces the old one.
+    sqlite.prepare("UPDATE series SET settings=? WHERE id=?").run(save({ style: "anime" }), seriesId);
+    expect((await view()).characterAssetId).toBeNull();
+    const restyled = await episode({ ...spec, style: "anime" });
+    expect(restyled.sheets).toBe(1);
+    expect(series().character_key).toBe(characterSheetKey(spec.subject!, "anime"));
+    expect(series().character_asset).not.toBe(look.character_asset);
+    expect(kept().map((a) => a.id)).toEqual([series().character_asset]);
+    // "New look" forgets the drawing (not while an episode is being made from it); the next episode draws another.
+    const waiting = await episode({ ...spec, style: "anime" }, false);
+    expect((await call(worker, env, "DELETE", `/api/series/${seriesId}/character`, undefined, user.cookie)).status).toBe(409);
+    await run();
+    expect(waiting.sheets).toBe(0);
+    const forgotten = await call(worker, env, "DELETE", `/api/series/${seriesId}/character`, undefined, user.cookie);
+    expect(forgotten).toMatchObject({ status: 200, data: { series: { characterAssetId: null } } });
+    expect(kept()).toEqual([]);
+    expect((await episode({ ...spec, style: "anime" })).sheets).toBe(1);
+    expect(kept()).toHaveLength(1);
+    // The drawing goes with its series; the episodes stay.
+    expect((await call(worker, env, "DELETE", `/api/series/${seriesId}`, undefined, user.cookie)).status).toBe(200);
+    expect(kept()).toEqual([]);
+    expect((await call(worker, env, "GET", `/api/videos/${second.id}`, undefined, user.cookie)).status).toBe(200);
   });
 
   it("draws every picture from its own text when FAL_REFERENCE_MODEL is off", async () => {

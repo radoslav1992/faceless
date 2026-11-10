@@ -7,6 +7,7 @@ import { withDefaults, siteUrl } from "./config";
 import { json } from "./db";
 import { safeEqual, token } from "./security";
 import { extOf, head, imageInfo, mediaKey, serveObject, storedDuration, storeStream } from "./storage";
+import { keepSeriesCharacter, seriesCharacter } from "./characters";
 import { fetchOutput } from "./providers/http";
 import { canFallBack, clipModelFor, falResult, falStatus, referenceModel, submitFal, type FalTicket, type Reference } from "./providers/fal";
 import { isAdmin } from "./auth";
@@ -532,7 +533,8 @@ async function makeClip(e: Env, step: WorkflowStep, run: RunInfo, name: string, 
 }
 /**
  * The video's reference sheets (shared/formats.ts pictureSheets), each made once and kept with the video (its
- * picture's meta.sheet): a sheet made for an earlier version is used again while its prompt is the same. None when
+ * picture's meta.sheet): a sheet made for an earlier version is used again while its prompt is the same. An episode
+ * of a series takes its main character's sheet from the series (server/characters.ts). None when
  * FAL_REFERENCE_MODEL is "off"; a sheet refused twice is left out (its scenes are drawn without it).
  */
 async function makeSheets(e: Env, step: WorkflowStep, run: RunInfo, spec: StorySpec, phase: Phase): Promise<Sheets> {
@@ -543,13 +545,17 @@ async function makeSheets(e: Env, step: WorkflowStep, run: RunInfo, spec: StoryS
       const known = await e.DB.prepare(
         "SELECT object_key FROM media_assets WHERE video_id=? AND user_id=? AND kind='ai_image' AND status='ready' AND json_extract(meta,'$.sheet')=? ORDER BY created_at DESC LIMIT 1",
       ).bind(run.video_id, run.user_id, sheet.key).first<{ object_key: string }>();
-      return known?.object_key ?? null;
+      if (known) return known.object_key;
+      // An episode's main character is drawn from its series' sheet, the same drawing for every episode.
+      return sheet.kind === "character" ? seriesCharacter(e, run.video_id, run.user_id, sheet.key) : null;
     }) ?? await (async () => {
       const m: PendingMedia = { kind: "image", prompt: sheet.prompt, path: [], key: "", sheet: sheet.key };
       const assetId = await drawPicture(e, step, run, `sheet-${n}-draw`, m, phase).catch((error) => {
         if ((error as Error)?.message !== "GENERATION_REJECTED") throw error;
         return null;
       });
+      // The first episode to draw its series' character: the sheet is kept for the episodes after it.
+      if (assetId && sheet.kind === "character") await step.do(`sheet-${n}-series`, safe, () => keepSeriesCharacter(e, run.video_id, run.user_id, sheet.key, assetId));
       return assetId && step.do(`sheet-${n}-file`, async () =>
         (await e.DB.prepare("SELECT object_key FROM media_assets WHERE id=?").bind(assetId).first<{ object_key: string }>())?.object_key ?? null);
     })();

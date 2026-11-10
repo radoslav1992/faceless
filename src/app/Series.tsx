@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, CalendarClock, Film, Pause, Play, Plus, Repeat, Settings2, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, CalendarClock, Film, Pause, Play, Plus, RefreshCw, Repeat, Settings2, Sparkles, Trash2, UserRound } from "lucide-react";
 import { del, errorText, fileUrl, newKey, patch, post, useApi, useAuth, usePoll, when, type Account, type Series, type Video } from "../lib";
 import { useToast } from "../ui";
 import { StyleArt } from "../art";
@@ -72,6 +72,7 @@ export function SeriesPage() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
+  const [newLook, setNewLook] = useState(false);
   // One idempotency key per "Make now" button, kept until its request succeeds: clicking again after a failure (a
   // timeout may still have made the episode) gets that episode back instead of writing and charging a second one.
   const keys = useRef(new Map<string, string>());
@@ -117,6 +118,20 @@ export function SeriesPage() {
         <button role="tab" aria-selected={tab === "episodes"} onClick={() => setTab("episodes")}><Film size={15} aria-hidden="true" /> Episodes</button>
         <button role="tab" aria-selected={tab === "settings"} onClick={() => { setTab("settings"); setSettings(s.settings); setName(s.name); }}><Settings2 size={15} aria-hidden="true" /> Settings</button>
       </div>
+      {tab === "episodes" && t?.kind !== "backdrop" && s.settings.subject.trim() && (
+        // The main character, drawn once: every episode's pictures are drawn from this one drawing.
+        <div className="slot character" style={{ marginBottom: 20 }}>
+          <div className="slot-cover">{s.characterAssetId ? <img src={fileUrl(s.characterAssetId)} alt={`The main character: ${s.settings.subject}`} /> : <UserRound size={18} aria-hidden="true" />}</div>
+          <div style={{ minWidth: 0 }}>
+            <strong>Main character</strong>
+            <small className="who">{s.settings.subject}</small>
+            <small>{s.characterAssetId
+              ? "Drawn once. Every episode is drawn from this picture, so the character looks the same each time."
+              : "Drawn with the next episode, then kept the same in every episode after it."}</small>
+          </div>
+          {s.characterAssetId && <button type="button" className="btn sm" onClick={() => setNewLook(true)}><RefreshCw size={14} aria-hidden="true" /> New look</button>}
+        </div>
+      )}
       {tab === "episodes" ? (
         <div className="grid two" style={{ alignItems: "start" }}>
           <section className="stack">
@@ -167,6 +182,15 @@ export function SeriesPage() {
             }, "Saved. New episodes use these settings.")}>{busy === "save" ? <span className="spinner" aria-hidden="true" /> : null} Save settings</button>
           </div>
         </div>
+      )}
+      {newLook && (
+        <ConfirmDialog title="Draw the character again?" confirmLabel="Draw a new look" danger={false} onClose={() => setNewLook(false)} onConfirm={async () => {
+          const r = await del<{ series: Series }>(`/series/${s.id}/character`);
+          setData({ ...data, series: r.series });
+          toast("The next episode draws a new look.", "good");
+        }}>
+          <p>The next episode draws the character again from your description, and every episode after it uses that drawing. Episodes already made keep the look they have.</p>
+        </ConfirmDialog>
       )}
       {confirm && (
         <ConfirmDialog title="Delete this series?" onClose={() => setConfirm(false)} onConfirm={async () => { await del(`/series/${s.id}`); navigate("/app/series"); }}>

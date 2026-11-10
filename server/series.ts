@@ -18,6 +18,7 @@ import { slots, validZone } from "../shared/schedule";
 import { planById } from "../shared/plans";
 import { PRODUCT } from "../shared/brand";
 import { KIDS_QUESTION } from "../shared/social";
+import { characterSheetKey } from "../shared/story";
 
 // Series: a faceless channel on autopilot. For every slot of its schedule an episode is written, made ahead of time
 // (MAKE_AHEAD) and, unless the series asks for review first, posted to its channels at that slot. The cron hands each
@@ -84,6 +85,9 @@ function seriesView(s: any, extra: Record<string, unknown> = {}) {
   return {
     id: s.id, name: s.name, template: s.template, status: s.status, settings, nextSlot: s.next_slot,
     blocked: s.blocked ? blockedText[s.blocked] || null : null, credits: episodeCredits(settings),
+    // The main character as drawn for every episode (server/characters.ts): only while it is the character and art
+    // style the series has now; after a change the next episode draws a new one.
+    characterAssetId: s.character_asset && settings.subject.trim() && s.character_key === characterSheetKey(settings.subject, settings.style) ? s.character_asset : null,
     createdAt: s.created_at, updatedAt: s.updated_at, ...extra,
   };
 }
@@ -204,6 +208,25 @@ series.delete("/:id", async (c) => {
     dbFailure(e);
   }
   return c.json({ ok: true });
+});
+/**
+ * A new look: forgets the main character's drawing, so the next episode draws the character again (from the same
+ * description) and that drawing is kept for the episodes after it. Episodes already made keep theirs.
+ */
+series.delete("/:id/character", async (c) => {
+  const user = c.get("user");
+  await rate(c, "series-character", 20, 3600, user.id);
+  const s = await ownedSeries(c.env, user.id, c.req.param("id"));
+  if (s.character_asset) {
+    // An episode being made right now is drawn from it.
+    const busy = await c.env.DB.prepare("SELECT 1 FROM runs r JOIN videos v ON v.id=r.video_id WHERE v.series_id=? AND r.status IN ('queued','running') LIMIT 1").bind(s.id).first();
+    if (busy) throw new HTTPException(409, { message: "An episode is being made with this look. Try again when it's ready." });
+    await c.env.DB.batch([
+      c.env.DB.prepare("UPDATE series SET character_asset=NULL,character_key=NULL WHERE id=?").bind(s.id),
+      c.env.DB.prepare("DELETE FROM media_assets WHERE id=? AND user_id=? AND video_id IS NULL").bind(s.character_asset, user.id),
+    ]);
+  }
+  return c.json({ series: seriesView(await ownedSeries(c.env, user.id, s.id)) });
 });
 /** "Make one now": an extra episode outside the schedule (or the episode of an upcoming slot not made yet). */
 series.post("/:id/episodes", async (c) => {
