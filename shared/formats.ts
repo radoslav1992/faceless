@@ -8,6 +8,7 @@ import { HIGHLIGHT_MAX_SECONDS, HIGHLIGHT_MIN_SECONDS, layoutSchema } from "./hi
 import { LONG_VIDEO_SECONDS } from "./speech";
 import { trackSchema } from "./track";
 import { SOUND_VOLUME } from "./sounds";
+import { filmClipPrompt, filmStill } from "./film";
 import {
   characterSheetPrompt, clipPrompt, fingerprint, narrationKey, narrationSchema, placeKey, placeOf, placeSchema, placeSheetPrompt, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_PLACES, STORY_MAX_SCENES, voicedScript, type StoryStyle,
 } from "./story";
@@ -106,6 +107,8 @@ export const storySpec = z.object({
   title: z.string().trim().max(100).default(""),
   /** Short topic label, e.g. "The octopus heart". */
   topic: z.string().trim().max(60).default(""),
+  /** A cinematic video (shared/film.ts; administrators only, server/videos.ts): film framing and sound, a film look. */
+  film: z.literal(true).optional(),
 });
 export type StorySpec = z.infer<typeof storySpec>;
 
@@ -199,6 +202,8 @@ export type PendingMedia = {
   clipModel?: ClipModel;
   /** A reference sheet (pictureSheets) instead of a scene's picture: its key, kept with the picture. */
   sheet?: string;
+  /** A cinematic video's clip: made with its own ambient sound where the model can (shared/film.ts). */
+  audio?: boolean;
 };
 /** A reference sheet a story's pictures are drawn from (shared/story.ts); `key` names what it is drawn from. */
 export type PictureSheet = { kind: "character" | "place"; prompt: string; key: string; place?: string };
@@ -224,11 +229,14 @@ export function pendingMedia(spec: Spec): PendingMedia[] {
   // A scene the presenter speaks on shows no picture.
   spec.scenes.forEach((s, i) => {
     if ((s.source === "image" || s.source === "clip") && !s.imageId && !showsPresenter(spec, i))
-      out.push({ kind: "image", prompt: scenePrompt(s.description, spec.subject, spec.style, spec.look, placeOf(spec.places, s.place)), path: ["scenes", i], key: "imageId" });
+      out.push({ kind: "image", prompt: scenePrompt(s.description, spec.subject, spec.style, spec.look, placeOf(spec.places, s.place)) + (spec.film ? filmStill(i) : ""), path: ["scenes", i], key: "imageId" });
   });
   spec.scenes.forEach((s, i) => {
     if (s.source === "clip" && !s.clipId && !showsPresenter(spec, i))
-      out.push({ kind: "clip", prompt: clipPrompt(s.description), path: ["scenes", i], key: "clipId", from: "imageId", seconds: s.clipSeconds, quality: s.clipQuality, clipModel: s.clipModel });
+      out.push({
+        kind: "clip", prompt: spec.film ? filmClipPrompt(s.description, i) : clipPrompt(s.description), path: ["scenes", i], key: "clipId", from: "imageId",
+        seconds: s.clipSeconds, quality: s.clipQuality, clipModel: s.clipModel, ...(spec.film && { audio: true }),
+      });
   });
   return out;
 }

@@ -1,18 +1,20 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { AlertTriangle, Check, Copy, KeyRound, Plug, Plus, Trash2, UserRound } from "lucide-react";
+import { AlertTriangle, Check, Copy, KeyRound, Mic, Plug, Plus, Trash2, UserRound } from "lucide-react";
 import { Spinner, useToast } from "../ui";
-import { del, errorText, patch, post, relative, useApi, useAuth } from "../lib";
+import { del, errorText, loadOwnVoices, patch, post, relative, useApi, useAuth, useOwnVoices } from "../lib";
 import { WITHDRAWAL_DAYS } from "../../shared/withdrawal";
-import { ConfirmDialog, useSignedInUser, useStableCallback } from "./pickers";
+import { ConfirmDialog, VoiceSample, usePreviewAudio, useSignedInUser, useStableCallback } from "./pickers";
+import { CloneVoiceDialog } from "./voice-clone";
+import type { Voice } from "../../shared/voices";
 import "./pages.css";
 
-/** Settings: the account (name, password, deletion) and API keys for the REST API and MCP. */
+/** Settings: the account (name, password, deletion), cloned voices and API keys for the REST API and MCP. */
 export function SettingsPage() {
   const { hash } = useLocation();
-  // The MCP page links to #api-keys: bring that section into view.
+  // The MCP page links to #api-keys, and the voice picker to #voices: bring that section into view.
   useEffect(() => {
-    if (hash === "#api-keys") document.getElementById("api-keys")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (hash === "#api-keys" || hash === "#voices") document.getElementById(hash.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [hash]);
   return (
     <main className="page">
@@ -25,6 +27,7 @@ export function SettingsPage() {
       <div className="settings">
         <AccountSection />
         <PasswordSection />
+        <VoicesSection />
         <ApiKeysSection />
         <DangerSection />
       </div>
@@ -131,6 +134,58 @@ function PasswordSection() {
 type ApiKey = { id: string; name: string; prefix: string; lastUsedAt: number | null; createdAt: number };
 
 /** Personal API keys: shown once when made, then only their first characters. */
+/** The person's cloned voices (where the operator offers voice cloning, or while they still have one). */
+function VoicesSection() {
+  const toast = useToast();
+  const own = useOwnVoices();
+  const audio = usePreviewAudio();
+  const [adding, setAdding] = useState(false);
+  const [deleting, setDeleting] = useState<Voice | null>(null);
+  const shown = !!own && (own.enabled || own.voices.length > 0);
+  // The voice picker links to #voices; the section appears only once the voices are loaded, after the page's own scroll.
+  useEffect(() => {
+    if (shown && window.location.hash === "#voices") document.getElementById("voices")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [shown]);
+  if (!own || !shown) return null;
+  return (
+    <section className="card" id="voices" aria-labelledby="voices-title">
+      <div className="card-head">
+        <div>
+          <h2 id="voices-title"><Mic size={18} aria-hidden="true" style={{ verticalAlign: -2, marginRight: 6 }} />Your voices</h2>
+          <p>Narrate your videos in your own voice, cloned from a short recording. Only you can use it.</p>
+        </div>
+      </div>
+      {own.voices.length ? (
+        <ul className="pick-rows list-plain">
+          {own.voices.map((v) => (
+            <li key={v.id} className="pick-row">
+              <VoiceSample voice={v} audio={audio} />
+              <span className="grow" style={{ minWidth: 0 }}>
+                <strong style={{ display: "block" }}>{v.name}</strong>
+                <span className="small muted">{v.preview ? "Play its sample, or choose it wherever you pick a voice." : "Choose it wherever you pick a voice."}</span>
+              </span>
+              <button type="button" className="btn icon ghost danger" onClick={() => { audio.stop(); setDeleting(v); }} aria-label={`Delete ${v.name}`} title="Delete"><Trash2 size={16} /></button>
+            </li>
+          ))}
+        </ul>
+      ) : <p className="muted small">No cloned voice yet.</p>}
+      {own.enabled && (
+        <div className="row wrap" style={{ gap: 10, marginTop: 16 }}>
+          <button type="button" className="btn primary" onClick={() => { audio.stop(); setAdding(true); }}><Plus size={16} aria-hidden="true" />Clone your voice</button>
+          {own.limit > 0 && <span className="small muted">{own.voices.length} of {own.limit} on your plan</span>}
+        </div>
+      )}
+      {adding && <CloneVoiceDialog onClose={() => setAdding(false)} />}
+      {deleting && (
+        <ConfirmDialog title={`Delete ${deleting.name}?`} confirmLabel="Delete voice" onClose={() => setDeleting(null)}
+          onConfirm={async () => { await del(`/voices/${deleting.id}`); await loadOwnVoices(true); toast("Voice deleted.", "good"); }}>
+          <p>The voice is deleted for good. Videos already narrated in it keep their narration; to change their words later you'll choose another voice.</p>
+        </ConfirmDialog>
+      )}
+    </section>
+  );
+}
+
 function ApiKeysSection() {
   const user = useSignedInUser();
   const toast = useToast();

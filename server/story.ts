@@ -12,7 +12,9 @@ import { ProviderError } from "./providers/http";
 import { narrationCurrent, storySpec, type StorySpec } from "../shared/formats";
 import { voiceIdSchema } from "../shared/voices";
 import { offeredVoice, voiceUsable } from "./voices";
-import { SPEECH_CHARS_PER_SECOND } from "../shared/credits";
+import { SPEECH_CHARS_PER_SECOND, clipModels, clipQualities } from "../shared/credits";
+import { filmSpec } from "../shared/film";
+import { isAdmin } from "./auth";
 import { languageCodes, languageName, type LanguageCode } from "../shared/series";
 import { templateIds, templateOf, type TemplateId, type VideoKind } from "../shared/templates";
 import { captionStyles, type CaptionWord } from "../shared/captions";
@@ -409,17 +411,21 @@ const draftSchema = z.object({
   animate: z.number().int().min(0).max(3).default(0),
   /** Sound effects from the library (shared/sounds.ts): a whoosh on scene changes and sounds the writer picks. */
   sounds: z.boolean().default(true),
+  /** A cinematic video (shared/film.ts; from administrators only): its clips' quality and, if they chose one, model. */
+  film: z.object({ quality: z.enum(clipQualities).default("regular"), model: z.enum(clipModels).optional() }).optional(),
 });
 export type DraftRequest = z.input<typeof draftSchema>;
 /**
  * A draft video from a template: written by the model (or, for text to video, split from the owner's script with
  * its pictures described), ready for the editor. Free: nothing is made or charged until it is saved.
  */
-export async function draftVideo(env: Env, userId: string, input: DraftRequest, recent: string[] = []): Promise<StorySpec> {
+export async function draftVideo(env: Env, userId: string, input: DraftRequest, recent: string[] = [], admin = false): Promise<StorySpec> {
   const d = draftSchema.parse(input);
+  // Cinematic videos are a test for administrators (`admin`): anyone else's request for one is refused, not ignored.
+  if (d.film && !admin) throw new HTTPException(403, { message: "Cinematic videos are still being tested and aren't available yet." });
   const t = templateOf(d.template);
   // A voice asked for must be offered; the template's own is replaced by the default voice when it was hidden.
-  if (d.voiceId && !(await voiceUsable(env, d.voiceId))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
+  if (d.voiceId && !(await voiceUsable(env, d.voiceId, null, userId))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
   const style = d.style || t.style, voiceId = d.voiceId || (await offeredVoice(env, t.voice));
   const catalog = d.musicTrackId ? await chosenTrack(env, d.musicTrackId) : await musicCatalog(env, d.music === "auto" ? t.music : d.music);
   const backdropId = t.kind === "backdrop" ? await backdropFor(env, null) : null;
@@ -456,7 +462,7 @@ export async function draftVideo(env: Env, userId: string, input: DraftRequest, 
     backdropId, sounds,
   });
   if (!spec) throw new HTTPException(502, { message: "The video we wrote didn't come out right. Please try again." });
-  return spec;
+  return d.film ? filmSpec(spec, d.film) : spec;
 }
 /** Create: a draft from a template (free; the text model only, 40 an hour and 200 a day). */
 story.post("/draft", async (c) => {
@@ -464,7 +470,7 @@ story.post("/draft", async (c) => {
   await rate(c, "story-draft", 40, 3600, user.id);
   if ((await hit(c.env, "story-draft-day", DAY, user.id)) > 200) throw new HTTPException(429, { message: "That's a lot of drafts for one day. Try again tomorrow." });
   const recent = (await c.env.DB.prepare("SELECT title FROM videos WHERE user_id=? AND title<>'' ORDER BY created_at DESC LIMIT 20").bind(user.id).all<{ title: string }>()).results.map((r) => r.title);
-  return c.json({ spec: await draftVideo(c.env, user.id, await c.req.json(), recent) });
+  return c.json({ spec: await draftVideo(c.env, user.id, await c.req.json(), recent, isAdmin(c.env, user)) });
 });
 
 export const alignedScript = alignedScriptText;

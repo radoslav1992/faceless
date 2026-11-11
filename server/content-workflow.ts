@@ -203,7 +203,7 @@ async function generateMedia(
     // HeyGen Video makes a clip from the scene's picture (the Idempotency-Key finds a resent request's job).
     const t: MediaTicket = clipModel === "heygen-video-1" && image
       ? { heygen: await submitHeyGenClip(e, `${run.id}-${name}`, heygenClipRequest(m.prompt, image, await clipLength(e, run, m), m.quality)) }
-      : await submitFal(e, kind, m.prompt, { image, seconds: m.seconds, clipQuality: m.quality, clipModel, references: refs.length ? refs : undefined, fallback });
+      : await submitFal(e, kind, m.prompt, { image, seconds: m.seconds, clipQuality: m.quality, clipModel, references: refs.length ? refs : undefined, fallback, audio: m.audio });
     await patchState(e, run.id, (s) => { (s.tickets ||= {})[name] = t; });
     return t;
   });
@@ -610,7 +610,7 @@ async function makeNarration(e: Env, step: WorkflowStep, run: RunInfo, spec: Sto
     if (s.claims?.voice) throw new Error("VOICE_FAILED");
     await patchState(e, run.id, (s) => { (s.claims ||= {}).voice = true; });
     await phase("voice");
-    const result = await speak(e, voiceId, voiced, spec.language || "en", "original");
+    const result = await speak(e, voiceId, voiced, spec.language || "en", "original", undefined, run.user_id);
     const assetId = uid(), key = mediaKey(run.user_id, assetId, "wav");
     await e.MEDIA.put(key, result.audio, { httpMetadata: { contentType: "audio/wav" } });
     await recordFile(e, key, e.DB.prepare(

@@ -50,6 +50,21 @@ under `/api/admin` answers 404 to anyone else.
   sample** (the waveform button) has ElevenLabs speak a text of yours, or the standard one ("Hi, I'm George…", about
   ten seconds of a story), with the same model as the videos, in place of the sample the voice had; **Make the missing
   samples** does it for every voice without one. ElevenLabs bills a character per character (about 160 a sample).
+  Customers' **cloned voices** (with `VOICE_CLONES` set) are not in this list and can't be imported: they are theirs
+  alone, and show in your ElevenLabs account named `hookstreak-shorts <first 8 of the user ID> <their name for it>`.
+  Never delete one there by hand while its owner still has it (their videos stop being narrated); one whose owner
+  deleted it or their account is deleted there automatically, at once or within the hour. The log line `Cloned voice
+  could not be deleted for a week; delete it in ElevenLabs` names a voice to remove by hand (then delete its row from
+  `voice_removals`); `Voice cloning is full` means `VOICE_CLONES` or the account's voice slots are used up.
+  The **ElevenLabs account** cards at the top of this tab show the plan, the share of the period's credits used (red
+  from 80%: narration fails with `VOICE_UNAVAILABLE` once they run out, so top up or upgrade before then), the voice
+  slots, and how many more voices customers can clone. They need the API key's **User: read** permission.
+- **Cinematic videos (a test)**: in Create, administrators see a **Cinematic** switch (not on Storytime): every scene
+  becomes an AI clip with a camera move, scenes cut hard, the clips' ambient sound plays under the voice and the video
+  gets a film look. Choose the clips' quality and model there; to compare models, list them in
+  `FAL_CLIP_MODEL_ADMIN` (for example `minimax-h3,flux-3-max`: both can make sound, Kling's clips are silent). It
+  costs credits like any video with every scene animated (a 60-second one about 15 to 35), and fal bills each clip.
+  Nobody else can draft or make one.
 - **Presenters**: the AI presenters people can put on camera (with `HEYGEN_API_KEY` set). **Add from HeyGen** pages
   through HeyGen's stock avatars (filters: gender, HQ only, name or tag among the ones loaded): pick one, confirm your
   HeyGen plan lets you offer it, add it. **Add by ID** takes a look ID: of a HeyGen stock avatar you found in HeyGen,

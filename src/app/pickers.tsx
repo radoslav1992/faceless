@@ -51,8 +51,9 @@ import {
 import { Link } from "react-router-dom";
 import { AlertCircle, Check, CheckCircle2, ChevronLeft, ChevronRight, Mic, Music, Pause, Play, Search, Upload, UploadCloud } from "lucide-react";
 import { Modal, Spinner, useToast } from "../ui";
-import { errorText, newKey, seconds, uploadFile, useApi, useAuth, useVoices, bytes as formatBytes, type Asset, type LibraryItem, type LibraryKind, type User } from "../lib";
+import { errorText, newKey, seconds, uploadFile, useApi, useAuth, useOwnVoices, useVoices, bytes as formatBytes, type Asset, type LibraryItem, type LibraryKind, type User } from "../lib";
 import type { Voice } from "../../shared/voices";
+import { CloneVoiceDialog } from "./voice-clone";
 import { musicMoods, type MusicMood } from "../../shared/series";
 import { planById } from "../../shared/plans";
 import "./pages.css";
@@ -265,7 +266,7 @@ export function PlayButton({ playing, onClick, label }: { playing: boolean; onCl
 /** "Warm storyteller · British" */
 const voiceAbout = (v: Voice) => [v.description, v.accent].filter(Boolean).join(" · ");
 /** A voice's sample to play, or a quiet placeholder for one without. */
-function VoiceSample({ voice, audio }: { voice: Voice | undefined; audio: ReturnType<typeof usePreviewAudio> }) {
+export function VoiceSample({ voice, audio }: { voice: Voice | undefined; audio: ReturnType<typeof usePreviewAudio> }) {
   if (!voice?.preview) return <span className="play-btn none" title="No sample yet" aria-hidden="true"><Mic size={18} /></span>;
   return <PlayButton playing={audio.playing === voice.id} onClick={() => audio.toggle(voice.id, voice.preview!)} label={`a sample of ${voice.name}`} />;
 }
@@ -299,6 +300,8 @@ const genderNames = { female: "Female", male: "Male", neutral: "Neutral" } as co
 /** Every voice offered (Admin → Voices) with its sample to play, filtered by gender and accent. */
 export function VoicePicker({ value, onPick, onClose }: { value: string; onPick: (id: string) => void; onClose: () => void }) {
   const { voices, loading } = useVoices();
+  const own = useOwnVoices();
+  const [cloning, setCloning] = useState(false);
   const audio = usePreviewAudio();
   const [chosen, setChosen] = useState(value);
   const [gender, setGender] = useState<Voice["gender"]>("");
@@ -307,7 +310,8 @@ export function VoicePicker({ value, onPick, onClose }: { value: string; onPick:
   const pick = (id: string) => { audio.stop(); onPick(id); };
   const genders = (["female", "male", "neutral"] as const).filter((g) => voices.some((v) => v.gender === g));
   const accents = [...new Set(voices.map((v) => v.accent).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-  const shown = voices.filter((v) => (!gender || v.gender === gender) && (!accent || v.accent === accent));
+  // The person's own voices stay whatever the filters say (they have no gender or accent to match).
+  const shown = voices.filter((v) => v.own || ((!gender || v.gender === gender) && (!accent || v.accent === accent)));
   const selected = voices.find((v) => v.id === chosen);
   return (
     <Modal title="Choose a voice" onClose={close} wide footer={
@@ -319,6 +323,17 @@ export function VoicePicker({ value, onPick, onClose }: { value: string; onPick:
       </>
     }>
       <p className="small muted" style={{ margin: "0 0 12px" }}>Play a sample to hear a voice. The whole video is narrated in the voice you choose.</p>
+      {own?.enabled && (
+        <div className="pick-row own-voice" style={{ marginBottom: 12 }}>
+          <span className="play-btn none" aria-hidden="true"><Mic size={18} /></span>
+          <span className="grow" style={{ minWidth: 0 }}>
+            <span className="name" style={{ display: "block" }}>Your own voice</span>
+            <span className="small muted">Clone it from a short recording, and narrate every video in it.</span>
+          </span>
+          <button type="button" className="btn sm" onClick={() => { audio.stop(); setCloning(true); }}>Clone your voice</button>
+        </div>
+      )}
+      {cloning && <CloneVoiceDialog onClose={() => setCloning(false)} onDone={(voice) => setChosen(voice.id)} />}
       {(genders.length > 1 || accents.length > 1) && (
         <div className="tag-filter">
           {genders.length > 1 && (
@@ -348,7 +363,7 @@ export function VoicePicker({ value, onPick, onClose }: { value: string; onPick:
                 <span className="grow" style={{ minWidth: 0 }}>
                   <span className="name" style={{ display: "block" }}>{v.name}</span>
                   {v.description && <span className="small pick-description">{v.description}</span>}
-                  <span className="small muted">{[v.gender ? genderNames[v.gender] : "", v.accent, v.age].filter(Boolean).join(" · ") || (v.preview ? "" : "No sample yet")}</span>
+                  <span className="small muted">{v.own ? "Only you can use it" : [v.gender ? genderNames[v.gender] : "", v.accent, v.age].filter(Boolean).join(" · ") || (v.preview ? "" : "No sample yet")}</span>
                 </span>
                 {v.id === chosen && <Check size={18} aria-hidden="true" />}
               </button>

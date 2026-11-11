@@ -483,6 +483,18 @@ def transition_plan(t):
     if not isinstance(t, dict) or t.get('kind') not in TRANSITIONS: raise ValueError('Invalid transition')
     return {'kind': t['kind'], 'frames': int(round(number(t.get('duration'), 2 / FPS, MAX_TRANSITION) * FPS))}
 
+# Looks laid over a whole video (the payload's `look`). "film", for cinematic videos (shared/film.ts): a little more
+# contrast, less colour and a warm cast, darker corners, and grain that changes every frame; together they give
+# pictures and clips from different models one image, and take the edge off their sharpness. Every filter works on
+# the YUV picture as it is (about half a second per second of video on one thread at 1080 x 1920; colorbalance and
+# curves, which go through RGB, cost two to four times that). Grain below 8 does not survive the encoder.
+LOOKS = {
+    'film': ("eq=contrast=1.06,"
+             "lutyuv=u='(val-128)*0.9+126':v='(val-128)*0.9+130',"
+             "vignette=angle=PI/5,"
+             "noise=alls=8:allf=t"),
+}
+
 def compose_plan(payload, origin):
     """Validates a compose payload completely, before anything is downloaded."""
     width, height = frame_size(payload)
@@ -519,9 +531,11 @@ def compose_plan(payload, origin):
     cover = payload.get('coverAt')
     used = ({s['input'] for s in segments if 'input' in s} | {x['input'] for x in (voice, music, overlay) if x}
             | {s['input'] for s in sounds})
+    look = payload.get('look')
+    if look is not None and look not in LOOKS: raise ValueError('Invalid look')
     return {'width': width, 'height': height, 'urls': urls, 'used': used, 'segments': segments, 'frames': frames,
             'voice': voice, 'music': music, 'overlay': overlay, 'sounds': sounds, 'ass': text(payload['ass']),
-            'synthetic': synthetic(payload), 'cover': None if cover is None else number(cover, 0, 3600)}
+            'synthetic': synthetic(payload), 'cover': None if cover is None else number(cover, 0, 3600), 'look': look}
 
 def sounds_plan(sounds, count, total_frames):
     """Sound effects on the output clock, in samples: each plays its file from the beginning for `duration` seconds
@@ -728,6 +742,10 @@ def compose(job, payload, origin):
                          f'atrim=end_sample={n * SAMPLES_PER_FRAME},volume={overlay["audio"]:.4f},'
                          f'adelay=delays={start * SAMPLES_PER_FRAME}S:all=1,apad,atrim=end_sample={total_samples}[ovsound]')
             sounds.append('[ovsound]')
+    if plan['look']:
+        # One look over the whole picture, under the captions (which stay clean and sharp).
+        graph.append(f'{video}{LOOKS[plan["look"]]},format=yuv420p[vlook]')
+        video = '[vlook]'
     ass = write_ass(job, 'captions.ass', plan['ass'])
     if ass:
         # Captions and on-screen text above everything else.

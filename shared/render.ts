@@ -88,6 +88,8 @@ export type ComposePayload = {
   coverAt?: number | null;
   /** Mark the files as AI-generated (MP4 metadata + XMP). */
   synthetic: boolean;
+  /** One look over the whole picture, under the captions: "film" is a grade, a vignette and grain (shared/film.ts). */
+  look?: "film" | null;
 };
 export type StillsPayload = {
   id: string;

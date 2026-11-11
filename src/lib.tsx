@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Interval, PlanId } from "../shared/plans";
 import type { Spec } from "../shared/formats";
 import type { SpeechStatus } from "../shared/speech";
@@ -101,10 +101,40 @@ export function useVoices() {
     voicesRequest.then((v) => { if (live) setVoices(v); }).catch(() => { if (live) setVoices([]); });
     return () => { live = false; };
   }, []);
-  const list = voices || [];
-  return { voices: list, loading: voices === null, byId: (id: string) => list.find((v) => v.id === id), fallback: list.find((v) => v.default)?.id ?? list[0]?.id ?? null };
+  // The person's own cloned voices come first; the default is always one of the voices everyone has.
+  const { user } = useAuth();
+  const mine = useOwnVoices(), own = mine?.voices ?? [], offered = voices || [], list = [...own, ...offered];
+  // Signed in, the list is whole only with the person's own voices: a video narrated in one must find it.
+  return { voices: list, loading: voices === null || (!!user && !mine), byId: (id: string) => list.find((v) => v.id === id), fallback: offered.find((v) => v.default)?.id ?? offered[0]?.id ?? null };
 }
 export const reloadVoices = () => { voicesRequest = null; };
+
+/** The signed-in person's cloned voices: whether cloning is on, how many their plan has room for, and the voices. */
+export type OwnVoices = { enabled: boolean; limit: number; voices: Voice[]; /** The plans cloning is part of: "Pro and Studio". */ plans?: string };
+let ownVoices: OwnVoices | null = null, ownVoicesOf: string | null = null, ownVoicesRequest: Promise<void> | null = null;
+const ownVoicesListeners = new Set<() => void>();
+/** Loads the person's cloned voices (again with `force`, after one was added or deleted); everything showing them follows. */
+export function loadOwnVoices(force = false) {
+  if (force) ownVoicesRequest = null;
+  ownVoicesRequest ??= api<OwnVoices>("/voices")
+    .then((r) => { ownVoices = r; })
+    .catch(() => { ownVoices ??= { enabled: false, limit: 0, voices: [] }; })
+    .then(() => ownVoicesListeners.forEach((listener) => listener()));
+  return ownVoicesRequest;
+}
+/** Null on the public pages and until loaded. */
+export function useOwnVoices() {
+  const { user } = useAuth();
+  const id = user?.id ?? null;
+  const state = useSyncExternalStore((listener) => { ownVoicesListeners.add(listener); return () => { ownVoicesListeners.delete(listener); }; }, () => ownVoices, () => null);
+  useEffect(() => {
+    if (!id) return;
+    // Another account signed in on this page: its own voices, not the last one's.
+    if (ownVoicesOf !== id) { ownVoicesOf = id; ownVoices = null; void loadOwnVoices(true); }
+    else void loadOwnVoices();
+  }, [id]);
+  return id && ownVoicesOf === id ? state : null;
+}
 let avatarsRequest: Promise<Avatar[]> | null = null;
 /** The presenters' avatars offered (Admin → Presenters; none while presenters aren't set up), loaded once per page. */
 export function useAvatars() {

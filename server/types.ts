@@ -57,6 +57,8 @@ export interface Env {
   /** Later pictures of a video drawn from its first as a reference (server/providers/fal.ts); "off" to stop it. */
   FAL_REFERENCE_MODEL?: string;
   ELEVENLABS_API_KEY?: string;
+  /** Voice cloning: how many cloned voices the ElevenLabs account has room for, for all customers together (unset or 0: off). */
+  VOICE_CLONES?: string;
   /** Sound effects made with videos for everyone per day (server/sounds.ts; default 40, 0 switches it off). */
   SOUND_AUTO_DAILY?: string;
   /** YouTube uploads (videos.insert calls) a day Google allows the project, 100 by default: the quota warning follows it. */

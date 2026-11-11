@@ -235,6 +235,34 @@ class RendererTest(unittest.TestCase):
         return job
 
 class ComposeTest(RendererTest):
+    def test_film_look_grades_the_picture_and_leaves_the_captions_clean(self):
+        # A cinematic video (shared/film.ts): one look over the picture, under the captions; a clip's own sound plays.
+        def render(look):
+            job = run({'operation': 'compose', 'urls': [FIXTURES.url('clip.mp4')], 'width': 720, 'height': 1280, 'synthetic': True,
+                       'segments': [{'input': 0, 'kind': 'video', 'duration': 1.5, 'audio': 0.22}],
+                       'ass': ass(720, 1280, (360, 300, 'Hi')), **({'look': look} if look else {})})
+            self.assertEqual(job['status'], 'completed', job)
+            self.assertEqual(job['duration'], 1.5)
+            return job['outputs'][0]
+        plain, film = render(None), render('film')
+        # The red clip, graded: less saturated (its green and blue lift), and darker in the corners than in the middle.
+        middle, corner = pixel(film, 0.7, 360, 900), pixel(film, 0.7, 12, 1268)
+        self.assertTrue(near(pixel(plain, 0.7, 360, 900), (255, 0, 0)))
+        self.assertFalse(near(middle, (255, 0, 0), 8), middle)
+        self.assertGreater(middle[0], 180, middle)
+        self.assertLess(sum(corner), sum(pixel(film, 0.7, 360, 640)), (corner, 'vignette'))
+        # Grain: the same spot differs from frame to frame, which it never does in the plain render.
+        spots = lambda path: {pixel(path, t, 200, 700) for t in (0.2, 0.5, 0.8, 1.1)}
+        self.assertEqual(len(spots(plain)), 1)
+        self.assertGreater(len(spots(film)), 1)
+        # The caption's box is drawn after the look: as red as in the plain render.
+        for path in (plain, film): self.assertGreater(share(path, 0.7, (310, 260, 100, 80), (255, 0, 0)), 0.3)
+        self.assertGreater(loudness(film, 0, 1.5), -60)
+        # Only the looks the renderer knows.
+        bad = run({'operation': 'compose', 'urls': [FIXTURES.url('clip.mp4')], 'width': 720, 'height': 1280, 'synthetic': False,
+                   'segments': [{'input': 0, 'kind': 'video', 'duration': 1}], 'ass': ass(720, 1280), 'look': 'sepia'})
+        self.assertEqual(bad['status'], 'failed', bad)
+
     def test_slideshow_with_video_voice_ducked_music_captions_and_cover(self):
         urls = [FIXTURES.url(n) for n in ('wide.png', 'clip.mp4', 'mute.mp4', 'voice.wav', 'music.wav')]
         job = run({'operation': 'compose', 'urls': urls, 'width': 720, 'height': 1280, 'synthetic': True, 'coverAt': 99,

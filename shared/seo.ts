@@ -4,6 +4,8 @@ import { tools } from "./templates";
 // Titles and descriptions per public page; the Worker puts them into the HTML for crawlers and link previews, and the
 // app updates them on navigation.
 const UPDATED = "2026-11-09";
+/** The terms and the privacy policy: the terms version recorded with every sign-up (TERMS_VERSION in server/auth.ts). */
+const LEGAL_UPDATED = "2026-11-10";
 const toolPages = Object.fromEntries(tools.map((t) => [`/tools/${t.slug}`, { title: `${t.title} — ${PRODUCT.name}`, description: t.description, updated: UPDATED }]));
 export const publicPages: Record<string, { title: string; description: string; updated: string }> = {
   "/": { title: `${PRODUCT.name} — ${PRODUCT.tagline}`, description: PRODUCT.pitch, updated: UPDATED },
@@ -15,8 +17,8 @@ export const publicPages: Record<string, { title: string; description: string; u
   "/business": { title: `For business — ${PRODUCT.name}`, description: "Run many faceless channels with review, API access and one bill.", updated: UPDATED },
   "/about": { title: `About — ${PRODUCT.name}`, description: `Why ${PRODUCT.name} exists and how it makes videos.`, updated: UPDATED },
   "/faq": { title: `FAQ — ${PRODUCT.name}`, description: `How ${PRODUCT.name} makes faceless videos on your schedule.`, updated: UPDATED },
-  "/terms": { title: `Terms of Service — ${PRODUCT.name}`, description: `The terms for using ${PRODUCT.name}.`, updated: UPDATED },
-  "/privacy": { title: `Privacy Policy — ${PRODUCT.name}`, description: `How ${PRODUCT.name} handles your data.`, updated: UPDATED },
+  "/terms": { title: `Terms of Service — ${PRODUCT.name}`, description: `The terms for using ${PRODUCT.name}.`, updated: LEGAL_UPDATED },
+  "/privacy": { title: `Privacy Policy — ${PRODUCT.name}`, description: `How ${PRODUCT.name} handles your data.`, updated: LEGAL_UPDATED },
   "/contact": { title: `Contact — ${PRODUCT.name}`, description: `Questions about ${PRODUCT.name}? Write to us.`, updated: UPDATED },
 };
 const privatePages: Record<string, string> = {

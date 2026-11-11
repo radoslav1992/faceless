@@ -67,8 +67,8 @@ handler runs `maintenance()` every minute.
 video), `0006_example_previews.sql` (the examples' short previews), `0007_library_categories.sql` (library items'
 genre or category), `0008_avatars.sql` (the presenters' avatars), `0009_growth.sql` (affiliates, commissions,
 payouts and calls for credits), `0010_tiktok_drafts.sql`, `0011_youtube_data.sql` (YouTube channel details' age, the
-"made for kids" answer), `0012_sound_effects.sql` (library sound effects) and `0015_series_character.sql` (a series'
-main character as drawn); D1 always enforces foreign keys.
+"made for kids" answer), `0012_sound_effects.sql` (library sound effects), `0015_series_character.sql` (a series'
+main character as drawn) and `0016_voice_clones.sql` (customers' cloned voices); D1 always enforces foreign keys.
 
 | Area | Tables |
 | --- | --- |
@@ -138,6 +138,24 @@ started 30 seconds), 1 credit per 5 new pictures, and new clips. A video never m
 refunded) costs what a new one does when it is made again, whatever its failed run made. Changes to the caption, hashtags or title need no new render; other free changes
 (subtitles, music, sound effects, transitions, timing) re-render for 0 credits.
 
+**Cinematic videos** (`shared/film.ts`; a test, for administrators only). A narrated video made the way AI short
+films are, as a flag on the video (`film` in its spec), not a video type, so any story style can be made this way.
+In Create an administrator switches Cinematic on and chooses the clips' quality and, of the models they may choose
+(`FAL_CLIP_MODEL_ADMIN`), one; the draft (`film` in the request, `filmSpec`) turns every AI picture into a clip as
+long as its scene (5 or 10 s by the script's estimated timing) and every scene change into a cut. Then:
+- each scene's picture is framed as a film still, the shots in turn (`filmStill`: wide, medium, close-up…), still
+  drawn from the video's reference sheets;
+- each clip gets a slow camera move, in turn, and is asked for the scene's ambience with nothing spoken
+  (`filmClipPrompt`; FLUX 3 Max with `generate_audio`, and whatever sound another model returns);
+- the render plays the clips' own sound quietly under the voice (`FILM_AMBIENCE` as the segments' `audio`), leaves
+  out the whoosh of scene changes, and lays the renderer's `look: "film"` over the picture under the captions (a
+  little contrast, less colour and a warm cast, a vignette and grain: `LOOKS` in `renderer/server.py`, YUV filters
+  only, about half a second per second of video).
+It costs what its parts do: the video by its length plus every clip by its length and quality. Drafting, making and
+making again one are refused to anyone but administrators (`draftVideo`, `checkFilm` in `server/videos.ts`); series
+and the API never make one. Not in it yet: takes are not judged or made again, and the shots and moves follow the
+scene's number, not the script.
+
 **Voices** (`server/voices.ts`, `voices` table, Admin → Voices in `src/app/AdminVoices.tsx`). Administrators import a
 voice of the ElevenLabs account (`GET /api/admin/voices/elevenlabs` lists it: `/v2/voices`, 100 at a time; `POST
 /api/admin/voices` reads `/v1/voices/{id}`) with ElevenLabs' details: "George - Warm Storyteller" becomes the name
@@ -154,6 +172,30 @@ fetch the new one. `GET /api/public/voices` lists the offered voices (the app's 
 chosen one with its sample, `VoicePicker` every voice with a play button, filtered by gender and accent; the API's
 `/types` and `list_video_types`). A new video or series must use an offered voice; one that already has a voice keeps
 it once hidden (`voiceUsable` with the kept voice), and a template whose voice was hidden gets the default.
+
+**Cloned voices** (`server/voice-clones.ts`, `shared/voices.ts`, tables `voice_clones`, `voice_removals` and
+`voice_consents`; `CloneVoiceDialog` in `src/app/voice-clone.tsx`, "Your voices" in Settings and "Your own voice" in
+the voice picker). A customer's own voice for their narration, off unless the operator sets `VOICE_CLONES`: every
+clone takes one of the ElevenLabs account's voice slots, so that number is the room for all customers together
+(clones plus voices still waiting to be deleted there), and a plan's `voices` how many each customer may have (one
+on Pro and Studio, none on the other plans). `cloningStatus` asks the account itself (`GET /v1/user/subscription`,
+`accountSubscription`) and caps the room at the slots its other voices leave free, and at nothing when the plan has
+no instant cloning; when the account can't be asked (the key lacks User read) the setting stands. Admin → Voices
+shows it (`GET /api/admin/voices/account`) beside the period's credits used. `POST /api/voices` takes one of the person's audio uploads (30 seconds to 5 minutes, at most
+10 MB), a name and their statement that the voice is theirs to use (`CLONE_CONSENT_TEXT`, in its current
+`CLONE_CONSENT_VERSION`), sends the recording to ElevenLabs Instant Voice Cloning (`POST /v1/voices/add`,
+`cloneVoice`), and saves the clone with the statement (`voice_consents`: who, when, which version; nothing of the
+voice). A voice ElevenLabs wants its speaker to verify is deleted there again and refused. A sample spoken by the
+clone is kept in the owner's folder and served to them alone (`GET /api/voices/:id/preview`); the app deletes the
+uploaded recording once the voice is made.
+A clone is a row of its own table, never of `voices`, with an ID no administrator's voice can have (`clone-` and 12
+hex digits): nothing that lists or manages the voices everyone has can show one, the ElevenLabs list in Admin → Voices
+leaves customers' clones out, and importing one is refused. `voiceUsable` and `providerVoiceId` take the user: a
+clone is usable, and speaks (`speak` in the content workflow), only for its owner. `DELETE /api/voices/:id` is refused
+while a series of the owner uses the voice or a video is being narrated in it; videos narrated in it keep their
+recordings. A deleted clone, and a deleted account's clones, are queued in `voice_removals` by triggers and deleted
+at ElevenLabs at once and then hourly (`removeClonedVoices`) until ElevenLabs confirms: never given up, and reported
+in the logs after a week. The statements stay 5 years after the voice is gone, then retention removes them.
 
 **Affiliates** (`shared/growth.ts`, `server/affiliates.ts`, "Earn 30%" in `src/app/Affiliate.tsx`, Admin → Growth in
 `src/app/AdminGrowth.tsx`). A verified user joins with a PayPal address and the affiliate terms (Terms › Affiliate
