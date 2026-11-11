@@ -6,9 +6,9 @@ import { DAY, now } from "./types";
 import { rate } from "./security";
 import { allowance } from "./billing";
 import { serveObject } from "./storage";
-import { cloneVoice, deleteVoice, speakSample } from "./providers/elevenlabs";
+import { accountSubscription, cloneVoice, deleteVoice, speakSample, type ElevenAccount } from "./providers/elevenlabs";
 import { ProviderError } from "./providers/http";
-import { planById } from "../shared/plans";
+import { cloningPlans, planById } from "../shared/plans";
 import { PRODUCT } from "../shared/brand";
 import { CLONE_CONSENT_VERSION, CLONE_NAME_MAX, CLONE_SAMPLE, cloneSampleText, isCloneId, type Voice } from "../shared/voices";
 
@@ -18,8 +18,9 @@ import { CLONE_CONSENT_VERSION, CLONE_NAME_MAX, CLONE_SAMPLE, cloneSampleText, i
 // and speaks only in their videos (server/voices.ts providerVoiceId).
 //
 // Off unless the operator sets VOICE_CLONES: every clone takes one of the ElevenLabs account's voice slots, so the
-// operator says how many there is room for, for all customers together. Plans say how many each customer can have
-// (`voices` in shared/plans.ts; none on the free trial).
+// operator says how many customers may have together, and the account's own count (cloningStatus) caps that at what
+// is really free there. Plans say how many each customer can have (`voices` in shared/plans.ts: one on the larger
+// plans, none on the others).
 //
 // A person's voice is personal data of a sensitive kind: the recording they upload stays their file (the app deletes
 // it once the voice is made), the ElevenLabs voice is deleted when they delete the clone or their account (at once,
@@ -39,6 +40,30 @@ const capacity = (env: Env) => {
   const n = Number(env.VOICE_CLONES);
   return Number.isInteger(n) && n > 0 && env.ELEVENLABS_API_KEY?.trim() ? n : 0;
 };
+/**
+ * Where voice cloning stands, for Admin → Voices and before each clone: the operator's setting, the slots customers'
+ * clones hold at ElevenLabs (clones, and voices still to be deleted there), what the ElevenLabs account itself says
+ * (null when it can't be asked: the key lacks the User read permission, or ElevenLabs didn't answer), and the room
+ * that leaves. The account wins over the setting: its other voices (the operator's own clones and designed voices)
+ * hold slots too, and a setting above what is really free would only fail later, at ElevenLabs.
+ */
+export async function cloningStatus(env: Env) {
+  const setting = capacity(env);
+  const held = (await env.DB.prepare("SELECT (SELECT COUNT(*) FROM voice_clones) AS clones,(SELECT COUNT(*) FROM voice_removals) AS removals")
+    .first<{ clones: number; removals: number }>().catch(() => null)) ?? { clones: 0, removals: 0 };
+  const ours = held.clones + held.removals;
+  let account: ElevenAccount | null = null, problem: string | null = null;
+  try {
+    account = await accountSubscription(env);
+  } catch (e) {
+    problem = e instanceof ProviderError ? e.code : "VOICE_FAILED";
+  }
+  // Slots for customers: all of the account's, less the ones its other voices hold.
+  const others = account?.voiceSlotsUsed != null ? Math.max(0, account.voiceSlotsUsed - ours) : null;
+  const slots = account?.voiceSlots != null && others != null ? Math.max(0, account.voiceSlots - others) : null;
+  const room = account?.canClone === false ? 0 : slots == null ? setting : Math.min(setting, slots);
+  return { setting, clones: held.clones, removals: held.removals, account, problem, others, slots, room, left: Math.max(0, room - ours) };
+}
 const hex = (bytes: number) => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
 const clean = (s: string) => s.replace(/[\u0000-\u001f\u007f<>]/g, "").replace(/\s+/g, " ").trim(); // eslint-disable-line no-control-regex
 const ownClones = async (env: Env, userId: string) =>
@@ -56,7 +81,7 @@ voiceClones.get("/", async (c) => {
   const user = c.get("user");
   const enabled = capacity(c.env) > 0;
   const limit = enabled ? planById((await allowance(c.env, user)).plan).voices : 0;
-  return c.json({ enabled, limit, voices: (await ownClones(c.env, user.id)).map(cloneView) });
+  return c.json({ enabled, limit, plans: cloningPlans(), voices: (await ownClones(c.env, user.id)).map(cloneView) });
 });
 
 const refusals: Record<string, [status: 422 | 502 | 503, message: string]> = {
@@ -79,16 +104,19 @@ voiceClones.post("/", async (c) => {
     consent: z.literal(true, { error: "Confirm that this voice is yours to use." }),
     version: z.literal(CLONE_CONSENT_VERSION, { error: "The statement has changed. Reload the page and confirm it again." }),
   }).parse(await c.req.json());
-  const room = capacity(c.env);
-  if (!room) throw new HTTPException(503, { message: "Voice cloning isn't available yet." });
+  if (!capacity(c.env)) throw new HTTPException(503, { message: "Voice cloning isn't available yet." });
   const limit = planById((await allowance(c.env, user)).plan).voices;
-  if (!limit) throw new HTTPException(402, { message: "Cloning your voice is part of the paid plans. Choose a plan to add your own voice." });
+  if (!limit) throw new HTTPException(402, { message: `Cloning your voice is part of the ${cloningPlans()} plans. Upgrade to add your own voice.` });
   if ((await ownClones(c.env, user.id)).length >= limit)
-    throw new HTTPException(409, { message: `Your plan has room for ${limit} cloned voice${limit === 1 ? "" : "s"}. Delete one first, or upgrade.` });
-  // Voices waiting to be deleted at ElevenLabs still hold their slots there.
-  const taken = await c.env.DB.prepare("SELECT (SELECT COUNT(*) FROM voice_clones)+(SELECT COUNT(*) FROM voice_removals) AS n").first<{ n: number }>();
-  if ((taken?.n ?? 0) >= room) {
-    console.error("Voice cloning is full: raise VOICE_CLONES if the ElevenLabs account has more voice slots", { taken: taken?.n, room });
+    throw new HTTPException(409, { message: `Your plan has room for ${limit} cloned voice${limit === 1 ? "" : "s"}. Delete ${limit === 1 ? "it" : "one"} first to clone another.` });
+  // The operator's setting and what the ElevenLabs account really has free, whichever is less.
+  const status = await cloningStatus(c.env);
+  if (status.account?.canClone === false) {
+    console.error("Voice cloning is on, but the ElevenLabs plan has no instant voice cloning");
+    throw new HTTPException(503, { message: "Voice cloning isn't available right now. Please try again later." });
+  }
+  if (!status.left) {
+    console.error("Voice cloning is full: the ElevenLabs account's voice slots, or VOICE_CLONES, are used up", { clones: status.clones, removals: status.removals, setting: status.setting, slots: status.slots });
     throw new HTTPException(503, { message: "Voice cloning is full right now. Please try again later." });
   }
   const name = clean(d.name);

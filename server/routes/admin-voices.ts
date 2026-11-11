@@ -5,6 +5,7 @@ import type { App } from "../types";
 import { now, uid } from "../types";
 import { accountVoices, importVoice, voiceUsage, voiceView, type VoiceRow } from "../voices";
 import { speakSample } from "../providers/elevenlabs";
+import { cloningStatus } from "../voice-clones";
 import { ProviderError } from "../providers/http";
 import { SAMPLE_MAX_CHARS, sampleText } from "../../shared/voices";
 
@@ -20,6 +21,11 @@ adminVoices.get("/", async (c) => {
     voices: rows.map((r) => ({ ...voiceView(r), providerId: r.provider_id, active: !!r.active, sort: r.sort, usage: usage.get(r.id) ?? { series: 0, videos: 0 } })),
   });
 });
+/**
+ * The ElevenLabs account behind the narration: its plan, the credits used this period, its voice slots, and where
+ * customers' voice cloning stands (server/voice-clones.ts cloningStatus).
+ */
+adminVoices.get("/account", async (c) => c.json(await cloningStatus(c.env)));
 /** The voices of the ElevenLabs account, to pick one to import. */
 adminVoices.get("/elevenlabs", async (c) => {
   const q = z.object({ search: z.string().max(100).default("") }).parse(c.req.query());

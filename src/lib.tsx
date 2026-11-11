@@ -110,7 +110,7 @@ export function useVoices() {
 export const reloadVoices = () => { voicesRequest = null; };
 
 /** The signed-in person's cloned voices: whether cloning is on, how many their plan has room for, and the voices. */
-export type OwnVoices = { enabled: boolean; limit: number; voices: Voice[] };
+export type OwnVoices = { enabled: boolean; limit: number; voices: Voice[]; /** The plans cloning is part of: "Pro and Studio". */ plans?: string };
 let ownVoices: OwnVoices | null = null, ownVoicesOf: string | null = null, ownVoicesRequest: Promise<void> | null = null;
 const ownVoicesListeners = new Set<() => void>();
 /** Loads the person's cloned voices (again with `force`, after one was added or deleted); everything showing them follows. */

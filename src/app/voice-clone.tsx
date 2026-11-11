@@ -62,9 +62,9 @@ export function CloneVoiceDialog({ onClose, onDone }: { onClose: () => void; onD
       )
     }>
       {!own ? <Spinner label="Loading" /> : !limit ? (
-        <p>Cloning your voice is part of the paid plans. <Link className="link" to="/app/billing">Choose a plan</Link> to narrate your videos in your own voice.</p>
+        <p>Cloning your voice is part of the {own.plans || "larger"} plans. <Link className="link" to="/app/billing">Upgrade</Link> to narrate your videos in your own voice.</p>
       ) : full ? (
-        <p>Your plan has room for {limit} cloned voice{limit === 1 ? "" : "s"}. Delete one in <Link className="link" to="/app/settings#voices">Settings</Link> first, or upgrade.</p>
+        <p>Your plan has room for {limit} cloned voice{limit === 1 ? "" : "s"}. Delete {limit === 1 ? "it" : "one"} in <Link className="link" to="/app/settings#voices">Settings</Link> first to clone another.</p>
       ) : (
         <form id="clone-voice" className="stack" onSubmit={submit}>
           <p className="small muted" style={{ margin: 0 }}>

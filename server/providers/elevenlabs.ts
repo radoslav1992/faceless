@@ -233,3 +233,32 @@ export async function deleteVoice(e: Env, providerVoice: string) {
   if ((r.status === 400 || r.status === 422) && /not_found|does_not_exist/.test(await refusal(r))) return;
   throw new ProviderError("VOICE_FAILED");
 }
+
+/**
+ * What the ElevenLabs account's plan allows and has used (GET /v1/user/subscription; the API key needs the User read
+ * permission): credits this period, and voice slots, which cloned and designed voices take. Fields ElevenLabs does
+ * not send are null.
+ */
+export type ElevenAccount = {
+  tier: string; creditsUsed: number | null; creditsLimit: number | null; creditsReset: number | null;
+  voiceSlotsUsed: number | null; voiceSlots: number | null; canClone: boolean | null;
+};
+export async function accountSubscription(e: Env): Promise<ElevenAccount> {
+  const key = e.ELEVENLABS_API_KEY?.trim();
+  if (!key) throw new ProviderError("VOICE_UNAVAILABLE");
+  const r = await providerFetch("https://api.elevenlabs.io/v1/user/subscription", { headers: { "xi-api-key": key }, signal: AbortSignal.timeout(15000) })
+    .catch((error) => { throw error instanceof ProviderError ? error : new ProviderError("VOICE_FAILED"); });
+  if (!r.ok) {
+    await r.body?.cancel();
+    throw new ProviderError([401, 403].includes(r.status) ? "VOICE_PERMISSION" : r.status === 429 ? "VOICE_BUSY" : "VOICE_FAILED");
+  }
+  const s = (await r.json().catch(() => null)) as any;
+  if (!s || typeof s !== "object") throw new ProviderError("VOICE_FAILED");
+  const count = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : null);
+  return {
+    tier: typeof s.tier === "string" ? s.tier.replace(/[^\w -]/g, "").slice(0, 40) : "",
+    creditsUsed: count(s.character_count), creditsLimit: count(s.character_limit), creditsReset: count(s.next_character_count_reset_unix),
+    voiceSlotsUsed: count(s.voice_slots_used), voiceSlots: count(s.voice_limit),
+    canClone: typeof s.can_use_instant_voice_cloning === "boolean" ? s.can_use_instant_voice_cloning : null,
+  };
+}

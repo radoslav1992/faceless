@@ -31,7 +31,7 @@ and the maintenance cron.
   bedtime stories, "Your own topic" and more), each with its brief for the writer, voice, art style, length and music
   mood. There are 15 art styles, 26 narration languages, 21 caption styles, and the narration voices administrators
   choose from their ElevenLabs account (Admin → Voices; twelve to start). Where the operator turns it on (`VOICE_CLONES`),
-  customers on paid plans can also clone their own voice from a short recording, for their narration alone.
+  customers on the Pro and Studio plans can also clone their own voice from a short recording, for their narration alone.
 - **Series on autopilot.** A series is one faceless channel: a style, a topic, a language, voice, art style, length
   (30, 45, 60 or 90 s), music mood, sound effects, subtitles, the connected accounts it posts to and a schedule (times per day on
   chosen weekdays, in its time zone). For every slot an episode is written and made ahead of time (6 hours before;

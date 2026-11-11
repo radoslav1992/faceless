@@ -11,6 +11,59 @@ import { SAMPLE_MAX_CHARS, sampleText, type Voice } from "../../shared/voices";
 // narration's model from a text of theirs (or the standard one). A voice no video or series uses can be deleted; a
 // used one can only be hidden.
 
+/** GET /api/admin/voices/account: the ElevenLabs plan, and where customers' voice cloning stands. */
+type Account = {
+  setting: number; clones: number; removals: number; problem: string | null; others: number | null; slots: number | null; room: number; left: number;
+  account: { tier: string; creditsUsed: number | null; creditsLimit: number | null; creditsReset: number | null; voiceSlotsUsed: number | null; voiceSlots: number | null; canClone: boolean | null } | null;
+};
+const count = (n: number) => n.toLocaleString("en-US");
+/**
+ * The ElevenLabs account behind every narration: how much of the period's credits is used (narration stops when they
+ * run out), its voice slots, and the room customers' cloned voices have.
+ */
+function AccountPanel() {
+  const { data, loading } = useApi<Account>("/admin/voices/account");
+  if (loading && !data) return <div className="skeleton" style={{ height: 96 }} />;
+  if (!data) return null;
+  const a = data.account;
+  const used = a?.creditsUsed != null && a.creditsLimit ? a.creditsUsed / a.creditsLimit : null;
+  const reset = a?.creditsReset ? new Date(a.creditsReset * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
+  const held = data.clones + data.removals;
+  return (
+    <section aria-labelledby="eleven-title" className="stack" style={{ gap: 12 }}>
+      <h2 id="eleven-title">ElevenLabs account{a?.tier ? <span className="chip" style={{ marginLeft: 10, verticalAlign: 3, textTransform: "capitalize" }}>{a.tier}</span> : null}</h2>
+      {data.problem && (
+        <p className="notice warn small" role="status" style={{ margin: 0 }}>
+          {data.problem === "VOICE_PERMISSION"
+            ? "The ElevenLabs API key can't read the account (it needs the User read permission), so credits and voice slots aren't shown, and voice cloning uses VOICE_CLONES as set."
+            : "ElevenLabs didn't answer about the account just now, so credits and voice slots aren't shown. Reload to ask again."}
+        </p>
+      )}
+      <div className="grid three">
+        <div className={`card stat-card${used != null && used >= 0.8 ? " bad" : ""}`}>
+          <span className="label">Credits this period</span>
+          <strong>{used != null ? `${Math.round(used * 100)}%` : "—"}</strong>
+          <span className="sub">{a?.creditsUsed != null && a.creditsLimit != null ? `${count(a.creditsUsed)} of ${count(a.creditsLimit)} used${reset ? ` · new on ${reset}` : ""}` : "Not known"}{used != null && used >= 0.8 ? ". Narration stops when they run out." : ""}</span>
+        </div>
+        <div className="card stat-card">
+          <span className="label">Voice slots</span>
+          <strong>{a?.voiceSlotsUsed != null && a.voiceSlots != null ? `${count(a.voiceSlotsUsed)} / ${count(a.voiceSlots)}` : "—"}</strong>
+          <span className="sub">{data.others != null ? `${count(data.others)} of your own (cloned or designed), ${count(held)} customers'` : "Cloned and designed voices take one each; library voices take none."}</span>
+        </div>
+        <div className={`card stat-card${data.setting > 0 && (a?.canClone === false || !data.left) ? " bad" : ""}`}>
+          <span className="label">Customers' cloned voices</span>
+          <strong>{data.setting ? `${count(data.clones)} / ${count(data.room)}` : "Off"}</strong>
+          <span className="sub">
+            {!data.setting ? "Set VOICE_CLONES to the number customers may have together to turn voice cloning on."
+              : a?.canClone === false ? "This ElevenLabs plan has no instant voice cloning: customers can't clone a voice."
+                : `${count(data.left)} more can be made.${data.removals ? ` ${count(data.removals)} deleted, still to be removed at ElevenLabs.` : ""}${data.slots != null && data.setting > data.slots ? ` VOICE_CLONES is ${count(data.setting)}, but only ${count(data.slots)} slots are free for customers.` : ""}`}
+          </span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 type AdminVoice = Voice & { providerId: string; active: boolean; sort: number; usage: { series: number; videos: number } };
 type AccountVoice = { providerId: string; category: string; name: string; description: string; gender: string; accent: string; age: string; imported: string | null };
 const genders: Record<string, string> = { female: "Female", male: "Male", neutral: "Neutral", "": "—" };
@@ -52,6 +105,7 @@ export function VoicesTab() {
   };
   return (
     <div className="stack" style={{ gap: 20 }}>
+      <AccountPanel />
       <section aria-labelledby="voices-title">
         <div className="section-head">
           <div>

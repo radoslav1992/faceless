@@ -159,8 +159,11 @@ it once hidden (`voiceUsable` with the kept voice), and a template whose voice w
 `voice_consents`; `CloneVoiceDialog` in `src/app/voice-clone.tsx`, "Your voices" in Settings and "Your own voice" in
 the voice picker). A customer's own voice for their narration, off unless the operator sets `VOICE_CLONES`: every
 clone takes one of the ElevenLabs account's voice slots, so that number is the room for all customers together
-(clones plus voices still waiting to be deleted there), and a plan's `voices` how many each customer may have (none
-on the free trial). `POST /api/voices` takes one of the person's audio uploads (30 seconds to 5 minutes, at most
+(clones plus voices still waiting to be deleted there), and a plan's `voices` how many each customer may have (one
+on Pro and Studio, none on the other plans). `cloningStatus` asks the account itself (`GET /v1/user/subscription`,
+`accountSubscription`) and caps the room at the slots its other voices leave free, and at nothing when the plan has
+no instant cloning; when the account can't be asked (the key lacks User read) the setting stands. Admin → Voices
+shows it (`GET /api/admin/voices/account`) beside the period's credits used. `POST /api/voices` takes one of the person's audio uploads (30 seconds to 5 minutes, at most
 10 MB), a name and their statement that the voice is theirs to use (`CLONE_CONSENT_TEXT`, in its current
 `CLONE_CONSENT_VERSION`), sends the recording to ElevenLabs Instant Voice Cloning (`POST /v1/voices/add`,
 `cloneVoice`), and saves the clone with the statement (`voice_consents`: who, when, which version; nothing of the

@@ -20,7 +20,7 @@ beforeEach(() => {
 });
 const mp3 = () => { const b = new Uint8Array(1200).fill(7); b.set([0x49, 0x44, 0x33]); return b; };
 /** ElevenLabs as the Worker sees it: voices made and deleted, samples spoken; `o` makes it refuse. */
-function elevenlabs(o: { add?: () => Response; deleteFails?: boolean; account?: () => any[] } = {}) {
+function elevenlabs(o: { add?: () => Response; deleteFails?: boolean; account?: () => any[]; subscription?: (ours: number) => Response } = {}) {
   const made: { id: string; name: string; file: File }[] = [], deleted: string[] = [], spoken: { voice: string; text: string }[] = [];
   const state = { ...o };
   vi.stubGlobal("fetch", async (input: any, init: any = {}) => {
@@ -45,6 +45,8 @@ function elevenlabs(o: { add?: () => Response; deleteFails?: boolean; account?: 
       spoken.push({ voice: speech, text: JSON.parse(init.body).text });
       return new Response(mp3(), { headers: { "Content-Type": "audio/mpeg" } });
     }
+    // The account's plan: unless a test says otherwise, the key can't read it (the operator's setting then stands).
+    if (url === "https://api.elevenlabs.io/v1/user/subscription") return state.subscription ? state.subscription(made.length - deleted.length) : Response.json({ detail: { status: "missing_permissions" } }, { status: 401 });
     if (url.startsWith("https://api.elevenlabs.io/v2/voices?")) return Response.json({ voices: state.account?.() ?? [], has_more: false });
     return Response.json({ detail: { status: "voice_not_found" } }, { status: 404 });
   });
@@ -52,10 +54,14 @@ function elevenlabs(o: { add?: () => Response; deleteFails?: boolean; account?: 
 }
 async function setup(overrides: Record<string, string> = {}) {
   const { env, sqlite } = testEnv({ MEDIA_ENABLED: "true", ELEVENLABS_API_KEY: "el", VOICE_CLONES: "10", ...overrides });
-  const admin = signedIn(sqlite, "admin@example.com"), owner = signedIn(sqlite, "owner@example.com"), other = signedIn(sqlite, "other@example.com"), trial = signedIn(sqlite, "trial@example.com");
-  subscribe(sqlite, owner.id, "starter");
-  subscribe(sqlite, other.id, "daily");
-  for (const u of [admin, owner, other, trial]) await call(worker, env, "GET", "/api/auth/me", undefined, u.cookie);
+  const admin = signedIn(sqlite, "admin@example.com"), owner = signedIn(sqlite, "owner@example.com"), other = signedIn(sqlite, "other@example.com");
+  const trial = signedIn(sqlite, "trial@example.com"), small = signedIn(sqlite, "small@example.com"), third = signedIn(sqlite, "third@example.com");
+  // Pro and Studio have room for one cloned voice each; Starter and Creator, like the trial, for none.
+  subscribe(sqlite, owner.id, "double");
+  subscribe(sqlite, other.id, "studio");
+  subscribe(sqlite, small.id, "daily");
+  subscribe(sqlite, third.id, "double");
+  for (const u of [admin, owner, other, trial, small, third]) await call(worker, env, "GET", "/api/auth/me", undefined, u.cookie);
   const as = (who: { cookie: string }) => (method: string, path: string, body?: unknown) => call(worker, env, method, path, body, who.cookie);
   /** An uploaded recording of `who` (two minutes of MP3 unless said). */
   const recording = async (who: { id: string }, o: { seconds?: number; bytes?: number; mime?: string; kind?: string } = {}) => {
@@ -67,14 +73,14 @@ async function setup(overrides: Record<string, string> = {}) {
   };
   const clone = async (who: { id: string; cookie: string }, body: Record<string, unknown> = {}) =>
     as(who)("POST", "/api/voices", { name: "Mira", assetId: await recording(who), consent: true, version: CLONE_CONSENT_VERSION, ...body });
-  return { env, sqlite, admin, owner, other, trial, as, recording, clone };
+  return { env, sqlite, admin, owner, other, trial, small, third, as, recording, clone };
 }
 
 describe("cloned voices", () => {
   it("are off unless the operator says how many the ElevenLabs account has room for", async () => {
     const s = await setup({ VOICE_CLONES: "" });
     const api = elevenlabs();
-    expect((await s.as(s.owner)("GET", "/api/voices")).data).toEqual({ enabled: false, limit: 0, voices: [] });
+    expect((await s.as(s.owner)("GET", "/api/voices")).data).toEqual({ enabled: false, limit: 0, plans: "Pro and Studio", voices: [] });
     expect((await s.clone(s.owner)).status).toBe(503);
     expect(api.made).toEqual([]);
   });
@@ -82,7 +88,8 @@ describe("cloned voices", () => {
   it("are made from the owner's recording with their statement, and are theirs alone", async () => {
     const s = await setup();
     const api = elevenlabs();
-    expect((await s.as(s.owner)("GET", "/api/voices")).data).toEqual({ enabled: true, limit: plans.find((p) => p.id === "starter")!.voices, voices: [] });
+    expect(plans.map((p) => p.voices)).toEqual([0, 0, 0, 1, 1]);
+    expect((await s.as(s.owner)("GET", "/api/voices")).data).toEqual({ enabled: true, limit: 1, plans: "Pro and Studio", voices: [] });
     // Never without the statement, in its current wording.
     expect((await s.clone(s.owner, { consent: false })).status).toBe(400);
     expect((await s.clone(s.owner, { version: "2020-01-01" })).status).toBe(400);
@@ -138,17 +145,46 @@ describe("cloned voices", () => {
     expect(stolen).toMatchObject({ status: 400, data: { error: "Choose one of the voices offered." } });
   });
 
-  it("are limited by the plan and by the room the operator set, and are not for the free trial", async () => {
+  it("are for the Pro and Studio plans, one voice each, within the room the operator set", async () => {
     const s = await setup({ VOICE_CLONES: "2" });
     const api = elevenlabs();
-    expect(await s.clone(s.trial)).toMatchObject({ status: 402, data: { error: expect.stringContaining("paid plans") } });
+    for (const who of [s.trial, s.small]) {
+      expect(await s.clone(who)).toMatchObject({ status: 402, data: { error: "Cloning your voice is part of the Pro and Studio plans. Upgrade to add your own voice." } });
+      expect((await s.as(who)("GET", "/api/voices")).data).toMatchObject({ enabled: true, limit: 0 });
+    }
     expect((await s.clone(s.owner)).status).toBe(201);
-    // Starter has room for one.
     expect(await s.clone(s.owner)).toMatchObject({ status: 409, data: { error: expect.stringContaining("room for 1 cloned voice.") } });
     expect((await s.clone(s.other)).status).toBe(201);
-    // Creator has room for two, but the ElevenLabs account for no more.
-    expect(await s.clone(s.other)).toMatchObject({ status: 503, data: { error: "Voice cloning is full right now. Please try again later." } });
+    // The operator set room for two.
+    expect(await s.clone(s.third)).toMatchObject({ status: 503, data: { error: "Voice cloning is full right now. Please try again later." } });
     expect(api.made).toHaveLength(2);
+  });
+
+  it("never promise more voices than the ElevenLabs account has slots free, whatever the operator set", async () => {
+    const s = await setup({ VOICE_CLONES: "10" });
+    const api = elevenlabs();
+    // A Creator account: 30 slots, 29 of them held by the operator's own cloned and designed voices.
+    const plan = { tier: "creator", character_count: 81_000, character_limit: 100_000, next_character_count_reset_unix: 1_800_000_000, voice_limit: 30, can_use_instant_voice_cloning: true };
+    api.state.subscription = (ours) => Response.json({ ...plan, voice_slots_used: 29 + ours });
+    const status = async () => (await s.as(s.admin)("GET", "/api/admin/voices/account")).data;
+    expect(await status()).toMatchObject({
+      setting: 10, clones: 0, removals: 0, problem: null, others: 29, slots: 1, room: 1, left: 1,
+      account: { tier: "creator", creditsUsed: 81_000, creditsLimit: 100_000, creditsReset: 1_800_000_000, voiceSlotsUsed: 29, voiceSlots: 30, canClone: true },
+    });
+    expect((await s.as(s.owner)("GET", "/api/admin/voices/account")).status).toBe(404);
+    expect((await s.clone(s.owner)).status).toBe(201);
+    expect(await status()).toMatchObject({ clones: 1, others: 29, slots: 1, room: 1, left: 0 });
+    expect(await s.clone(s.other)).toMatchObject({ status: 503, data: { error: "Voice cloning is full right now. Please try again later." } });
+    expect(api.made).toHaveLength(1);
+    // A plan without instant voice cloning: nobody is sent to ElevenLabs to be refused there.
+    api.state.subscription = () => Response.json({ ...plan, voice_slots_used: 1, can_use_instant_voice_cloning: false });
+    expect(await status()).toMatchObject({ room: 0, left: 0, account: { canClone: false } });
+    expect((await s.clone(s.other)).status).toBe(503);
+    expect(api.made).toHaveLength(1);
+    // A key that can't read the account: the operator's setting stands, and the page says why nothing is shown.
+    api.state.subscription = undefined;
+    expect(await status()).toMatchObject({ account: null, problem: "VOICE_PERMISSION", slots: null, room: 10, left: 9 });
+    expect((await s.clone(s.other)).status).toBe(201);
   });
 
   it("save nothing when ElevenLabs refuses the recording, wants the speaker verified, or is not set up for cloning", async () => {

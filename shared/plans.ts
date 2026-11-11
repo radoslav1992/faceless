@@ -6,7 +6,7 @@ import {
 // Plans: the source of truth for prices and limits. Credits are the one currency: a new video costs one credit per
 // started 20 seconds (shared/credits.ts), so "up to N videos" assumes 30-second videos (2 credits). The server enforces credits
 // per usage window (a D1 trigger) and `series`, `accounts`, `storageGb`, `voices` (cloned voices, where the operator
-// has switched voice cloning on) and the upload limits of videos (`videoMinutes`, `videoMb`: long videos for clips on
+// has switched voice cloning on: a voice slot of the operator's ElevenLabs account each, so only the larger plans) and the upload limits of videos (`videoMinutes`, `videoMb`: long videos for clips on
 // paid plans) in code. Unused credits roll over from month to month while a plan
 // runs (up to ROLLOVER_MONTHS of them), and subscribers can buy credit packs. Ids never change (subscriptions, Stripe
 // lookup keys and the API use them); names are what people see: "daily" is Creator and "double" is Pro.
@@ -42,7 +42,7 @@ export const plans = [
     series: 2,
     accounts: 1,
     storageGb: 10,
-    voices: 1,
+    voices: 0,
     videoMinutes: 120,
     videoMb: 2000,
     popular: false,
@@ -58,7 +58,7 @@ export const plans = [
     series: 5,
     accounts: 100,
     storageGb: 30,
-    voices: 2,
+    voices: 0,
     videoMinutes: 120,
     videoMb: 2000,
     popular: true,
@@ -74,7 +74,7 @@ export const plans = [
     series: 10,
     accounts: 100,
     storageGb: 60,
-    voices: 3,
+    voices: 1,
     videoMinutes: 120,
     videoMb: 2000,
     popular: false,
@@ -90,7 +90,7 @@ export const plans = [
     series: 30,
     accounts: 100,
     storageGb: 200,
-    voices: 5,
+    voices: 1,
     videoMinutes: 120,
     videoMb: 2000,
     popular: false,
@@ -111,6 +111,8 @@ export const ROLLOVER_MONTHS = 3;
 /** How long an administrator can give a paid plan for free (Admin → Billing), in months. */
 export const GRANT_MONTHS = [1, 3, 6, 12] as const;
 export const planById = (id: string | undefined): Plan => plans.find((p) => p.id === id) || plans[0];
+/** The plans a customer can clone their voice on, by name: "Pro and Studio". */
+export const cloningPlans = () => plans.filter((p) => p.voices > 0).map((p) => p.name as string).join(" and ");
 /** "Up to N videos a month": 30-second videos. */
 export const videosPerMonth = (p: Plan) => Math.floor(p.credits / videoCredits(30));
 
