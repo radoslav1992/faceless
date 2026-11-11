@@ -10,6 +10,7 @@ import { heygenClipRequest, heygenRetry } from "../server/providers/heygen";
 import { attention } from "../server/operations";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 import { languages, seriesSettingsSchema } from "../shared/series";
+import { FILM_AMBIENCE, filmSpec } from "../shared/film";
 import { estimatedSeconds, narrationCurrent, pendingMedia, pictureSheets, specCredits, specSchema, storySpec, type StorySpec } from "../shared/formats";
 import {
   AUTO_TRANSITIONS, characterSheetKey, clipFor, estimatedTimings, mergeScenes, moveEdge, narrationKey, placeOf, splitScene, toggleKey, resolveTransition, scenePrompt, scenesFromCounts, splitScenes, storyScript, storySegments,
@@ -922,6 +923,58 @@ describe("narrated videos in the content run", () => {
     expect((await call(worker, env, "DELETE", `/api/series/${seriesId}`, undefined, user.cookie)).status).toBe(200);
     expect(kept()).toEqual([]);
     expect((await call(worker, env, "GET", `/api/videos/${second.id}`, undefined, user.cookie)).status).toBe(200);
+  });
+
+  it("makes a cinematic video for an administrator: every scene a clip with film framing and sound, cut hard, with a film look", async () => {
+    const { env, sqlite, user, spec, run } = await setup();
+    // Asked for by anyone else, a cinematic draft or video is refused.
+    const brief = { template: "script", script: "The reef wakes slowly. A small octopus leaves its den. It finds a silver coin in the sand. Then a shadow passes overhead.", film: { quality: "regular", model: "flux-3-max" } };
+    expect(await call(worker, env, "POST", "/api/story/draft", brief, user.cookie)).toMatchObject({ status: 403, data: { error: expect.stringContaining("still being tested") } });
+    const filmed = filmSpec(spec, { quality: "regular", model: "flux-3-max" });
+    expect((await call(worker, env, "POST", "/api/videos", { spec: filmed, idempotencyKey: crypto.randomUUID() }, user.cookie)).status).toBe(403);
+    // An administrator's: the AI pictures become clips as long as their scenes, of the chosen quality and model; the
+    // owner's own picture stays; every scene changes on a cut.
+    sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
+    env.FAL_CLIP_MODEL_ADMIN = "flux-3-max";
+    expect(filmed.film).toBe(true);
+    expect(filmed.scenes.map((s) => [s.source, s.transition])).toEqual([["clip", "cut"], ["clip", "cut"], ["clip", "cut"], ["own", "cut"], ["clip", "cut"]]);
+    expect(filmed.scenes.filter((s) => s.source === "clip").every((s) => s.clipQuality === "regular" && s.clipModel === "flux-3-max" && [5, 10].includes(s.clipSeconds))).toBe(true);
+    expect(filmSpec({ ...spec, backdrop: { libraryId: crypto.randomUUID() } }).film).toBeUndefined();
+    // Its price: the video by its length, plus every clip.
+    const clips = filmed.scenes.filter((s) => s.source === "clip");
+    expect(specCredits(filmed, true)).toBe(videoCredits(estimatedSeconds(filmed)) + clips.reduce((n, s) => n + CLIP_CREDITS.regular * (s.clipSeconds / 5), 0));
+    const calls = providers();
+    const created = await call(worker, env, "POST", "/api/videos", { spec: filmed, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(created.status).toBe(201);
+    await run();
+    const video = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
+    expect(video.renderStatus).toBe("ready");
+    expect(video.spec.film).toBe(true);
+    const fal = calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/"));
+    // Pictures framed as film stills, each scene its own shot.
+    const stills = fal.filter((c) => /^Draw a new picture of this scene/.test(c.body.prompt));
+    expect(stills).toHaveLength(4);
+    expect(stills[0].body.prompt).toContain("Composed as a wide establishing shot from a film");
+    expect(stills[1].body.prompt).toContain("Composed as a medium shot from a film");
+    // Clips from the chosen model, each with a camera move, asked for the scene's ambience and nothing spoken.
+    const made = fal.filter((c) => c.url.includes("flux-3-max"));
+    expect(made).toHaveLength(4);
+    expect(made.every((c) => c.body.generate_audio === true)).toBe(true);
+    expect(made[0].body.prompt).toMatch(/^Doodle of sentence 1\. A slow push-in\. .*no speech, no voices and no music\./);
+    expect(made[1].body.prompt).toContain("A slow sideways tracking move.");
+    // The render: the clips' own sound quietly under the voice, no transitions, and the film look.
+    const narration = { key: "media/u/voice.wav", duration: 12, words: video.spec.generated.words };
+    const media = Object.fromEntries(video.spec.scenes.flatMap((s: any) => [s.clipId, s.imageId, s.assetId]).filter(Boolean)
+      .map((id: string, n: number) => [id, { key: `media/u/${n}`, kind: video.spec.scenes.some((s: any) => s.clipId === id) ? "video" : "image", duration: 5, width: 1080, height: 1920, ai: true }]));
+    const { compose } = planRender(video.spec, { media, narration, watermark: "" } as PlanContext);
+    expect(compose.look).toBe("film");
+    expect(compose.segments.map((s) => [s.kind, s.audio ?? null, s.transition ?? null])).toEqual([
+      ["video", FILM_AMBIENCE, null], ["video", FILM_AMBIENCE, null], ["video", FILM_AMBIENCE, null], ["image", null, null], ["video", FILM_AMBIENCE, null],
+    ]);
+    // The same video without the flag: silent clips, and no look.
+    const plain = planRender({ ...video.spec, film: undefined }, { media, narration, watermark: "" } as PlanContext).compose;
+    expect(plain.look).toBeUndefined();
+    expect(plain.segments.every((s) => !s.audio)).toBe(true);
   });
 
   it("draws every picture from its own text when FAL_REFERENCE_MODEL is off", async () => {

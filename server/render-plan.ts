@@ -10,6 +10,7 @@ import { cutWords, keptDuration, windowCuts } from "../shared/cuts";
 import { clipWords } from "../shared/speech";
 import { trackWindow } from "../shared/track";
 import { paneWindow, placedPanes, splitHeights } from "../shared/highlights";
+import { FILM_AMBIENCE } from "../shared/film";
 
 // A video's spec → the renderer payload. Pure: every referenced file is resolved beforehand (R2 key, length) and
 // inputs are R2 keys here; the workflow turns them into capability links. Times are seconds on the output clock.
@@ -65,13 +66,14 @@ const total = (segments: ComposeSegment[]) => round(segments.reduce((n, s) => n 
  * or the owner's image or video, or a library clip or picture. A clip shorter than its scene loops, except AI clips
  * (made for the scene, they hold their last frame for the moment of a transition).
  */
-function sceneSegment(ctx: PlanContext, inputs: Inputs, scene: StoryScene, seconds: number, n: number): ComposeSegment {
+/** `film`: a cinematic video (shared/film.ts), whose AI clips play their own ambient sound quietly under the voice. */
+function sceneSegment(ctx: PlanContext, inputs: Inputs, scene: StoryScene, seconds: number, n: number, film = false): ComposeSegment {
   const id = scene.source === "clip" ? scene.clipId || scene.imageId : scene.source === "image" ? scene.imageId : scene.source === "own" ? scene.assetId : scene.libraryId;
   const m = need(ctx, id);
   if (m.kind === "image") return { kind: "image", input: inputs.add(m.key), duration: seconds, motion: motionFor(n) };
   if (m.kind !== "video") throw new Error("MEDIA_INPUT");
   const loop = scene.source !== "clip" && m.duration > 0.5 && m.duration < seconds - 1;
-  return { kind: "video", input: inputs.add(m.key), trim: 0, duration: seconds, audio: 0, ...(loop && { loop }) };
+  return { kind: "video", input: inputs.add(m.key), trim: 0, duration: seconds, audio: film && scene.source === "clip" ? FILM_AMBIENCE : 0, ...(loop && { loop }) };
 }
 
 /**
@@ -152,7 +154,7 @@ function planStory(spec: StorySpec, ctx: PlanContext): Plan {
       const seconds = part.frames / FPS;
       const segment: ComposeSegment = presenter && showsPresenter(spec, part.scene)
         ? { kind: "video", input: inputs.add(presenter.key), trim: round(part.from / FPS), duration: seconds, audio: 0 }
-        : sceneSegment(ctx, inputs, spec.scenes[part.scene], seconds, part.scene);
+        : sceneSegment(ctx, inputs, spec.scenes[part.scene], seconds, part.scene, !!spec.film);
       return part.transition ? { ...segment, transition: { kind: part.transition.kind, duration: part.transition.frames / FPS } } : segment;
     });
   }
@@ -170,13 +172,15 @@ function planStory(spec: StorySpec, ctx: PlanContext): Plan {
   if (length > MAX_SECONDS + 0.5) throw new Error("MEDIA_TOO_LONG");
   const track = spec.music, id = track?.trackId || track?.assetId;
   const music = track && id ? { input: inputs.add(need(ctx, id).key), volume: track.volume, duck: [[0, d]] as [number, number][] } : null;
-  const sounds = soundEffects(spec, ctx, inputs, onScreen, !spec.backdrop, length);
+  // A cinematic video cuts in silence: no whoosh on its scene changes (the scenes' own sounds stay).
+  const sounds = soundEffects(spec, ctx, inputs, onScreen, !spec.backdrop && !spec.film, length);
   // Marked as AI-made when its voice, or any picture, clip, track or sound in it, is (EU AI Act Art. 50, platform AI labels).
   const synthetic = spec.narration.kind === "voice" || Object.values(ctx.media).some((m) => m.ai && inputs.keys.includes(m.key));
   return {
     compose: {
       operation: "compose", width: W, height: H, segments, voice, music, ...(sounds.length && { sounds }), overlay: null,
       ass: ctx.watermark ? withWatermark(ass, ctx.watermark, W, H) : ass, coverAt: Math.min(coverAt, Math.max(0, length - 0.1)), synthetic, keys: inputs.keys,
+      ...(spec.film && !spec.backdrop && { look: "film" as const }),
     },
   };
 }

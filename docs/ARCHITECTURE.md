@@ -138,6 +138,24 @@ started 30 seconds), 1 credit per 5 new pictures, and new clips. A video never m
 refunded) costs what a new one does when it is made again, whatever its failed run made. Changes to the caption, hashtags or title need no new render; other free changes
 (subtitles, music, sound effects, transitions, timing) re-render for 0 credits.
 
+**Cinematic videos** (`shared/film.ts`; a test, for administrators only). A narrated video made the way AI short
+films are, as a flag on the video (`film` in its spec), not a video type, so any story style can be made this way.
+In Create an administrator switches Cinematic on and chooses the clips' quality and, of the models they may choose
+(`FAL_CLIP_MODEL_ADMIN`), one; the draft (`film` in the request, `filmSpec`) turns every AI picture into a clip as
+long as its scene (5 or 10 s by the script's estimated timing) and every scene change into a cut. Then:
+- each scene's picture is framed as a film still, the shots in turn (`filmStill`: wide, medium, close-up…), still
+  drawn from the video's reference sheets;
+- each clip gets a slow camera move, in turn, and is asked for the scene's ambience with nothing spoken
+  (`filmClipPrompt`; FLUX 3 Max with `generate_audio`, and whatever sound another model returns);
+- the render plays the clips' own sound quietly under the voice (`FILM_AMBIENCE` as the segments' `audio`), leaves
+  out the whoosh of scene changes, and lays the renderer's `look: "film"` over the picture under the captions (a
+  little contrast, less colour and a warm cast, a vignette and grain: `LOOKS` in `renderer/server.py`, YUV filters
+  only, about half a second per second of video).
+It costs what its parts do: the video by its length plus every clip by its length and quality. Drafting, making and
+making again one are refused to anyone but administrators (`draftVideo`, `checkFilm` in `server/videos.ts`); series
+and the API never make one. Not in it yet: takes are not judged or made again, and the shots and moves follow the
+scene's number, not the script.
+
 **Voices** (`server/voices.ts`, `voices` table, Admin → Voices in `src/app/AdminVoices.tsx`). Administrators import a
 voice of the ElevenLabs account (`GET /api/admin/voices/elevenlabs` lists it: `/v2/voices`, 100 at a time; `POST
 /api/admin/voices` reads `/v1/voices/{id}`) with ElevenLabs' details: "George - Warm Storyteller" becomes the name

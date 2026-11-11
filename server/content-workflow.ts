@@ -203,7 +203,7 @@ async function generateMedia(
     // HeyGen Video makes a clip from the scene's picture (the Idempotency-Key finds a resent request's job).
     const t: MediaTicket = clipModel === "heygen-video-1" && image
       ? { heygen: await submitHeyGenClip(e, `${run.id}-${name}`, heygenClipRequest(m.prompt, image, await clipLength(e, run, m), m.quality)) }
-      : await submitFal(e, kind, m.prompt, { image, seconds: m.seconds, clipQuality: m.quality, clipModel, references: refs.length ? refs : undefined, fallback });
+      : await submitFal(e, kind, m.prompt, { image, seconds: m.seconds, clipQuality: m.quality, clipModel, references: refs.length ? refs : undefined, fallback, audio: m.audio });
     await patchState(e, run.id, (s) => { (s.tickets ||= {})[name] = t; });
     return t;
   });

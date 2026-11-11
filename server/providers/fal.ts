@@ -42,8 +42,9 @@ const auth = (e: Env) => {
  */
 // The clip models (shared/credits.ts clipModels), each from the scene's picture in its own request: Kling 2.5 Turbo
 // (Standard at regular quality, Pro at high), MiniMax H3 (768P at both: its 2K is an upscale at about twice the price)
-// and FLUX 3 Max (720p at regular, 1080p at high). The clips' own sound, which H3 and FLUX 3 Max can make, is never
-// played: the render takes only their picture.
+// and FLUX 3 Max (720p at regular, 1080p at high). The clips' own sound, which H3 and FLUX 3 Max can make, is played
+// only in a cinematic video (shared/film.ts: FLUX 3 Max is asked for it with `audio`, quietly under the voice); every
+// other render takes only their picture.
 const H3_CLIP_MODEL = "minimax/h3/image-to-video";
 const FLUX_CLIP_MODEL = "blackforestlabs/flux-3-max/image-to-video";
 /** Whether a clip model can be used: HeyGen Video 1 only with the HeyGen key (HEYGEN_API_KEY). */
@@ -71,6 +72,8 @@ export type FalOptions = {
   references?: Reference[]; referenceModel?: string;
   /** Drawn with the fallback models (Nano Banana 2), after the operator's model refused the picture. */
   fallback?: boolean;
+  /** A clip with its own sound, where the model takes the choice (a cinematic video's ambience, shared/film.ts). */
+  audio?: boolean;
 };
 /**
  * A reference sheet of the video a picture is drawn from (shared/formats.ts pictureSheets): what its recurring
@@ -116,7 +119,7 @@ export function falRequest(kind: "image" | "clip", prompt: string, options: FalO
   if (options.image && options.clipModel === "minimax-h3")
     return { model: H3_CLIP_MODEL, body: { prompt: text, image_url: options.image, duration: seconds, resolution: "768P" } };
   if (options.image && options.clipModel === "flux-3-max")
-    return { model: FLUX_CLIP_MODEL, body: { prompt: text, image_url: options.image, duration: seconds, resolution: quality === "high" ? "1080p" : "720p", generate_audio: false } };
+    return { model: FLUX_CLIP_MODEL, body: { prompt: text, image_url: options.image, duration: seconds, resolution: quality === "high" ? "1080p" : "720p", generate_audio: !!options.audio } };
   const common = { prompt: text, duration: String(seconds), negative_prompt: NEGATIVE, cfg_scale: 0.5 };
   if (options.image) return { model: IMAGE_CLIP_MODELS[quality], body: { ...common, image_url: options.image } };
   return { model: CLIP_MODEL, body: { ...common, aspect_ratio: "9:16" } };

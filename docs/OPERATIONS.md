@@ -59,6 +59,12 @@ under `/api/admin` answers 404 to anyone else.
   The **ElevenLabs account** cards at the top of this tab show the plan, the share of the period's credits used (red
   from 80%: narration fails with `VOICE_UNAVAILABLE` once they run out, so top up or upgrade before then), the voice
   slots, and how many more voices customers can clone. They need the API key's **User: read** permission.
+- **Cinematic videos (a test)**: in Create, administrators see a **Cinematic** switch (not on Storytime): every scene
+  becomes an AI clip with a camera move, scenes cut hard, the clips' ambient sound plays under the voice and the video
+  gets a film look. Choose the clips' quality and model there; to compare models, list them in
+  `FAL_CLIP_MODEL_ADMIN` (for example `minimax-h3,flux-3-max`: both can make sound, Kling's clips are silent). It
+  costs credits like any video with every scene animated (a 60-second one about 15 to 35), and fal bills each clip.
+  Nobody else can draft or make one.
 - **Presenters**: the AI presenters people can put on camera (with `HEYGEN_API_KEY` set). **Add from HeyGen** pages
   through HeyGen's stock avatars (filters: gender, HQ only, name or tag among the ones loaded): pick one, confirm your
   HeyGen plan lets you offer it, add it. **Add by ID** takes a look ID: of a HeyGen stock avatar you found in HeyGen,

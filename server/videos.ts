@@ -8,6 +8,7 @@ import { rate } from "./security";
 import { allowance, type Allowance } from "./billing";
 import { scheduleEpisode } from "./publishing";
 import { voiceUsable } from "./voices";
+import { isAdmin } from "./auth";
 import { avatarFor } from "./avatars";
 import { heygenEnabled } from "./providers/heygen";
 import {
@@ -128,10 +129,15 @@ export async function newVideoCredits(env: Env, userId: string, spec: Spec) {
     : null;
   return specCredits(spec, true, recording?.duration || undefined);
 }
+/** Cinematic videos (shared/film.ts) are a test: only administrators make one, or make one again. */
+function checkFilm(env: Env, user: DbUser, spec: Spec) {
+  if (!isHighlight(spec) && spec.film && !isAdmin(env, user)) throw new HTTPException(403, { message: "Cinematic videos are still being tested and aren't available yet." });
+}
 export async function createVideo(
   env: Env, user: DbUser, spec: Spec, a: Allowance, key: string,
   from: { seriesId?: string; slotAt?: number | null; approved?: boolean; maxCredits?: number } = {},
 ) {
+  checkFilm(env, user, spec);
   requireMedia(env);
   if (await storageFull(env, user.id)) throw refusal("STORAGE_FULL");
   // A series episode never costs more than the series says it does, however long the writer ran.
@@ -160,6 +166,7 @@ export async function createVideo(
  */
 async function rerun(env: Env, user: DbUser, video: any, spec: Spec, key: string, before: Spec) {
   requireMedia(env);
+  checkFilm(env, user, spec);
   const previous = await env.DB.prepare("SELECT video_id FROM runs WHERE user_id=? AND idempotency_key=?").bind(user.id, key).first<{ video_id: string }>();
   if (previous) return { credits: 0 };
   const a = await allowance(env, user);
