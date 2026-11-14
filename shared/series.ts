@@ -5,7 +5,7 @@ import { storyStyleIds, type StoryStyle } from "./story";
 import { FALLBACK_VOICE, voiceIdSchema } from "./voices";
 import { videoCredits } from "./credits";
 import { templates, type TemplateId } from "./templates";
-import { castSubject, dramaSchema } from "./drama";
+import { castSubject, dramaSchema, lipSyncCredits } from "./drama";
 
 // A series is a faceless channel on autopilot: one template (shared/templates.ts), voice, language, art style and
 // schedule. For every posting slot the server writes a new episode, makes it ahead of time and posts it to the series'
@@ -85,7 +85,8 @@ export const defaultSeriesSettings = (template: TemplateId = "facts"): SeriesSet
   return seriesSettingsSchema.parse({ style: t.style, voiceId: t.voice, seconds, music: { mood: t.music }, sounds: true });
 };
 /** Credits an episode of the series takes (its length, plus the scenes brought to life). */
-export const episodeCredits = (s: Pick<SeriesSettings, "seconds" | "animate">) => videoCredits(s.seconds) + s.animate;
+export const episodeCredits = (s: Pick<SeriesSettings, "seconds" | "animate"> & Partial<Pick<SeriesSettings, "drama">>) =>
+  videoCredits(s.seconds) + s.animate + (s.drama?.lipSync ? lipSyncCredits(s.seconds) : 0);
 
 /** How long before its slot an episode is made: time to render, and in review mode time to look at it. */
 export const MAKE_AHEAD = { autopilot: 6 * 3600, review: 24 * 3600 } as const;

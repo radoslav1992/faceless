@@ -133,9 +133,11 @@ export async function newVideoCredits(env: Env, userId: string, spec: Spec) {
     : null;
   return specCredits(spec, true, recording?.duration || undefined);
 }
-/** Cinematic videos (shared/film.ts) are a test: only administrators make one, or make one again. */
+/** Cinematic videos (shared/film.ts) and lip-synced scenes (shared/drama.ts) are tests: only administrators make one, or make one again. */
 function checkFilm(env: Env, user: DbUser, spec: Spec) {
-  if (!isHighlight(spec) && spec.film && !isAdmin(env, user)) throw new HTTPException(403, { message: "Cinematic videos are still being tested and aren't available yet." });
+  if (isHighlight(spec) || isAdmin(env, user)) return;
+  if (spec.film) throw new HTTPException(403, { message: "Cinematic videos are still being tested and aren't available yet." });
+  if (spec.scenes.some((s) => s.lipSync)) throw new HTTPException(403, { message: "Lip-synced scenes are still being tested and aren't available yet." });
 }
 export async function createVideo(
   env: Env, user: DbUser, spec: Spec, a: Allowance, key: string,

@@ -66,14 +66,17 @@ const total = (segments: ComposeSegment[]) => round(segments.reduce((n, s) => n 
  * or the owner's image or video, or a library clip or picture. A clip shorter than its scene loops, except AI clips
  * (made for the scene, they hold their last frame for the moment of a transition).
  */
-/** `film`: a cinematic video (shared/film.ts), whose AI clips play their own ambient sound quietly under the voice. */
+/**
+ * `film`: a cinematic video (shared/film.ts), whose AI clips play their own ambient sound quietly under the voice. A
+ * lip-synced clip (shared/drama.ts) is always silent: its sound is the voice already playing.
+ */
 function sceneSegment(ctx: PlanContext, inputs: Inputs, scene: StoryScene, seconds: number, n: number, film = false): ComposeSegment {
   const id = scene.source === "clip" ? scene.clipId || scene.imageId : scene.source === "image" ? scene.imageId : scene.source === "own" ? scene.assetId : scene.libraryId;
   const m = need(ctx, id);
   if (m.kind === "image") return { kind: "image", input: inputs.add(m.key), duration: seconds, motion: motionFor(n) };
   if (m.kind !== "video") throw new Error("MEDIA_INPUT");
   const loop = scene.source !== "clip" && m.duration > 0.5 && m.duration < seconds - 1;
-  return { kind: "video", input: inputs.add(m.key), trim: 0, duration: seconds, audio: film && scene.source === "clip" ? FILM_AMBIENCE : 0, ...(loop && { loop }) };
+  return { kind: "video", input: inputs.add(m.key), trim: 0, duration: seconds, audio: film && scene.source === "clip" && !scene.lipSync ? FILM_AMBIENCE : 0, ...(loop && { loop }) };
 }
 
 /**

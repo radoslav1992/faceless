@@ -158,8 +158,17 @@ refuses a drama to anyone but administrators and on other than story styles).
   drawn together on the series' one character sheet and kept for every episode (**One main character**, below).
 - **The season ends.** Asked for an episode past the last, `makeEpisode` answers `finished`; `runEpisode` then pauses
   the series, keeps the reason and e-mails the owner once. More episodes in Settings and Resume carry the story on.
-The series page shows the story so far (`story` in `GET /api/series/:id`). Not in it: lips moving with the words
-(scenes are pictures or clips under the voices), and the cinematic look.
+- **Lip-sync** (an option of a drama, `lipSync`). Every scene a cast member says becomes a clip of its picture with
+  the lips moving to that scene's words (`lipSyncSpec`: `lipSync` on the scene, a cut before it). It is made after
+  the voice: `lineAudio` cuts the scene's stretch out of the recording (from where its segment starts in the render,
+  so clip and recording stay in step), adds silence up to the 5 seconds the model asks for, and sends it with the
+  scene's picture to fal's MiniMax H3 Max Lip Sync (`minimax/h3-max/lip-sync/image-to-video`: `image_url`,
+  `audio_url`, `resolution` 768P; about $0.08 a second). The clip plays silent over the one recording. It is charged
+  as a high-quality clip of the scene's length (2 credits per 5 s), counted in the episode's price (`lipSyncCredits`),
+  and made again whenever the voice is recorded again (`pendingMedia`). Only administrators can make a video with
+  lip-synced scenes (`checkFilm`).
+The series page shows the story so far (`story` in `GET /api/series/:id`). Not in it: the cinematic look. Edits that
+move a lip-synced scene's edges after it is made (free edits) are not followed by a new lip-sync.
 
 **Cinematic videos** (`shared/film.ts`; a test, for administrators only). A narrated video made the way AI short
 films are, as a flag on the video (`film` in its spec), not a video type, so any story style can be made this way.

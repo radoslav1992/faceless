@@ -62,7 +62,9 @@ under `/api/admin` answers 404 to anyone else.
 - **Drama series (a test)**: creating a series on a story style, administrators see a **Drama** switch: a premise, a
   number of episodes and a cast of up to three, each with a look and a voice. Every episode continues the story from
   the ones before (the series page lists them under **Story so far**) and ends on a cliffhanger; cast members speak in
-  their own voices over the pictures (lips do not move with the words). After the last episode the series pauses and
+  their own voices over the pictures. With **Lip-sync** on, every scene a character says becomes a clip of its
+  picture with the lips moving to the line (fal's MiniMax H3 Max Lip Sync, about $0.08 a second, charged 2 credits per
+  5 seconds of those scenes). After the last episode the series pauses and
   says so; raise the number of episodes and resume to go on. Rejecting or deleting an episode takes it out of the
   story the next one is written from. Episodes cost what any episode of that length does; a dialogue is a few short
   ElevenLabs calls, one per speaker's stretch, where a narrated episode is one.

@@ -9,6 +9,7 @@ import { LONG_VIDEO_SECONDS } from "./speech";
 import { trackSchema } from "./track";
 import { SOUND_VOLUME } from "./sounds";
 import { filmClipPrompt, filmStill } from "./film";
+import { lipSyncPrompt } from "./drama";
 import {
   characterSheetPrompt, clipPrompt, fingerprint, narrationKey, narrationSchema, narrationVoice, placeKey, placeOf, placeSchema, placeSheetPrompt, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_PLACES, STORY_MAX_SCENES, voicedScript, type StoryStyle,
 } from "./story";
@@ -209,6 +210,8 @@ export type PendingMedia = {
   sheet?: string;
   /** A cinematic video's clip: made with its own ambient sound where the model can (shared/film.ts). */
   audio?: boolean;
+  /** A talking scene's clip: the picture lip-synced to the scene's stretch of the voice, so made after it (shared/drama.ts). */
+  lipSync?: boolean;
 };
 /** A reference sheet a story's pictures are drawn from (shared/story.ts); `key` names what it is drawn from. */
 export type PictureSheet = { kind: "character" | "place"; prompt: string; key: string; place?: string };
@@ -236,8 +239,12 @@ export function pendingMedia(spec: Spec): PendingMedia[] {
     if ((s.source === "image" || s.source === "clip") && !s.imageId && !showsPresenter(spec, i))
       out.push({ kind: "image", prompt: scenePrompt(s.description, spec.subject, spec.style, spec.look, placeOf(spec.places, s.place)) + (spec.film ? filmStill(i) : ""), path: ["scenes", i], key: "imageId" });
   });
+  // A lip-synced clip follows the voice it was made to: a voice still to be recorded (new words, another voice) needs it again.
+  const voiceChanges = spec.narration.kind === "voice" && !narrationCurrent(spec);
   spec.scenes.forEach((s, i) => {
-    if (s.source === "clip" && !s.clipId && !showsPresenter(spec, i))
+    if (s.source === "clip" && s.lipSync && (!s.clipId || voiceChanges) && !showsPresenter(spec, i))
+      out.push({ kind: "clip", prompt: lipSyncPrompt(s.speaker, s.text), path: ["scenes", i], key: "clipId", from: "imageId", seconds: s.clipSeconds, quality: s.clipQuality, lipSync: true });
+    else if (s.source === "clip" && !s.clipId && !showsPresenter(spec, i))
       out.push({
         kind: "clip", prompt: spec.film ? filmClipPrompt(s.description, i) : clipPrompt(s.description), path: ["scenes", i], key: "clipId", from: "imageId",
         seconds: s.clipSeconds, quality: s.clipQuality, clipModel: s.clipModel, ...(spec.film && { audio: true }),

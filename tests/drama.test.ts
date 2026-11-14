@@ -3,10 +3,11 @@ import worker from "../server/index";
 import { runEpisode } from "../server/series";
 import { joinSpeech, speakDialogue, TURN_PAUSE } from "../server/providers/elevenlabs";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
-import { castSubject, dramaSchema } from "../shared/drama";
+import { castSubject, dramaSchema, lipSyncCredits } from "../shared/drama";
+import { CLIP_CREDITS } from "../shared/credits";
 import { narrationKey, narrationVoice, voicedScript, voiceRuns } from "../shared/story";
-import { narrationCurrent, storySpec } from "../shared/formats";
-import { seriesSettingsSchema, seriesSubject } from "../shared/series";
+import { narrationCurrent, specCredits, storySpec } from "../shared/formats";
+import { episodeCredits, seriesSettingsSchema, seriesSubject } from "../shared/series";
 
 // Drama series (a test, for administrators): a series with a cast and a premise whose episodes continue one story.
 // Each episode's writer reads what happened before, cast members speak in their own voices, the cast is the series'
@@ -65,7 +66,7 @@ describe("drama series", () => {
     ]) expect(dramaSchema.safeParse(bad).success).toBe(false);
     const made = await s.create(s.admin);
     expect(made.status).toBe(201);
-    expect(made.data.series.settings.drama).toEqual(drama);
+    expect(made.data.series.settings.drama).toEqual({ ...drama, lipSync: false });
     // The cast is the series' recurring characters, each called by name in every picture.
     expect(seriesSubject(seriesSettingsSchema.parse(s.settings()))).toBe("Mara: a woman of 30, short black hair, a red coat; Ilya: a thin man of 25 in a grey hoodie");
     expect(castSubject(cast).length).toBeLessThanOrEqual(300);
@@ -126,6 +127,24 @@ describe("drama series", () => {
     expect(longer.data.series).toMatchObject({ status: "active", blocked: null });
     expect(await next()).toMatchObject({ state: "made" });
     expect(s.asked.at(-1)!.instructions).toContain("This is episode 4 of 5");
+  });
+
+  it("lip-sync the cast's scenes when asked, and count their clips in an episode's price", async () => {
+    const s = setup();
+    const plain = seriesSettingsSchema.parse(s.settings()), synced = seriesSettingsSchema.parse(s.settings({ drama: { ...drama, lipSync: true } }));
+    // Seven tenths of a 45-second episode as high-quality clips, on top of the episode.
+    expect(episodeCredits(synced)).toBe(episodeCredits(plain) + lipSyncCredits(45));
+    expect(lipSyncCredits(45)).toBe(Math.ceil(45 * 0.7 / 5) * CLIP_CREDITS.high);
+    const id = (await s.create(s.admin, { settings: s.settings({ drama: { ...drama, lipSync: true } }) })).data.series.id as string;
+    expect(await runEpisode(s.env, id, s.row(id).next_slot)).toMatchObject({ state: "made" });
+    const [first] = s.videos(id);
+    // Mara's and Ilya's scenes are lip-synced clips, cut in hard; the narrator's stays a picture.
+    expect(first.spec.scenes.map((x: any) => [x.source, x.lipSync ?? null, x.clipQuality, x.transition])).toEqual([
+      ["clip", true, "high", "cut"], ["clip", true, "high", "cut"], ["image", null, "regular", "auto"], ["clip", true, "high", "cut"],
+    ]);
+    const run = s.sqlite.prepare("SELECT credits FROM runs WHERE video_id=?").get(first.id) as any;
+    expect(run.credits).toBe(specCredits(first.spec, true));
+    expect(run.credits).toBeLessThanOrEqual(episodeCredits(synced));
   });
 
   it("say a dialogue in its speakers' voices, one stretch after another, as one recording", async () => {

@@ -14,7 +14,7 @@ import { voiceIdSchema } from "../shared/voices";
 import { offeredVoice, voiceUsable } from "./voices";
 import { SPEECH_CHARS_PER_SECOND, clipModels, clipQualities } from "../shared/credits";
 import { filmSpec } from "../shared/film";
-import { castMember, episodeTitle, NARRATOR } from "../shared/drama";
+import { castMember, episodeTitle, lipSyncSpec, NARRATOR } from "../shared/drama";
 import { isAdmin } from "./auth";
 import { languageCodes, languageName, type LanguageCode } from "../shared/series";
 import { templateIds, templateOf, type TemplateId, type VideoKind } from "../shared/templates";
@@ -307,6 +307,8 @@ export type SpecChoices = {
   cast?: { name: string; voiceId: string }[];
   /** A drama's episode: its number and the season's length (its summary is the writer's). */
   episode?: { n: number; of: number };
+  /** A drama with lip-sync: the scenes its cast says become lip-synced clips (shared/drama.ts lipSyncSpec). */
+  lipSync?: boolean;
 };
 /** A written video as a spec (AI pictures and an AI voice), or null when it does not validate. */
 export function conceptToSpec(k: StoryConcept, c: SpecChoices): StorySpec | null {
@@ -333,7 +335,7 @@ export function conceptToSpec(k: StoryConcept, c: SpecChoices): StorySpec | null
     caption: k.caption, hashtags, title: c.episode ? episodeTitle(c.episode.n, k.title) : k.title, topic: k.topic,
     ...(c.episode && { episode: { ...c.episode, summary: k.summary || k.caption.slice(0, 600) } }),
   });
-  return parsed.success ? parsed.data : null;
+  return parsed.success ? (c.lipSync ? lipSyncSpec(parsed.data) : parsed.data) : null;
 }
 
 /**

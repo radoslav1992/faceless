@@ -11,6 +11,7 @@ import { attention } from "../server/operations";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 import { languages, seriesSettingsSchema } from "../shared/series";
 import { FILM_AMBIENCE, filmSpec } from "../shared/film";
+import { lipSyncSpec } from "../shared/drama";
 import { estimatedSeconds, narrationCurrent, pendingMedia, pictureSheets, specCredits, specSchema, storySpec, type StorySpec } from "../shared/formats";
 import {
   AUTO_TRANSITIONS, characterSheetKey, clipFor, estimatedTimings, mergeScenes, moveEdge, narrationKey, placeOf, splitScene, toggleKey, resolveTransition, scenePrompt, scenesFromCounts, splitScenes, storyScript, storySegments,
@@ -1015,6 +1016,62 @@ describe("narrated videos in the content run", () => {
     // A voice nobody may use is refused before anything is made.
     const stolen = { ...talk, scenes: talk.scenes.map((s, i) => (i === 1 ? { ...s, voiceId: "clone-0123456789ab" } : s)) };
     expect(await call(worker, env, "POST", "/api/videos", { spec: stolen, idempotencyKey: crypto.randomUUID() }, user.cookie)).toMatchObject({ status: 400, data: { error: expect.stringContaining("no longer available") } });
+  });
+
+  it("lip-syncs a talking scene: its picture and its stretch of the voice go to the lip-sync model after the voice is recorded", async () => {
+    const { env, sqlite, user, spec, run } = await setup();
+    env.FAL_REFERENCE_MODEL = "off";
+    const calls = providers();
+    const others = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: any, init: any = {}) => {
+      const url = String(input?.url ?? input);
+      if (!url.includes("/v1/text-to-speech/")) return others(input, init);
+      calls.push({ method: "POST", url });
+      const chars = [...JSON.parse(init.body).text as string], step = 2 / chars.length;
+      return Response.json({
+        audio_base64: Buffer.from(new Uint8Array(2 * 48000).fill(9)).toString("base64"),
+        alignment: { characters: chars, character_start_times_seconds: chars.map((_, i) => i * step), character_end_times_seconds: chars.map((_, i) => (i + 1) * step) },
+      });
+    });
+    // Scene 2 is Mara's line; the cast's scenes become lip-synced clips, charged as high-quality clips of their length.
+    const talk = lipSyncSpec({ ...spec, scenes: spec.scenes.map((s, i) => ({ ...s, source: "image" as const, assetId: undefined, ...(i === 1 && { voiceId: "sarah", speaker: "Mara" }) })) });
+    expect(talk.scenes.map((s) => [s.source, s.lipSync ?? null, s.transition])).toEqual([["image", null, "auto"], ["clip", true, "cut"], ["image", null, "auto"], ["image", null, "auto"], ["image", null, "circleopen"]]);
+    expect(specCredits(talk, true)).toBe(videoCredits(estimatedSeconds(talk)) + CLIP_CREDITS.high * (talk.scenes[1].clipSeconds / 5));
+    // A test for administrators.
+    expect(await call(worker, env, "POST", "/api/videos", { spec: talk, idempotencyKey: crypto.randomUUID() }, user.cookie)).toMatchObject({ status: 403, data: { error: expect.stringContaining("Lip-synced scenes") } });
+    sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
+    const created = await call(worker, env, "POST", "/api/videos", { spec: talk, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(created.status).toBe(201);
+    await run();
+    const video = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
+    expect(video.renderStatus).toBe("ready");
+    // The lip-sync is asked for after the voice, with the scene's picture and its stretch of the recording, at 768P.
+    const sync = calls.findIndex((c) => c.method === "POST" && c.url === "https://queue.fal.run/minimax/h3-max/lip-sync/image-to-video");
+    expect(sync).toBeGreaterThan(calls.map((c) => c.url.includes("/v1/text-to-speech/")).lastIndexOf(true));
+    const state = JSON.parse((sqlite.prepare("SELECT provider FROM runs WHERE video_id=?").get(video.id) as any).provider);
+    const file = (link: string) => state.inputs[Number(/\/api\/render-inputs\/[0-9a-f-]{36}\/(\d+)\?token=/.exec(link)![1])] as string;
+    const body = calls[sync].body;
+    expect(Object.keys(body).sort()).toEqual(["audio_url", "image_url", "resolution"]);
+    expect(body.resolution).toBe("768P");
+    const picture = (sqlite.prepare("SELECT object_key FROM media_assets WHERE id=?").get(video.spec.scenes[1].imageId) as any).object_key;
+    expect(file(body.image_url)).toBe(picture);
+    // The line: scene 2's two seconds of the voice (the second call's audio, after the first and a pause), then silence
+    // up to the five seconds the model asks for; a 24 kHz WAV like the recording.
+    const line = new Uint8Array(await (await env.MEDIA.get(file(body.audio_url)))!.arrayBuffer());
+    expect(line.length).toBe(44 + Math.ceil(5.1 * 24000) * 2);
+    expect(new DataView(line.buffer).getUint32(24, true)).toBe(24000);
+    const sound = line.subarray(44);
+    expect(sound[48000]).toBe(9);
+    expect(sound.subarray(3 * 48000).every((b) => b === 0)).toBe(true);
+    // The scene shows the lip-synced clip, silent (its sound is the voice already playing), cut in hard.
+    expect(video.spec.scenes[1].clipId).toBeTruthy();
+    const compose = env.MEDIA_RENDERER.log.filter((p: any) => p.operation === "compose").at(-1);
+    expect(compose.segments[1]).toMatchObject({ kind: "video", audio: 0 });
+    expect(compose.segments[1].transition ?? null).toBeNull();
+    // New words are a new voice, and the lips with it: the clip is paid and made again.
+    const reworded = { ...video.spec, scenes: video.spec.scenes.map((s: any, i: number) => (i === 1 ? { ...s, text: "Where were you? Tell me now." } : s)) };
+    expect(pendingMedia(reworded).filter((m) => m.lipSync)).toHaveLength(1);
+    expect(pendingMedia(video.spec).filter((m) => m.lipSync)).toHaveLength(0);
   });
 
   it("draws every picture from its own text when FAL_REFERENCE_MODEL is off", async () => {

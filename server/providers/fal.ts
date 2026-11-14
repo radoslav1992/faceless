@@ -147,9 +147,22 @@ export function canFallBack(e: Env, references: boolean) {
 }
 /** The operator's picture quality (FAL_IMAGE_QUALITY), when it is one GPT Image knows. */
 const imageQuality = (e: Env) => imageQualities.find((q) => q === e.FAL_IMAGE_QUALITY?.trim().toLowerCase());
+/**
+ * Lip-sync (shared/drama.ts): MiniMax H3 Max Lip Sync animates a picture so its mouth moves to a recording, and
+ * returns a video as long as the recording (at least 5 seconds of it) with that recording as its sound. The request,
+ * as fal's schema for the endpoint has it: the picture (its shape between 0.4 and 2.5 wide per high: ours is 9:16),
+ * the audio, and the resolution; 768P costs $0.08 a second. Transcription of the audio guides the lips (the default).
+ */
+export const LIP_SYNC_MODEL = "minimax/h3-max/lip-sync/image-to-video";
+export const lipSyncRequest = (image: string, audio: string) => ({ model: LIP_SYNC_MODEL, body: { image_url: image, audio_url: audio, resolution: "768P" } });
+/** Submits a lip-sync once (a ticket like any clip's: its status and result are read the same way). */
+export const submitFalLipSync = (e: Env, image: string, audio: string) => { const { model, body } = lipSyncRequest(image, audio); return submitQueue(e, model, body); };
 /** Submits once; the caller stores the ticket before anything else so a retry polls instead of paying again. */
 export async function submitFal(e: Env, kind: "image" | "clip", prompt: string, options: FalOptions = {}): Promise<FalTicket> {
   const { model, body } = falRequest(kind, prompt, { ...options, ...pictureModels(e, options.fallback), quality: imageQuality(e) });
+  return submitQueue(e, model, body);
+}
+async function submitQueue(e: Env, model: string, body: unknown): Promise<FalTicket> {
   const r = await providerFetch(`https://queue.fal.run/${model}`, {
     method: "POST",
     headers: { ...auth(e), "Content-Type": "application/json" },

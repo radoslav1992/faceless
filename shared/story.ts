@@ -131,6 +131,11 @@ export const storySceneSchema = z
      */
     voiceId: z.string().regex(/^[a-z0-9][a-z0-9-]{1,39}$/).optional(),
     speaker: z.string().trim().max(40).optional(),
+    /**
+     * The scene's clip is its picture with the lips moving to the scene's words (shared/drama.ts lip-sync), made after
+     * the voice from the picture and that stretch of the recording; made again whenever the voice is recorded again.
+     */
+    lipSync: z.literal(true).optional(),
   })
   .refine((s) => s.source !== "own" || !!s.assetId, "Choose a picture or video for each scene with your own media.")
   .refine((s) => s.source !== "library" || !!s.libraryId, "Choose a library clip or picture for each scene that uses one.")
