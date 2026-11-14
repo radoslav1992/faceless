@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, ArrowRight, Check, Plus, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Plus, Trash2, X } from "lucide-react";
 import { errorText, post, useApi, useAuth, useVoices, type Account, type LibraryItem, type Series } from "../lib";
 import { Switch, useToast } from "../ui";
 import { StyleArt } from "../art";
@@ -14,6 +14,7 @@ import { defaultSeriesSettings, episodeCredits, episodeLengths, languages, lengt
 import { videosPerMonth } from "../../shared/schedule";
 import { storyStyles } from "../../shared/story";
 import { comingSoon, platforms, type PlatformId } from "../../shared/social";
+import { DRAMA_CAST_MAX, dramaSchema, type CastMember, type Drama } from "../../shared/drama";
 import { planById } from "../../shared/plans";
 import { creditsLabel } from "../../shared/credits";
 import "./create.css";
@@ -44,17 +45,74 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
   const toast = useToast();
   // Back on this page after the network's consent screen (the wizard keeps its answers meanwhile).
   const connect = (platform: PlatformId) => connectPlatform(platform, pathname).catch((e) => toast(errorText(e), "bad"));
+  const { user } = useAuth();
+  // Drama series are a test for administrators, on story styles (shared/drama.ts).
+  const canDrama = !!user?.admin && t.kind === "story";
+  const drama = settings.drama;
+  const setDrama = (patch: Partial<Drama>) => drama && set({ drama: { ...drama, ...patch } });
+  const setCast = (i: number, patch: Partial<CastMember>) => drama && setDrama({ cast: drama.cast.map((c, k) => (k === i ? { ...c, ...patch } : c)) });
   const content = (
     <>
+      {canDrama && (
+        <Section title="Drama" hint="One continuing story told in episodes by a cast of characters, each with their own voice. Every episode picks up where the last one ended and stops on a cliffhanger; the last one ends the story.">
+          <span className="row" style={{ gap: 10 }}>
+            <Switch checked={!!drama} label="Drama series"
+              onChange={(on) => set({ drama: on ? { premise: "", episodes: 10, cast: [{ name: "", role: "", look: "", voiceId: settings.voiceId }] } : undefined })} />
+            <span>Drama series <span className="chip" style={{ marginLeft: 6 }}>Admin test</span></span>
+          </span>
+          {drama && (
+            <div className="stack" style={{ gap: 14, marginTop: 12 }}>
+              <label className="field"><span className="small">Premise</span>
+                <textarea className="textarea" rows={3} maxLength={600} value={drama.premise} placeholder="A night nurse finds a patient who knows a secret about her missing brother. Tense and emotional, in a small coastal town."
+                  onChange={(e) => setDrama({ premise: e.target.value })} />
+                <span className="hint">The situation, the conflict and the tone. Every episode is written from this and from what happened before.</span>
+              </label>
+              <label className="field" style={{ maxWidth: 220 }}><span className="small">Episodes in the season</span>
+                <input className="input" type="number" min={2} max={60} value={drama.episodes} onChange={(e) => setDrama({ episodes: Math.max(2, Math.min(60, Math.round(Number(e.target.value) || 2))) })} />
+              </label>
+              <div className="stack" style={{ gap: 10 }}>
+                <span className="label">Cast <span className="muted small">(up to {DRAMA_CAST_MAX}; the narrator is the series' voice below)</span></span>
+                {drama.cast.map((c, i) => (
+                  <div key={i} className="cast-row">
+                    <div className="form-row">
+                      <label className="field"><span className="small">Name</span>
+                        <input className="input" maxLength={24} value={c.name} placeholder="Mara" onChange={(e) => setCast(i, { name: e.target.value })} />
+                      </label>
+                      <label className="field"><span className="small">Who they are</span>
+                        <input className="input" maxLength={80} value={c.role} placeholder="A night nurse hiding a debt" onChange={(e) => setCast(i, { role: e.target.value })} />
+                      </label>
+                    </div>
+                    <label className="field"><span className="small">Look</span>
+                      <input className="input" maxLength={70} value={c.look} placeholder="A woman of 30, short black hair, a red coat over scrubs" onChange={(e) => setCast(i, { look: e.target.value })} />
+                    </label>
+                    <div className="row between wrap" style={{ gap: 10 }}>
+                      <div className="grow" style={{ minWidth: 220 }}><VoiceSelect label={`${c.name || "Character"}'s voice`} value={c.voiceId} onChange={(voiceId) => setCast(i, { voiceId })} /></div>
+                      {drama.cast.length > 1 && (
+                        <button type="button" className="btn sm ghost danger" onClick={() => setDrama({ cast: drama.cast.filter((_, k) => k !== i) })}><Trash2 size={14} aria-hidden="true" /> Remove</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {drama.cast.length < DRAMA_CAST_MAX && (
+                  <button type="button" className="btn sm" style={{ justifySelf: "start" }}
+                    onClick={() => setDrama({ cast: [...drama.cast, { name: "", role: "", look: "", voiceId: settings.voiceId }] })}><Plus size={14} aria-hidden="true" /> Add a character</button>
+                )}
+              </div>
+            </div>
+          )}
+        </Section>
+      )}
+      {!drama && (
       <Section title={template === "custom" ? "What is the series about?" : "Topic and direction"} hint={template === "custom" ? "Describe the videos: the subject, the audience, the tone." : "Optional: narrow the topic or give the writer extra direction."}>
         <textarea className="textarea" rows={3} maxLength={600} value={settings.prompt} placeholder={t.examples.join(" · ")} onChange={(e) => set({ prompt: e.target.value })} />
       </Section>
+      )}
       <Section title="Voice and language">
         <div className="form-row">
           <label className="field"><span className="small">Narration language</span>
             <select className="select" value={settings.language} onChange={(e) => set({ language: e.target.value as SeriesSettings["language"] })}>{languages.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</select>
           </label>
-          <div className="field"><span className="small">Voice</span>
+          <div className="field"><span className="small">{drama ? "Narrator's voice" : "Voice"}</span>
             <VoiceSelect value={settings.voiceId} onChange={(voiceId) => set({ voiceId })} />
           </div>
         </div>
@@ -74,9 +132,11 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
       ) : (
         <Section title={`Art style · ${storyStyles[settings.style].name}`} hint="Every picture of every episode in one style.">
           <StoryStylePicker value={settings.style} onChange={(style) => set({ style })} />
-          <label className="field"><span className="small">Main character <span className="muted">(optional: drawn once, then the same in every episode)</span></span>
-            <input className="input" maxLength={300} value={settings.subject} placeholder="A small robot with a round blue head and one antenna" onChange={(e) => set({ subject: e.target.value })} />
-          </label>
+          {!drama && (
+            <label className="field"><span className="small">Main character <span className="muted">(optional: drawn once, then the same in every episode)</span></span>
+              <input className="input" maxLength={300} value={settings.subject} placeholder="A small robot with a round blue head and one antenna" onChange={(e) => set({ subject: e.target.value })} />
+            </label>
+          )}
           <label className="field"><span className="small">Animated scenes per episode</span>
             <select className="select" value={settings.animate} onChange={(e) => set({ animate: Number(e.target.value) })}>
               {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n ? `First ${n} scene${n > 1 ? "s" : ""} (+${n} credit${n > 1 ? "s" : ""})` : "None (pictures move slowly)"}</option>)}
@@ -201,6 +261,8 @@ export function SeriesWizard() {
   const [busy, setBusy] = useState(false);
   const accounts = useApi<{ accounts: Account[] }>(step >= 2 ? "/accounts" : null);
   const kidsMissing = settings.madeForKids === null && postsToYouTube(accounts.data?.accounts || [], settings);
+  // A drama needs its premise and a name and a look for everyone in its cast before it goes on.
+  const dramaIncomplete = !!settings.drama && !dramaSchema.safeParse(settings.drama).success;
   const pick = (id: TemplateId) => {
     const s = defaultSeriesSettings(id);
     setSettings({ ...s, schedule: settings.schedule, accounts: settings.accounts });
@@ -266,7 +328,7 @@ export function SeriesWizard() {
       )}
       <div className="row between" style={{ marginTop: 24 }}>
         {step > 0 ? <button type="button" className="btn" onClick={() => setStep(step - 1)}><ArrowLeft size={16} aria-hidden="true" /> Back</button> : <span />}
-        {step > 0 && step < 3 && <button type="button" className="btn primary" disabled={(template === "custom" && step === 1 && settings.prompt.trim().length < 3) || (step === 2 && kidsMissing)} onClick={() => setStep(step + 1)}>Continue <ArrowRight size={16} aria-hidden="true" /></button>}
+        {step > 0 && step < 3 && <button type="button" className="btn primary" disabled={(step === 1 && (dramaIncomplete || (template === "custom" && !settings.drama && settings.prompt.trim().length < 3))) || (step === 2 && kidsMissing)} onClick={() => setStep(step + 1)}>Continue <ArrowRight size={16} aria-hidden="true" /></button>}
         {step === 3 && <button type="button" className="btn primary big" disabled={busy || kidsMissing} onClick={create}>{busy ? <span className="spinner" aria-hidden="true" /> : <Check size={18} aria-hidden="true" />} Create series</button>}
       </div>
     </div>

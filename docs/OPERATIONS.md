@@ -59,6 +59,13 @@ under `/api/admin` answers 404 to anyone else.
   The **ElevenLabs account** cards at the top of this tab show the plan, the share of the period's credits used (red
   from 80%: narration fails with `VOICE_UNAVAILABLE` once they run out, so top up or upgrade before then), the voice
   slots, and how many more voices customers can clone. They need the API key's **User: read** permission.
+- **Drama series (a test)**: creating a series on a story style, administrators see a **Drama** switch: a premise, a
+  number of episodes and a cast of up to three, each with a look and a voice. Every episode continues the story from
+  the ones before (the series page lists them under **Story so far**) and ends on a cliffhanger; cast members speak in
+  their own voices over the pictures (lips do not move with the words). After the last episode the series pauses and
+  says so; raise the number of episodes and resume to go on. Rejecting or deleting an episode takes it out of the
+  story the next one is written from. Episodes cost what any episode of that length does; a dialogue is a few short
+  ElevenLabs calls, one per speaker's stretch, where a narrated episode is one.
 - **Cinematic videos (a test)**: in Create, administrators see a **Cinematic** switch (not on Storytime): every scene
   becomes an AI clip with a camera move, scenes cut hard, the clips' ambient sound plays under the voice and the video
   gets a film look. Choose the clips' quality and model there; to compare models, list them in

@@ -55,6 +55,10 @@ export async function checkReferences(env: Env, userId: string, spec: Spec, kept
   // An AI voice reads at most STORY_MAX_CHARS; an own voiceover is a recording with sound, up to the render's three minutes.
   if (spec.narration.kind === "voice") {
     if (!(await voiceUsable(env, spec.narration.voiceId, keptVoice, userId))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
+    // A drama's dialogue: every voice a scene is said in must be one its owner may use, like the narrator's.
+    const narrator = spec.narration.voiceId;
+    for (const id of new Set(spec.scenes.flatMap((s) => (s.voiceId && s.voiceId !== narrator ? [s.voiceId] : []))))
+      if (!(await voiceUsable(env, id, id, userId))) throw new HTTPException(400, { message: "A scene is said in a voice that is no longer available. Choose another voice for it." });
     if (storyScript(spec.scenes).length > STORY_MAX_CHARS) throw new HTTPException(400, { message: `The script can be up to ${STORY_MAX_CHARS.toLocaleString("en-US")} characters (about ${Math.round(STORY_MAX_CHARS / 15)} seconds).` });
   } else {
     const a = await env.DB.prepare("SELECT mime,duration,meta FROM media_assets WHERE id=? AND user_id=?").bind(spec.narration.assetId, userId).first<{ mime: string; duration: number; meta: string }>();

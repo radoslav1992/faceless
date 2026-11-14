@@ -2,7 +2,7 @@ import type { Env } from "./types";
 import { now, uid } from "./types";
 import { json } from "./db";
 import { extOf, mediaKey } from "./storage";
-import { seriesSettingsSchema } from "../shared/series";
+import { seriesSettingsSchema, seriesSubject } from "../shared/series";
 import { characterSheetKey } from "../shared/story";
 
 // A series' main character, drawn once. Every video draws its recurring characters on a reference sheet first and
@@ -40,7 +40,9 @@ export async function keepSeriesCharacter(env: Env, videoId: string, userId: str
       .bind(videoId, userId).first<{ id: string; name: string; settings: string; character_asset: string | null; character_key: string | null }>();
     if (!s) return;
     const settings = seriesSettingsSchema.safeParse(json(s.settings, {}));
-    if (!settings.success || !settings.data.subject.trim() || characterSheetKey(settings.data.subject, settings.data.style) !== key) return;
+    // The series' own characters: its main character, or a drama's cast (shared/drama.ts), all on one sheet.
+    const subject = settings.success ? seriesSubject(settings.data) : "";
+    if (!settings.success || !subject.trim() || characterSheetKey(subject, settings.data.style) !== key) return;
     // Another episode made at the same time kept its sheet first: the series has one look, the first one.
     if (s.character_asset && s.character_key === key) return;
     const copies = "user_id=?1 AND video_id IS NULL AND kind='ai_image' AND json_extract(meta,'$.series')=?2";

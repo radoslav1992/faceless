@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, CalendarClock, Film, Pause, Play, Plus, RefreshCw, Repeat, Settings2, Sparkles, Trash2, UserRound } from "lucide-react";
-import { del, errorText, fileUrl, newKey, patch, post, useApi, useAuth, usePoll, when, type Account, type Series, type Video } from "../lib";
+import { del, errorText, fileUrl, newKey, patch, post, useApi, useAuth, usePoll, when, type Account, type Series, type StoryEpisode, type Video } from "../lib";
 import { useToast } from "../ui";
 import { StyleArt } from "../art";
 import { ConfirmDialog } from "./pickers";
@@ -9,7 +9,7 @@ import { SeriesSettingsForm } from "./SeriesWizard";
 import { useConnectOutcome } from "./Channels";
 import { PlatformBadge, PublicationLine, StatusChip, making, phaseText } from "./video-ui";
 import { templates } from "../../shared/templates";
-import { languageName, lengthName, type SeriesSettings } from "../../shared/series";
+import { languageName, lengthName, seriesSubject, type SeriesSettings } from "../../shared/series";
 import { videosPerMonth } from "../../shared/schedule";
 import { storyStyles } from "../../shared/story";
 import { creditsLabel } from "../../shared/credits";
@@ -66,7 +66,7 @@ export function SeriesPage() {
   const { refresh } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
-  const { data, error, reload, setData } = useApi<{ series: Series; videos: Video[]; upcoming: { at: number; made: boolean }[] }>(`/series/${id}`);
+  const { data, error, reload, setData } = useApi<{ series: Series; videos: Video[]; upcoming: { at: number; made: boolean }[]; story?: StoryEpisode[] }>(`/series/${id}`);
   const [tab, setTab] = useState<"episodes" | "settings">("episodes");
   const [settings, setSettings] = useState<SeriesSettings | null>(null);
   const [name, setName] = useState("");
@@ -96,6 +96,7 @@ export function SeriesPage() {
   const bySlot = new Map(data.videos.filter((v) => v.slotAt).map((v) => [v.slotAt!, v]));
   const past = data.videos.filter((v) => !v.slotAt || v.slotAt <= Date.now() / 1000 || !data.upcoming.some((u) => u.at === v.slotAt));
   const editing = settings ?? s.settings;
+  const drama = s.settings.drama, story = data.story || [], subject = seriesSubject(s.settings);
   return (
     <div className="page">
       <div className="page-head">
@@ -113,20 +114,40 @@ export function SeriesPage() {
             : <button type="button" className="btn primary" onClick={() => run("resume", () => patch(`/series/${s.id}`, { status: "active" }), "Resumed.")}><Play size={16} aria-hidden="true" /> Resume</button>}
         </div>
       </div>
-      {s.blocked && <p className="notice warn" style={{ marginBottom: 16 }}>{s.blocked} <Link className="link" to="/app/billing">Billing</Link></p>}
+      {s.blocked && <p className="notice warn" style={{ marginBottom: 16 }}>{s.blocked}{s.blockedBy !== "finished" && <> <Link className="link" to="/app/billing">Billing</Link></>}</p>}
       <div className="tabs" role="tablist" style={{ marginBottom: 20 }}>
         <button role="tab" aria-selected={tab === "episodes"} onClick={() => setTab("episodes")}><Film size={15} aria-hidden="true" /> Episodes</button>
         <button role="tab" aria-selected={tab === "settings"} onClick={() => { setTab("settings"); setSettings(s.settings); setName(s.name); }}><Settings2 size={15} aria-hidden="true" /> Settings</button>
       </div>
-      {tab === "episodes" && t?.kind !== "backdrop" && s.settings.subject.trim() && (
+      {tab === "episodes" && drama && (
+        // A drama: where the season stands, and what has happened so far (what the next episode's writer reads).
+        <section className="card stack" style={{ marginBottom: 20 }} aria-labelledby="story-title">
+          <div className="row between wrap" style={{ gap: 8 }}>
+            <h2 id="story-title" style={{ fontSize: 18 }}>Story so far <span className="chip" style={{ marginLeft: 8, verticalAlign: 2 }}>Drama · admin test</span></h2>
+            <span className="small muted">{story.length ? `Episode ${Math.min(story.at(-1)!.n, drama.episodes)} of ${drama.episodes}` : `${drama.episodes} episodes`} · {drama.cast.map((c) => c.name).join(", ")}</span>
+          </div>
+          <p className="small muted" style={{ margin: 0 }}>{drama.premise}</p>
+          {story.length ? (
+            <ol className="story-list list-plain">
+              {story.map((e) => (
+                <li key={e.videoId}>
+                  <Link to={`/app/videos/${e.videoId}`} className="link">Ep. {e.n}: {e.title || "Episode"}</Link>
+                  <span className="small muted">{e.summary}</span>
+                </li>
+              ))}
+            </ol>
+          ) : <p className="small muted" style={{ margin: 0 }}>Nothing yet: the first episode sets the story going.</p>}
+        </section>
+      )}
+      {tab === "episodes" && t?.kind !== "backdrop" && subject.trim() && (
         // The main character, drawn once: every episode's pictures are drawn from this one drawing.
         <div className="slot character" style={{ marginBottom: 20 }}>
-          <div className="slot-cover">{s.characterAssetId ? <img src={fileUrl(s.characterAssetId)} alt={`The main character: ${s.settings.subject}`} /> : <UserRound size={18} aria-hidden="true" />}</div>
+          <div className="slot-cover">{s.characterAssetId ? <img src={fileUrl(s.characterAssetId)} alt={`${drama ? "The cast" : "The main character"}: ${subject}`} /> : <UserRound size={18} aria-hidden="true" />}</div>
           <div style={{ minWidth: 0 }}>
-            <strong>Main character</strong>
-            <small className="who">{s.settings.subject}</small>
+            <strong>{drama ? "Cast" : "Main character"}</strong>
+            <small className="who">{subject}</small>
             <small>{s.characterAssetId
-              ? "Drawn once. Every episode is drawn from this picture, so the character looks the same each time."
+              ? `Drawn once. Every episode is drawn from this picture, so ${drama ? "the cast looks" : "the character looks"} the same each time.`
               : "Drawn with the next episode, then kept the same in every episode after it."}</small>
           </div>
           {s.characterAssetId && <button type="button" className="btn sm" onClick={() => setNewLook(true)}><RefreshCw size={14} aria-hidden="true" /> New look</button>}

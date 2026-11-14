@@ -10,7 +10,7 @@ import { trackSchema } from "./track";
 import { SOUND_VOLUME } from "./sounds";
 import { filmClipPrompt, filmStill } from "./film";
 import {
-  characterSheetPrompt, clipPrompt, fingerprint, narrationKey, narrationSchema, placeKey, placeOf, placeSchema, placeSheetPrompt, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_PLACES, STORY_MAX_SCENES, voicedScript, type StoryStyle,
+  characterSheetPrompt, clipPrompt, fingerprint, narrationKey, narrationSchema, narrationVoice, placeKey, placeOf, placeSchema, placeSheetPrompt, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_PLACES, STORY_MAX_SCENES, voicedScript, type StoryStyle,
 } from "./story";
 
 // The editable description ("spec") of a video, one of two formats:
@@ -109,6 +109,11 @@ export const storySpec = z.object({
   topic: z.string().trim().max(60).default(""),
   /** A cinematic video (shared/film.ts; administrators only, server/videos.ts): film framing and sound, a film look. */
   film: z.literal(true).optional(),
+  /**
+   * An episode of a drama (shared/drama.ts): its number in the season, the season's length, and what happens in it,
+   * which the writer of the next episode reads. Set when the episode is written.
+   */
+  episode: z.object({ n: z.number().int().min(1).max(999), of: z.number().int().min(1).max(999), summary: z.string().trim().max(600).default("") }).optional(),
 });
 export type StorySpec = z.infer<typeof storySpec>;
 
@@ -171,13 +176,13 @@ export const paidMoment = (spec: HighlightSpec) => {
 
 /** The AI voice is recorded for the video's current words and voice (no new recording is paid). */
 export function narrationCurrent(spec: StorySpec) {
-  return spec.narration.kind === "voice" && !!spec.generated?.voiceAssetId && spec.generated.key === narrationKey(spec.narration.voiceId, voicedScript(spec.scenes));
+  return spec.narration.kind === "voice" && !!spec.generated?.voiceAssetId && spec.generated.key === narrationKey(narrationVoice(spec.narration.voiceId, spec.scenes), voicedScript(spec.scenes));
 }
 
 /** What a presenter video is made from: the avatar, its quality and the AI voice's words (a change needs a new one). */
 export const presenterKey = (spec: StorySpec) =>
   spec.presenter && spec.narration.kind === "voice"
-    ? `${spec.presenter.avatarId}:${spec.presenter.quality}:${narrationKey(spec.narration.voiceId, voicedScript(spec.scenes))}` : "";
+    ? `${spec.presenter.avatarId}:${spec.presenter.quality}:${narrationKey(narrationVoice(spec.narration.voiceId, spec.scenes), voicedScript(spec.scenes))}` : "";
 /**
  * The presenter's video is made for the video's current avatar, quality and words, from the recording it keeps (no
  * new one is paid). A new recording always needs a new presenter video: the lips follow the recording.

@@ -977,6 +977,46 @@ describe("narrated videos in the content run", () => {
     expect(plain.segments.every((s) => !s.audio)).toBe(true);
   });
 
+  it("narrates a dialogue in its scenes' voices: one call per stretch, joined into one recording the video keeps", async () => {
+    const { env, user, spec, run } = await setup();
+    env.FAL_REFERENCE_MODEL = "off";
+    const calls = providers();
+    // ElevenLabs times every character it was sent, two seconds a call.
+    const others = globalThis.fetch;
+    const spoken: { voice: string; text: string }[] = [];
+    vi.stubGlobal("fetch", async (input: any, init: any = {}) => {
+      const url = String(input?.url ?? input);
+      if (!url.includes("/v1/text-to-speech/")) return others(input, init);
+      const text = JSON.parse(init.body).text as string, chars = [...text], step = 2 / chars.length;
+      spoken.push({ voice: url.split("/")[5], text });
+      return Response.json({
+        audio_base64: Buffer.from(new Uint8Array(2 * 48000)).toString("base64"),
+        alignment: { characters: chars, character_start_times_seconds: chars.map((_, i) => i * step), character_end_times_seconds: chars.map((_, i) => (i + 1) * step) },
+      });
+    });
+    // Scenes 2 and 3 are Sarah's, scene 5 Liam's; the narrator (George) says the rest.
+    const talk = { ...spec, scenes: spec.scenes.map((s, i) => ({ ...s, source: "image" as const, assetId: undefined, ...(i === 1 || i === 2 ? { voiceId: "sarah", speaker: "Mara" } : i === 4 ? { voiceId: "liam", speaker: "Ilya" } : {}) })) };
+    const created = await call(worker, env, "POST", "/api/videos", { spec: talk, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(created.status).toBe(201);
+    await run();
+    const video = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
+    expect(video.renderStatus).toBe("ready");
+    const words = (from: number, to: number) => voicedScript(talk.scenes.slice(from, to));
+    expect(spoken).toEqual([
+      { voice: "JBFqnCBsd6RMkjVDRZzb", text: words(0, 1) }, { voice: "EXAVITQu4vr4xnSDxMaL", text: words(1, 3) },
+      { voice: "JBFqnCBsd6RMkjVDRZzb", text: words(3, 4) }, { voice: "TX3LPaxmHKxFdv7VOQHJ", text: words(4, 5) },
+    ]);
+    // One recording: every word of the script, in order, the later speakers' after the ones before; no alignment needed.
+    expect(calls.some((c) => c.url === ALIGNMENT_URL)).toBe(false);
+    expect(video.spec.generated.words.map((w: any) => w.text)).toEqual(textWords(storyScript(talk.scenes)));
+    expect(video.spec.generated.words.at(-1).end).toBeCloseTo(4 * 2 + 3 * 0.25, 1);
+    expect(narrationCurrent(video.spec)).toBe(true);
+    expect(video.spec.scenes.map((s: any) => s.speaker ?? null)).toEqual([null, "Mara", "Mara", null, "Ilya"]);
+    // A voice nobody may use is refused before anything is made.
+    const stolen = { ...talk, scenes: talk.scenes.map((s, i) => (i === 1 ? { ...s, voiceId: "clone-0123456789ab" } : s)) };
+    expect(await call(worker, env, "POST", "/api/videos", { spec: stolen, idempotencyKey: crypto.randomUUID() }, user.cookie)).toMatchObject({ status: 400, data: { error: expect.stringContaining("no longer available") } });
+  });
+
   it("draws every picture from its own text when FAL_REFERENCE_MODEL is off", async () => {
     const { env, user, spec, run } = await setup();
     env.FAL_REFERENCE_MODEL = "off";

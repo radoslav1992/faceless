@@ -12,7 +12,8 @@ import { scheduleEpisode, cancelScheduled, PAUSED } from "./publishing";
 import { voiceUsable } from "./voices";
 import { backdropFor, conceptToSpec, musicCatalog, writeVideo } from "./story";
 import { chooseSounds } from "./sounds";
-import { episodeCredits, LATE_GRACE, MAKE_AHEAD, seriesSettingsSchema, type SeriesSettings } from "../shared/series";
+import { episodeCredits, LATE_GRACE, MAKE_AHEAD, seriesSettingsSchema, seriesSubject, type SeriesSettings } from "../shared/series";
+import { isAdmin } from "./auth";
 import { seriesTemplates, templateOf, type TemplateId } from "../shared/templates";
 import { slots, validZone } from "../shared/schedule";
 import { planById } from "../shared/plans";
@@ -79,15 +80,18 @@ const blockedText: Record<string, string> = {
   failed: "Skipped: we couldn't write that episode. The next one is tried as usual.",
   busy: "Skipped: too much was being made at once. The next episode goes ahead.",
   storage: "Skipped: your storage is full. Delete some files or videos, or upgrade, and the next episode goes ahead.",
+  finished: "The season is complete: its last episode has been made. To go on with the story, raise the number of episodes in Settings and resume.",
 };
 function seriesView(s: any, extra: Record<string, unknown> = {}) {
   const settings = seriesSettings(s);
   return {
     id: s.id, name: s.name, template: s.template, status: s.status, settings, nextSlot: s.next_slot,
     blocked: s.blocked ? blockedText[s.blocked] || null : null, credits: episodeCredits(settings),
+    /** Why: "credits", "trial" and "storage" are for the owner to solve in Billing. */
+    blockedBy: s.blocked && blockedText[s.blocked] ? s.blocked : null,
     // The main character as drawn for every episode (server/characters.ts): only while it is the character and art
     // style the series has now; after a change the next episode draws a new one.
-    characterAssetId: s.character_asset && settings.subject.trim() && s.character_key === characterSheetKey(settings.subject, settings.style) ? s.character_asset : null,
+    characterAssetId: s.character_asset && seriesSubject(settings).trim() && s.character_key === characterSheetKey(seriesSubject(settings), settings.style) ? s.character_asset : null,
     createdAt: s.created_at, updatedAt: s.updated_at, ...extra,
   };
 }
@@ -104,7 +108,14 @@ const createSchema = z.object({
 async function checkSettings(env: Env, user: DbUser, template: TemplateId, settings: SeriesSettings, keptVoice: string | null = null) {
   if (!validZone(settings.schedule.timezone)) throw new HTTPException(400, { message: "Choose a valid time zone." });
   if (!(await voiceUsable(env, settings.voiceId, keptVoice, user.id))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
-  if (template === "custom" && settings.prompt.length < 3) throw new HTTPException(400, { message: "Describe what the videos of this series are about." });
+  if (template === "custom" && !settings.drama && settings.prompt.length < 3) throw new HTTPException(400, { message: "Describe what the videos of this series are about." });
+  // Drama series (shared/drama.ts) are a test for administrators: a story in episodes, told by a cast with voices.
+  if (settings.drama) {
+    if (!isAdmin(env, user)) throw new HTTPException(403, { message: "Drama series are still being tested and aren't available yet." });
+    if (templateOf(template).kind !== "story") throw new HTTPException(400, { message: "A drama is a story series: choose a story style for it." });
+    for (const c of settings.drama.cast)
+      if (!(await voiceUsable(env, c.voiceId, null, user.id))) throw new HTTPException(400, { message: `Choose one of the voices offered for ${c.name}.` });
+  }
   if (settings.accounts.length) {
     const rows = (await env.DB.prepare(`SELECT id,platform FROM social_accounts WHERE user_id=? AND id IN (${settings.accounts.map(() => "?").join(",")})`)
       .bind(user.id, ...settings.accounts).all<{ id: string; platform: string }>()).results;
@@ -167,6 +178,8 @@ series.get("/:id", async (c) => {
   const made = new Set(videos.map((v) => v.slot_at).filter(Boolean));
   return c.json({
     series: seriesView(s),
+    // A drama: its episodes in order, with what happens in each.
+    ...(settings.drama && { story: await storySoFar(c.env, s.id) }),
     videos: videos.map((v) => videoView(v)),
     upcoming: upcoming.filter((at) => made.has(at) || s.next_slot == null || at >= s.next_slot).slice(0, 30).map((at) => ({ at, made: made.has(at) })),
   });
@@ -253,6 +266,18 @@ series.post("/:id/episodes", async (c) => {
 const episodeKey = (seriesId: string, slot: number | null, extra: string) => (slot ? `episode:${seriesId}:${slot}` : `episode:${seriesId}:extra:${extra}`);
 
 /**
+ * A drama's episodes so far, in order: the number, title and summary each was written with (kept in its video's spec,
+ * so a deleted or rejected episode leaves the story). The next writer reads them; the series page shows them.
+ */
+async function storySoFar(env: Env, seriesId: string) {
+  return (await env.DB.prepare(
+    `SELECT id,title,json_extract(spec,'$.episode.n') AS n,json_extract(spec,'$.episode.summary') AS summary FROM videos
+     WHERE series_id=? AND status<>'rejected' AND json_extract(spec,'$.episode.n') IS NOT NULL ORDER BY n, created_at LIMIT 200`,
+  ).bind(seriesId).all<{ id: string; title: string; n: number; summary: string | null }>()).results
+    .map((v) => ({ n: v.n, videoId: v.id, title: v.title.replace(/^Ep\. \d+: /, ""), summary: v.summary || "" }));
+}
+
+/**
  * Writes and creates one episode of a series: for `slot` (one video per slot), or an extra one (null). Returns the
  * video, or why it could not be made (`blocked`: the reason kept on the series when a slot is skipped).
  */
@@ -268,16 +293,23 @@ export async function makeEpisode(
   const recent = (await env.DB.prepare("SELECT title FROM videos WHERE series_id=? AND title<>'' ORDER BY created_at DESC LIMIT 40").bind(s.id).all<{ title: string }>()).results.map((r) => r.title);
   const catalog = settings.music.trackId ? [] : await musicCatalog(env, settings.music.mood);
   const backdropId = template.kind === "backdrop" ? await backdropFor(env, settings.backdropId) : null;
+  // A drama: the next episode of its season, written from the premise, the cast and the episodes before it.
+  const drama = settings.drama, soFar = drama ? await storySoFar(env, s.id) : [];
+  const episode = drama ? { n: (soFar.at(-1)?.n ?? 0) + 1, of: drama.episodes } : null;
+  if (episode && episode.n > episode.of) return { error: blockedText.finished, status: 409, blocked: "finished" };
+  const subject = seriesSubject(settings);
   const concept = await writeVideo(env, {
     template: s.template, prompt: settings.prompt, seconds: settings.seconds, language: settings.language, style: settings.style,
-    subject: settings.subject, recent, music: catalog,
+    subject, recent, music: catalog,
+    ...(drama && episode && { drama: { premise: drama.premise, cast: drama.cast, soFar, episode: episode.n, of: episode.of } }),
   });
   if (!concept) return { error: "We couldn't write this episode right now. Please try again in a minute.", status: 503, blocked: "failed" };
   const sounds = settings.sounds ? await chooseSounds(env, { userId: user.id, scenes: concept.scenes, create: true }) : null;
   const picked = settings.music.trackId || (concept.music && catalog.find((m) => m.ref === concept.music)?.id) || catalog[0]?.id;
   const spec = conceptToSpec(concept, {
     kind: template.kind, voiceId: settings.voiceId, style: settings.style, language: settings.language, captions: settings.captions,
-    subject: settings.subject, animate: settings.animate, hashtags: settings.hashtags, backdropId, sounds,
+    subject, animate: settings.animate, hashtags: settings.hashtags, backdropId, sounds,
+    ...(drama && episode && { cast: drama.cast, episode }),
     music: picked && settings.music.mood !== "none" ? { trackId: picked, volume: settings.music.volume } : null,
   });
   if (!spec) return { error: "The episode we wrote didn't come out right. Please try again.", status: 502, blocked: "failed" };
@@ -323,6 +355,15 @@ export async function runEpisode(env: Env, seriesId: string, slot: number) {
     await env.DB.prepare("UPDATE series SET next_slot=?,failures=0,blocked=NULL,attempted_at=NULL,updated_at=? WHERE id=? AND (next_slot IS NULL OR next_slot<=?)")
       .bind(after, now(), seriesId, slot).run();
     return { state: "made" as const, videoId: result.id };
+  }
+  // A drama whose last episode is made: the series stops (never skipping slot after slot), and its owner is told once.
+  if (result.blocked === "finished") {
+    await env.DB.prepare("UPDATE series SET status='paused',blocked='finished',next_slot=NULL,failures=0,attempted_at=NULL,updated_at=? WHERE id=? AND status='active'").bind(now(), seriesId).run();
+    if (s.blocked !== "finished" && settings.notify)
+      await mail(env, user.email, `“${s.name}” is complete`, [
+        `Every episode of your series “${s.name}” has been made, so it has stopped.`, "", blockedText.finished, "", `Open the series: ${siteUrl(env)}/app/series/${s.id}`,
+      ]).catch(() => {});
+    return { state: "stopped" as const };
   }
   const retry = result.blocked === "failed" && s.failures + 1 < 3;
   await env.DB.prepare(`UPDATE series SET failures=?,blocked=?,next_slot=CASE WHEN ? THEN next_slot ELSE ? END,updated_at=? WHERE id=? AND (next_slot IS NULL OR next_slot<=?)`)

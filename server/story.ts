@@ -14,6 +14,7 @@ import { voiceIdSchema } from "../shared/voices";
 import { offeredVoice, voiceUsable } from "./voices";
 import { SPEECH_CHARS_PER_SECOND, clipModels, clipQualities } from "../shared/credits";
 import { filmSpec } from "../shared/film";
+import { castMember, episodeTitle, NARRATOR } from "../shared/drama";
 import { isAdmin } from "./auth";
 import { languageCodes, languageName, type LanguageCode } from "../shared/series";
 import { templateIds, templateOf, type TemplateId, type VideoKind } from "../shared/templates";
@@ -68,7 +69,9 @@ export type StoryConcept = {
    * `tone`: how the AI voice says the scene (shared/story.ts voiceTones), or empty to keep the one it had; `place`: the
    * label of the place it is set in, or empty.
    */
-  scenes: { text: string; picture: string; keys: string[]; tone: VoiceTone | ""; place: string }[];
+  scenes: { text: string; picture: string; keys: string[]; tone: VoiceTone | ""; place: string; /** A drama: who says the scene (a cast member's name, or the narrator). */ speaker?: string }[];
+  /** A drama's episode: what happens in it, for the writer of the next one. */
+  summary?: string;
 };
 const sceneJson = {
   type: "object", additionalProperties: false, required: ["text", "picture", "keys", "tone", "place"],
@@ -98,6 +101,14 @@ const storyJson = {
     scenes: { type: "array", minItems: 2, maxItems: STORY_MAX_SCENES, items: sceneJson },
   },
 };
+/** A drama's episode (shared/drama.ts): every scene also says who speaks it, and the episode is summed up for the next one. */
+const dramaJson = {
+  ...storyJson, required: [...storyJson.required, "summary"],
+  properties: {
+    ...storyJson.properties, summary: { type: "string" },
+    scenes: { ...storyJson.properties.scenes, items: { ...sceneJson, required: [...sceneJson.required, "speaker"], properties: { ...sceneJson.properties, speaker: { type: "string" } } } },
+  },
+};
 /** The writer's places: each with a label (each label once) and its description, at most STORY_MAX_PLACES. */
 function acceptPlaces(value: unknown): StoryPlace[] {
   const out: StoryPlace[] = [];
@@ -120,8 +131,8 @@ export function acceptStory(value: unknown, maxChars = STORY_MAX_CHARS): StoryCo
   const r = z.object({
     title: z.string().optional(), topic: z.string().optional(), caption: z.string().optional(), headline: z.string().optional(),
     hashtags: z.array(z.string()).optional(), subject: z.string().optional(), look: z.string().optional(), music: z.string().optional(),
-    places: z.unknown().optional(),
-    scenes: z.array(z.object({ text: z.unknown(), picture: z.unknown(), keys: z.unknown(), tone: z.unknown(), place: z.unknown() }).partial()),
+    places: z.unknown().optional(), summary: z.unknown().optional(),
+    scenes: z.array(z.object({ text: z.unknown(), picture: z.unknown(), keys: z.unknown(), tone: z.unknown(), place: z.unknown(), speaker: z.unknown() }).partial()),
   }).safeParse(value);
   if (!r.success) return null;
   const places = acceptPlaces(r.data.places);
@@ -135,7 +146,7 @@ export function acceptStory(value: unknown, maxChars = STORY_MAX_CHARS): StoryCo
     const picture = tidy(s.picture, 300);
     scenes.push({
       text, picture: picture.length >= 3 ? picture : `An illustration of: ${text}`.slice(0, 300), keys: sceneKeys(text, s.keys), tone: toneOf(s.tone),
-      place: placeLabel(places, s.place),
+      place: placeLabel(places, s.place), ...(tidy(s.speaker, 40) && { speaker: tidy(s.speaker, 40) }),
     });
     chars += text.length + 1;
   }
@@ -146,6 +157,7 @@ export function acceptStory(value: unknown, maxChars = STORY_MAX_CHARS): StoryCo
     hashtags: (d.hashtags || []).map((h) => tidy(h, 60)).filter(Boolean).slice(0, 8),
     headline: tidy(String(d.headline || "").replace(/[\p{Extended_Pictographic}]/gu, ""), 140), subject: tidy(d.subject, 300),
     look: tidy(d.look, 300), places, music: /^music\d{1,3}$/.test(d.music || "") ? d.music! : "", scenes,
+    ...(tidy(d.summary, 600) && { summary: tidy(d.summary, 600) }),
   };
 }
 
@@ -180,7 +192,28 @@ export type WriteRequest = {
   recent: string[];
   /** Music the model may pick from (by code). */
   music?: { ref: string; name: string; tags?: string; description?: string }[];
+  /**
+   * An episode of a drama (shared/drama.ts): the story's premise and cast, what happened in the episodes before, and
+   * which episode of how many this is.
+   */
+  drama?: { premise: string; cast: { name: string; role: string; look: string }[]; soFar: { n: number; title: string; summary: string }[]; episode: number; of: number };
 };
+/** How an episode of a drama is written, in place of the story rules. */
+const dramaRules = (d: NonNullable<WriteRequest["drama"]>) => [
+  `This is episode ${d.episode} of ${d.of} of a serial drama for vertical video: one continuing story told in short episodes, mostly through what its characters say. The premise, the cast and the story so far are given as data.`,
+  d.episode === 1
+    ? "Episode 1: open in the middle of a tense moment, make clear in the first scenes who the characters are and what each of them wants, and set the conflict of the whole story going."
+    : "Continue the story exactly where the story so far ends: never start it again, never contradict what happened, and recap nothing beyond a few words inside a line.",
+  d.episode >= d.of
+    ? "This is the final episode: bring the main conflict to its end and close the story; the last scene is its ending, not a cliffhanger."
+    : "Something must change in this episode (a secret comes out, a choice is made, a plan fails), and the last scene ends on a cliffhanger: a reveal, a threat or a question the next episode has to answer.",
+  `Each scene is said by one speaker. \`speaker\`: the name of a cast member exactly as given, or "${NARRATOR}". Most scenes, and at least half, are a character speaking; the narrator only bridges time and place, in one short sentence in the present tense.`,
+  "A character's `text` is only the words they say out loud, in the first person, as people really talk: no name in front, no quotation marks, no 'she said'. Speakers answer each other, and every character sounds like themselves.",
+  "Only the cast speaks. Other people may be seen in pictures, never named and never speaking.",
+  "Each `picture` shows the speaker while they talk (or what the narrator describes), calling cast members by their names, with their expression and what they are doing.",
+  "headline: this episode's title in 2 to 6 words, in the narration's language (no emojis, no episode number). title: the same title.",
+  "summary: what happens in this episode in two or three English sentences, with how it ends, for the writer of the next episode.",
+];
 /** How each video type is written, on top of the template's brief. */
 const kindRules: Record<Exclude<VideoKind, "script">, (r: WriteRequest) => string[]> = {
   story: () => [
@@ -229,10 +262,11 @@ export async function writeVideo(env: Env, r: WriteRequest): Promise<StoryConcep
     `Write the spoken text, the headline, the title, the caption and the hashtags in ${languageName(r.language)}. Picture descriptions, the subject, the places and the topic are always in English.`,
     `Length: about ${r.seconds} seconds of speech, about ${chars} characters in all, split into exactly ${count} scenes.`,
     "Each scene: `text`, one or two short spoken sentences; `picture`, the picture that shows what is said, in 12 to 30 English words (subject, action, setting, composition), concrete and drawable, never text, captions or logos; `keys`, one or two key words copied exactly from the scene's text, the words a viewer should catch (they are coloured in the subtitles).",
-    ...kindRules[t.kind as Exclude<VideoKind, "script">](r),
-    r.subject
-      ? "subject: keep the owner's recurring character (given as data) and put it in every picture."
-      : SUBJECT_RULE,
+    ...(r.drama ? dramaRules(r.drama) : kindRules[t.kind as Exclude<VideoKind, "script">](r)),
+    r.drama ? "subject: the cast as given in `subject` (data), unchanged: these are the people in the pictures."
+      : r.subject
+        ? "subject: keep the owner's recurring character (given as data) and put it in every picture."
+        : SUBJECT_RULE,
     LOOK_RULE,
     PLACES_RULE,
     CAMERA_RULE,
@@ -241,16 +275,24 @@ export async function writeVideo(env: Env, r: WriteRequest): Promise<StoryConcep
     "music: a musicN from the music list whose mood fits (it plays quietly under the voice), or an empty string.",
     "Plain spoken text only: no emojis, hashtags, stage directions, brackets or markdown in `text`.",
     "caption: 1–3 short sentences for the post description (no hashtags in it). hashtags: 3–6, lowercase, no spaces. title: at most 70 characters, for YouTube. topic: 2–4 English words naming the subject.",
-    "Never repeat a topic from the recent titles, unless the owner's request asks for it.",
+    r.drama ? "Never reuse an episode title from the recent titles." : "Never repeat a topic from the recent titles, unless the owner's request asks for it.",
   ].join("\n");
   const input = {
-    template: { name: t.name, brief: t.brief },
-    ownerRequest: r.prompt || "",
+    // A drama is written from its premise, not from the template's brief.
+    template: r.drama ? { name: "Drama series", brief: "A serial drama: tense, emotional, character-driven, told in short episodes that each end on a cliffhanger." } : { name: t.name, brief: t.brief },
+    ownerRequest: r.drama ? "" : r.prompt || "",
+    ...(r.drama && {
+      premise: r.drama.premise,
+      cast: r.drama.cast.map((c) => ({ name: c.name, ...(c.role && { role: c.role }), look: c.look })),
+      // The latest episodes in full, older ones by their titles: the story stays in view without growing without end.
+      storySoFar: r.drama.soFar.slice(-12).map((e) => ({ episode: e.n, title: e.title, summary: e.summary })),
+      earlierEpisodes: r.drama.soFar.slice(0, -12).map((e) => `${e.n}: ${e.title}`),
+    }),
     ...(r.subject && { subject: r.subject }),
     music: (r.music || []).map((m) => ({ code: m.ref, name: m.name, tags: m.tags, ...(m.description && { description: m.description }) })),
     recentTitles: r.recent.slice(0, 40),
   };
-  return acceptStory(await aiJson(env, instructions, input, storyJson, Math.min(12000, 1800 + count * 230), 90000));
+  return acceptStory(await aiJson(env, instructions, input, r.drama ? dramaJson : storyJson, Math.min(12000, 1800 + count * (r.drama ? 260 : 230)), 90000));
 }
 
 export type SpecChoices = {
@@ -261,6 +303,10 @@ export type SpecChoices = {
   animate?: number; hashtags?: string[];
   /** Sound effects on (null: off): the whoosh of scene changes and each scene's sound (chooseSounds). */
   sounds?: SoundPicks | null;
+  /** A drama's cast with their voices: a scene a cast member speaks is said in theirs (shared/drama.ts). */
+  cast?: { name: string; voiceId: string }[];
+  /** A drama's episode: its number and the season's length (its summary is the writer's). */
+  episode?: { n: number; of: number };
 };
 /** A written video as a spec (AI pictures and an AI voice), or null when it does not validate. */
 export function conceptToSpec(k: StoryConcept, c: SpecChoices): StorySpec | null {
@@ -269,17 +315,23 @@ export function conceptToSpec(k: StoryConcept, c: SpecChoices): StorySpec | null
   const parsed = storySpec.safeParse({
     format: "story", kind: c.kind, language: c.language,
     narration: { kind: "voice", voiceId: c.voiceId },
-    scenes: k.scenes.map((s, i) => ({
-      text: s.text, description: s.picture, keys: s.keys, tone: s.tone, place: s.place, source: !c.backdropId && i < animate ? "clip" : "image",
-      ...(c.sounds?.scenes[i] && { soundId: c.sounds.scenes[i] }),
-    })),
+    scenes: k.scenes.map((s, i) => {
+      // A cast member's line is said in their voice; the narrator's, and anyone's the cast doesn't have, in the video's.
+      const who = c.cast ? castMember(c.cast, s.speaker) : null;
+      return {
+        text: s.text, description: s.picture, keys: s.keys, tone: s.tone, place: s.place, source: !c.backdropId && i < animate ? "clip" : "image",
+        ...(c.sounds?.scenes[i] && { soundId: c.sounds.scenes[i] }),
+        ...(who && { speaker: who.name, ...(who.voiceId !== c.voiceId && { voiceId: who.voiceId }) }),
+      };
+    }),
     style: c.style, subject: c.subject || k.subject, look: k.look, places: k.places,
     captions: c.captions ?? { enabled: true, style: c.kind === "backdrop" || c.kind === "mashup" ? "bold" : "keyword" },
     headline: headlineFor(c.kind, k.headline || (c.kind === "story" ? k.title : "")),
     backdrop: c.backdropId ? { libraryId: c.backdropId } : null,
     music: c.music ?? null,
     ...(c.sounds && { sounds: { enabled: true, volume: SOUND_VOLUME, ...(c.sounds.transitionId && { transitionId: c.sounds.transitionId }) } }),
-    caption: k.caption, hashtags, title: k.title, topic: k.topic,
+    caption: k.caption, hashtags, title: c.episode ? episodeTitle(c.episode.n, k.title) : k.title, topic: k.topic,
+    ...(c.episode && { episode: { ...c.episode, summary: k.summary || k.caption.slice(0, 600) } }),
   });
   return parsed.success ? parsed.data : null;
 }

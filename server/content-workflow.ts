@@ -11,7 +11,7 @@ import { keepSeriesCharacter, seriesCharacter } from "./characters";
 import { fetchOutput } from "./providers/http";
 import { canFallBack, clipModelFor, falResult, falStatus, referenceModel, submitFal, type FalTicket, type Reference } from "./providers/fal";
 import { isAdmin } from "./auth";
-import { forcedAlignment, speak } from "./providers/elevenlabs";
+import { forcedAlignment, speak, speakDialogue } from "./providers/elevenlabs";
 import { avatarVideoStatus, heygenClipRequest, heygenClipStatus, heygenRetry, submitAvatarVideo, submitHeyGenClip } from "./providers/heygen";
 import { avatarFor, forgetHeyGenVideo } from "./avatars";
 import { releaseRender, renderFailures, renderFile, renderStatus, submitRender } from "./renderer";
@@ -30,7 +30,7 @@ import {
 import { PRESENTER_ENGINES } from "../shared/presenter";
 import { CLIP_SECONDS, type ClipModel } from "../shared/credits";
 import { trackSchema, type Track } from "../shared/track";
-import { narrationKey, placeKey, storyScript, textWords, voicedScript } from "../shared/story";
+import { narrationKey, narrationVoice, placeKey, storyScript, textWords, voiceRuns, voicedScript } from "../shared/story";
 import { PRODUCT } from "../shared/brand";
 import type { RenderPayload, RenderStatus } from "../shared/render";
 
@@ -610,7 +610,11 @@ async function makeNarration(e: Env, step: WorkflowStep, run: RunInfo, spec: Sto
     if (s.claims?.voice) throw new Error("VOICE_FAILED");
     await patchState(e, run.id, (s) => { (s.claims ||= {}).voice = true; });
     await phase("voice");
-    const result = await speak(e, voiceId, voiced, spec.language || "en", "original", undefined, run.user_id);
+    // A drama's dialogue: each stretch in its speaker's voice, joined into one recording; else the one voice says it all.
+    const turns = voiceRuns(voiceId, spec.scenes);
+    const result = turns.length > 1
+      ? await speakDialogue(e, turns.map((t) => ({ voiceId: t.voiceId, text: voicedScript(spec.scenes.slice(t.from, t.to)) })), spec.language || "en", run.user_id)
+      : await speak(e, turns[0]?.voiceId ?? voiceId, voiced, spec.language || "en", "original", undefined, run.user_id);
     const assetId = uid(), key = mediaKey(run.user_id, assetId, "wav");
     await e.MEDIA.put(key, result.audio, { httpMetadata: { contentType: "audio/wav" } });
     await recordFile(e, key, e.DB.prepare(
@@ -632,7 +636,7 @@ async function makeNarration(e: Env, step: WorkflowStep, run: RunInfo, spec: Sto
     }
   });
   await step.do("narration-apply", () => updateSpec(e, run.video_id, (s) => {
-    s.generated = { key: narrationKey(voiceId, voiced), voiceAssetId: voice.assetId, words };
+    s.generated = { key: narrationKey(narrationVoice(voiceId, spec.scenes), voiced), voiceAssetId: voice.assetId, words };
   }));
 }
 

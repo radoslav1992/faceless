@@ -125,6 +125,12 @@ export const storySceneSchema = z
     place: z.string().trim().max(PLACE_LABEL_MAX).default(""),
     /** A library sound effect played when the scene starts (shared/sounds.ts), while the video's sound effects are on. */
     soundId: uuid.optional(),
+    /**
+     * A drama's dialogue (shared/drama.ts): the voice that says this scene when it is not the narrator's, and who is
+     * speaking (a cast member's name). Absent: the video's own voice says it.
+     */
+    voiceId: z.string().regex(/^[a-z0-9][a-z0-9-]{1,39}$/).optional(),
+    speaker: z.string().trim().max(40).optional(),
   })
   .refine((s) => s.source !== "own" || !!s.assetId, "Choose a picture or video for each scene with your own media.")
   .refine((s) => s.source !== "library" || !!s.libraryId, "Choose a library clip or picture for each scene that uses one.")
@@ -177,6 +183,26 @@ export function fingerprint(text: string) {
 }
 /** Same voice and the same words: the same paid recording. */
 export const narrationKey = (voiceId: string, script: string) => `story:${voiceId}:${script.length}:${fingerprint(script)}`;
+/**
+ * Who speaks a narrated video, for its recording's key: the narrator alone, or with the voices of the scenes other
+ * voices say (a drama's dialogue), so a scene given to another voice is a new recording. A video without such scenes
+ * keeps the key it always had.
+ */
+export const narrationVoice = (voiceId: string, scenes: Pick<StoryScene, "voiceId">[]) =>
+  scenes.some((s) => s.voiceId && s.voiceId !== voiceId) ? `${voiceId}~${fingerprint(scenes.map((s) => s.voiceId || "").join(","))}` : voiceId;
+/**
+ * The script as the stretches each voice says, in order: neighbouring scenes of one voice are one stretch (one call
+ * to the voice, so it reads on naturally). `from` and `to` are scene numbers (`to` not included).
+ */
+export function voiceRuns(voiceId: string, scenes: Pick<StoryScene, "voiceId">[]): { voiceId: string; from: number; to: number }[] {
+  const runs: { voiceId: string; from: number; to: number }[] = [];
+  scenes.forEach((s, i) => {
+    const voice = s.voiceId || voiceId, last = runs.at(-1);
+    if (last && last.voiceId === voice) last.to = i + 1;
+    else runs.push({ voiceId: voice, from: i, to: i + 1 });
+  });
+  return runs;
+}
 
 /**
  * The script's words with times. By position when the voice has as many words; else matched by their letters, and a

@@ -5,6 +5,7 @@ import { storyStyleIds, type StoryStyle } from "./story";
 import { FALLBACK_VOICE, voiceIdSchema } from "./voices";
 import { videoCredits } from "./credits";
 import { templates, type TemplateId } from "./templates";
+import { castSubject, dramaSchema } from "./drama";
 
 // A series is a faceless channel on autopilot: one template (shared/templates.ts), voice, language, art style and
 // schedule. For every posting slot the server writes a new episode, makes it ahead of time and posts it to the series'
@@ -71,8 +72,12 @@ export const seriesSettingsSchema = z.object({
   notify: z.boolean().default(true),
   /** Hashtags added to every episode's description, besides the writer's own. */
   hashtags: z.array(z.string().trim().regex(/^#?[\p{L}\p{N}_]{1,60}$/u)).max(5).default([]),
+  /** A drama (shared/drama.ts; administrators only): a cast, a premise and a season of episodes that continue. */
+  drama: dramaSchema.optional(),
 });
 export type SeriesSettings = z.infer<typeof seriesSettingsSchema>;
+/** The recurring characters every episode is drawn with: a drama's cast, else the series' main character. */
+export const seriesSubject = (s: Pick<SeriesSettings, "subject" | "drama">) => (s.drama ? castSubject(s.drama.cast) : s.subject);
 /** A template's starting choices. */
 export const defaultSeriesSettings = (template: TemplateId = "facts"): SeriesSettings => {
   const t = templates[template];

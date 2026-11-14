@@ -89,6 +89,37 @@ export async function speak(
   return { audio: wav(pcm, 24000), seconds, words };
 }
 
+/** The pause between two speakers of a dialogue (seconds): a breath, as people leave when they answer each other. */
+export const TURN_PAUSE = 0.25;
+/**
+ * Several recordings as one, in order, with a short pause between them: the audio joined (24 kHz mono, as `speak`
+ * makes it) and every word moved to where it now is.
+ */
+export function joinSpeech(parts: { audio: Uint8Array; seconds: number; words: CaptionWord[] }[], pause = TURN_PAUSE) {
+  const gap = Math.round(pause * 24000) * 2;
+  const pcm = new Uint8Array(parts.reduce((n, p) => n + p.audio.length - 44, 0) + gap * Math.max(0, parts.length - 1));
+  const words: CaptionWord[] = [];
+  let at = 0;
+  for (const [i, p] of parts.entries()) {
+    if (i) at += gap;
+    const offset = at / 48000;
+    pcm.set(p.audio.subarray(44), at);
+    words.push(...p.words.map((w) => ({ ...w, start: w.start + offset, end: w.end + offset })));
+    at += p.audio.length - 44;
+  }
+  return { audio: wav(pcm, 24000), seconds: pcm.length / 48000, words };
+}
+/**
+ * A dialogue (a drama's episode, shared/drama.ts): each stretch of the script spoken by its own voice, one after
+ * another, joined into one recording with the words' times. A stretch that fails stops the whole (the earlier ones
+ * were spoken and billed: a dialogue is a few short calls, never retried on its own).
+ */
+export async function speakDialogue(e: Env, turns: { voiceId: string; text: string }[], language = "en", userId?: string) {
+  const parts: Awaited<ReturnType<typeof speak>>[] = [];
+  for (const turn of turns) parts.push(await speak(e, turn.voiceId, turn.text, language, "original", undefined, userId));
+  return joinSpeech(parts);
+}
+
 /**
  * A voice's sample (Admin → Voices): `text` spoken as an MP3 by the narration's model, so it sounds as the videos will.
  * Billed by ElevenLabs like any speech (a character per character).
