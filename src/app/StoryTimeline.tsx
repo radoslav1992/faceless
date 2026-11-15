@@ -15,11 +15,13 @@ const LABEL = 104;
 /** The time of the edge before word `i`: the middle of the pause before it. */
 const edgeTime = (words: CaptionWord[], i: number) => (words[i - 1].end + words[i].start) / 2;
 
-export function StoryTimeline({ timing, segments, duration, pictures, thumbs, selected, player, estimated, voiceLabel, music, onSelect, onMoveEdge, onMusic }: {
+export function StoryTimeline({ timing, segments, duration, pictures, thumbs, selected, player, estimated, estimatedNote, voiceLabel, music, onSelect, onMoveEdge, onMusic }: {
   timing: StoryTiming; segments: StorySegment[]; duration: number; pictures: ScenePicture[];
   /** A still of each scene for its clip on the timeline (an AI clip's first picture), if any. */
   thumbs: (string | null)[];
   selected: number; player: StoryPlayer; estimated: boolean; voiceLabel: string;
+  /** What the estimate waits for, when it is not the voice (a film's shots). */
+  estimatedNote?: string;
   music: string | null;
   onSelect: (scene: number) => void;
   /** Scene `k` now starts at word `first` of the script. */
@@ -95,7 +97,7 @@ export function StoryTimeline({ timing, segments, duration, pictures, thumbs, se
       </button>
       <span className="tl-timecode" ref={clock} aria-live="off">0:00.0 / {clockText(duration)}</span>
       <span className="st-timeline-title">Timeline</span>
-      {estimated && <span className="chip orange">Estimated times until the voice is made</span>}
+      {estimated && <span className="chip orange">{estimatedNote ?? "Estimated times until the voice is made"}</span>}
       <div className="tl-zoom">
         <button type="button" className="btn sm icon" aria-label="Zoom out" disabled={zoom <= 1} onClick={() => setZoom((z) => Math.max(1, z / 1.5))}><ZoomOut size={15} /></button>
         <button type="button" className="btn sm icon" aria-label="Zoom in" disabled={zoom >= 8} onClick={() => setZoom((z) => Math.min(8, z * 1.5))}><ZoomIn size={15} /></button>

@@ -23,8 +23,11 @@ export type Media = { key: string; kind: "image" | "video" | "audio"; duration: 
 export type PlanContext = {
   /** Media by asset ID or library ID. */
   media: Record<string, Media>;
-  /** The voiceover (the AI voice or the owner's recording) and its words on its clock. */
-  narration?: { key: string; duration: number; words: CaptionWord[] };
+  /**
+   * The voiceover (the AI voice or the owner's recording) and its words on its clock. A film (shared/drama.ts) has no
+   * recording (`key` null): its words are said in its clips, and `cuts` is where each shot starts.
+   */
+  narration?: { key: string | null; duration: number; words: CaptionWord[]; cuts?: number[] };
   /** A small mark in the corner of every video (the free trial's), or empty. */
   watermark: string;
 };
@@ -68,13 +71,15 @@ const total = (segments: ComposeSegment[]) => round(segments.reduce((n, s) => n 
  */
 /**
  * `film`: a cinematic video (shared/film.ts), whose AI clips play their own ambient sound quietly under the voice. A
- * lip-synced clip (shared/drama.ts) is always silent: its sound is the voice already playing.
+ * lip-synced clip (shared/drama.ts) is always silent: its sound is the voice already playing. A film's shot plays its
+ * take: the clip from where its line starts, at full volume (its sound is the scene's voice).
  */
 function sceneSegment(ctx: PlanContext, inputs: Inputs, scene: StoryScene, seconds: number, n: number, film = false): ComposeSegment {
   const id = scene.source === "clip" ? scene.clipId || scene.imageId : scene.source === "image" ? scene.imageId : scene.source === "own" ? scene.assetId : scene.libraryId;
   const m = need(ctx, id);
   if (m.kind === "image") return { kind: "image", input: inputs.add(m.key), duration: seconds, motion: motionFor(n) };
   if (m.kind !== "video") throw new Error("MEDIA_INPUT");
+  if (scene.acted && scene.clipId) return { kind: "video", input: inputs.add(m.key), trim: round(scene.take?.trim ?? 0), duration: seconds, audio: 1 };
   const loop = scene.source !== "clip" && m.duration > 0.5 && m.duration < seconds - 1;
   return { kind: "video", input: inputs.add(m.key), trim: 0, duration: seconds, audio: film && scene.source === "clip" && !scene.lipSync ? FILM_AMBIENCE : 0, ...(loop && { loop }) };
 }
@@ -111,9 +116,9 @@ function soundEffects(spec: StorySpec, ctx: PlanContext, inputs: Inputs, shown: 
  * How long scene `n` is on screen in a narrated video's render (half of each transition beside it included), in
  * seconds; null when it is not shown on its own (one background clip under the whole voice, or squeezed out).
  */
-export function sceneOnScreen(spec: StorySpec, narration: { duration: number; words: CaptionWord[] }, n: number): number | null {
+export function sceneOnScreen(spec: StorySpec, narration: { duration: number; words: CaptionWord[]; cuts?: number[] }, n: number): number | null {
   if (spec.backdrop) return null;
-  const timing = storyTiming(spec.scenes, narration.words, Math.min(MAX_SECONDS, narration.duration));
+  const timing = storyTiming(spec.scenes, narration.words, Math.min(MAX_SECONDS, narration.duration), narration.cuts);
   const part = storySegments(timing, spec.scenes.map((s) => s.transition)).find((p) => p.scene === n);
   return part ? part.frames / FPS : null;
 }
@@ -122,7 +127,8 @@ export function sceneOnScreen(spec: StorySpec, narration: { duration: number; wo
  * A narrated video: a picture per scene (or its presenter speaking) on the voiceover's clock with a transition centred
  * on every scene edge (the segments overlap by them, so they add up to the voice exactly) — or one background clip
  * looping under the whole voice — the voice as one track, subtitles over it all, music and sound effects under it, and
- * the headline on top.
+ * the headline on top. A film (shared/drama.ts) is its shots one after another, each with its own sound, on the clock
+ * its takes give.
  */
 export function planRender(spec: Spec, ctx: PlanContext): Plan {
   return spec.format === "highlight" ? planHighlight(spec, ctx) : planStory(spec, ctx);
@@ -132,7 +138,7 @@ function planStory(spec: StorySpec, ctx: PlanContext): Plan {
   const narration = ctx.narration;
   if (!narration) throw new Error("MEDIA_INPUT");
   if (narration.duration > MAX_SECONDS + 0.5) throw new Error("MEDIA_TOO_LONG");
-  const timing = storyTiming(spec.scenes, narration.words, Math.min(MAX_SECONDS, narration.duration));
+  const timing = storyTiming(spec.scenes, narration.words, Math.min(MAX_SECONDS, narration.duration), narration.cuts);
   const d = timing.frames / FPS;
   let segments: ComposeSegment[];
   // Where each scene is shown on the output clock (a scene squeezed out of the pictures is left out).
@@ -161,7 +167,8 @@ function planStory(spec: StorySpec, ctx: PlanContext): Plan {
       return part.transition ? { ...segment, transition: { kind: part.transition.kind, duration: part.transition.frames / FPS } } : segment;
     });
   }
-  const voice: ComposePayload["voice"] = { input: inputs.add(narration.key), start: 0, volume: 1 };
+  // A film has no voice track: every shot plays its own sound.
+  const voice: ComposePayload["voice"] = narration.key ? { input: inputs.add(narration.key), start: 0, volume: 1 } : null;
   // Subtitles only from real word timings (never from estimates); with a headline on top they stay at the bottom.
   let ass = spec.captions.enabled && narration.words.length ? captionAss(styledCaptions(timing.words, spec.captions.style)) : emptyAss(W, H);
   const headline = spec.headline;

@@ -9,7 +9,7 @@ import { safeEqual, token } from "./security";
 import { extOf, head, imageInfo, mediaKey, serveObject, storedDuration, storeStream } from "./storage";
 import { keepSeriesCharacter, seriesCharacter } from "./characters";
 import { fetchOutput } from "./providers/http";
-import { canFallBack, clipModelFor, falResult, falStatus, referenceModel, submitFal, submitFalLipSync, type FalTicket, type Reference } from "./providers/fal";
+import { canFallBack, clipModelFor, falResult, falStatus, referenceModel, submitFal, submitFalLipSync, submitFalShot, type FalTicket, type Reference } from "./providers/fal";
 import { isAdmin } from "./auth";
 import { forcedAlignment, speak, speakDialogue, wav } from "./providers/elevenlabs";
 import { avatarVideoStatus, heygenClipRequest, heygenClipStatus, heygenRetry, submitAvatarVideo, submitHeyGenClip } from "./providers/heygen";
@@ -24,14 +24,15 @@ import { narrationContext } from "./story";
 import { runEpisode, videoReady, videoFailed } from "./series";
 import { LONG_VIDEO_SECONDS, SPEECH_MAX_SECONDS, speechSpans } from "../shared/speech";
 import {
-  isHighlight, narrationCurrent, pendingMedia, pictureSheets, presenterKey, presenterNeeded, referencedAssets, referencedLibrary, specSchema, trackKey,
+  isFilm, isHighlight, narrationCurrent, pendingMedia, pictureSheets, presenterKey, presenterNeeded, referencedAssets, referencedLibrary, specSchema, trackKey,
   type HighlightSpec, type PendingMedia, type Spec, type StorySpec,
 } from "../shared/formats";
 import { PRESENTER_ENGINES } from "../shared/presenter";
 import { CLIP_SECONDS, type ClipModel } from "../shared/credits";
 import { trackSchema, type Track } from "../shared/track";
 import { FPS, narrationKey, narrationVoice, placeKey, storyScript, storySegments, storyTiming, textWords, voiceRuns, voicedScript } from "../shared/story";
-import { LIP_SYNC_MIN_SECONDS } from "../shared/drama";
+import { LIP_SYNC_MIN_SECONDS, TAKE_HEARD, takeKey, takeOf, voiceSampleText, VOICE_SAMPLE_SECONDS } from "../shared/drama";
+import type { CaptionWord } from "../shared/captions";
 import { PRODUCT } from "../shared/brand";
 import type { RenderPayload, RenderStatus } from "../shared/render";
 
@@ -196,14 +197,19 @@ async function generateMedia(
     if (s.claims?.[name]) throw new Error("GENERATION_UNCERTAIN");
     const image = from ? await from() : undefined;
     const refs = references ? await references() : [];
+    // A film's shot is said in a voice like its speaker's: the sample of it made for this video (voiceSample).
+    const voice = m.acted ? await voiceSampleUrl(e, run, m.acted.voiceId) : undefined;
     if (fallback && !canFallBack(e, refs.length > 0)) throw new Error("GENERATION_REJECTED");
     // A model chosen for the scene counts only when its owner is an administrator who may choose it.
-    const clipModel = kind === "clip" && !m.lipSync ? instead ?? await sceneClipModel(e, run, m) : undefined;
+    const clipModel = kind === "clip" && !m.lipSync && !m.acted ? instead ?? await sceneClipModel(e, run, m) : undefined;
     await patchState(e, run.id, (s) => { (s.claims ||= {})[name] = true; });
     await phase(kind === "clip" ? "clip" : "images");
     // A talking scene: its picture, lip-synced to its stretch of the voice (made before this, shared/drama.ts).
     // HeyGen Video makes a clip from the scene's picture (the Idempotency-Key finds a resent request's job).
-    const t: MediaTicket = m.lipSync
+    // A film's shot: its picture played and its line said by the video model (shared/drama.ts).
+    const t: MediaTicket = m.acted && voice
+      ? await submitFalShot(e, { image: image ?? await sourcePicture(e, run, m), prompt: m.prompt, seconds: m.acted.seconds, voice })
+      : m.lipSync
       ? await submitFalLipSync(e, image ?? await sourcePicture(e, run, m), await lineAudio(e, run, m))
       : clipModel === "heygen-video-1" && image
       ? { heygen: await submitHeyGenClip(e, `${run.id}-${name}`, heygenClipRequest(m.prompt, image, await clipLength(e, run, m), m.quality)) }
@@ -249,7 +255,7 @@ async function generateMedia(
     await recordFile(e, key, e.DB.prepare(
       "INSERT OR REPLACE INTO media_assets(id,user_id,video_id,kind,name,object_key,mime,bytes,duration,width,height,status,meta,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'ready',?,?,?)",
     ).bind(assetId, run.user_id, run.video_id, kind === "clip" ? "ai_clip" : "ai_image", `AI ${kind === "clip" ? "clip" : "picture"}: ${m.prompt}`.slice(0, 160), key, actual, bytes, duration, width, height,
-      JSON.stringify({ prompt: m.prompt.slice(0, 400), ai: true, ...(m.sheet && { sheet: m.sheet }), ...(instead && { clipModel: instead, fallback: true }) }), now(), now()));
+      JSON.stringify({ prompt: m.prompt.slice(0, 400), ai: true, ...(m.sheet && { sheet: m.sheet }), ...(m.acted && { shot: true }), ...(instead && { clipModel: instead, fallback: true }) }), now(), now()));
     return assetId;
   });
   // Ours is saved: HeyGen's copy goes (retried hourly while HeyGen can't be reached).
@@ -284,11 +290,16 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
   // reference sheets, made before them.
   const pending = pendingMedia(first);
   const sheets = pending.some((m) => m.kind === "image") ? await makeSheets(e, step, run, first, phase) : { places: {} };
+  // A film's shots are said in voices like their speakers': a short sample of each, made once and kept with the video.
+  const voices = [...new Set(pending.flatMap((m) => (m.acted ? [m.acted.voiceId] : [])))];
+  for (const [n, voiceId] of voices.entries()) await step.do(`voice-sample-${n}`, once, () => voiceSample(e, run, first, voiceId));
   const make = async (which: (m: PendingMedia, i: number) => boolean) => {
     for (let i = 0; i < pending.length; i++) {
       const m = pending[i];
       if (!which(m, i)) continue;
-      const assetId = m.kind === "image"
+      // A film's shot comes with its take: where its line is in the clip, and when each word is said.
+      const shot = m.acted ? await makeTake(e, step, run, `ai-${i}`, m, phase) : null;
+      const assetId = shot ? shot.assetId : m.kind === "image"
         ? await drawPicture(e, step, run, `ai-${i}`, m, phase, () => referencePictures(e, run, sheets, first.scenes[m.path[1] as number]?.place))
         : m.lipSync ? await generateMedia(e, step, run, `ai-${i}`, m, phase, () => sourcePicture(e, run, m))
           : await makeClip(e, step, run, `ai-${i}`, m, phase, models.get(i)!, m.from ? () => sourcePicture(e, run, m) : undefined);
@@ -296,6 +307,7 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
         let target = spec;
         for (const part of m.path) target = target[part];
         target[m.key] = assetId;
+        if (shot) target.take = shot.take;
       }));
     }
   };
@@ -303,11 +315,12 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
   // the voice's clock (HeyGen bills by the second). Every other clip is made before it, like the pictures: one refused
   // stops the run before the voice is paid for.
   const models = new Map<number, ClipModel>();
-  for (const [i, m] of pending.entries()) if (m.kind === "clip" && !m.lipSync) models.set(i, await step.do(`ai-${i}-model`, () => sceneClipModel(e, run, m)));
+  for (const [i, m] of pending.entries()) if (m.kind === "clip" && !m.lipSync && !m.acted) models.set(i, await step.do(`ai-${i}-model`, () => sceneClipModel(e, run, m)));
   // A lip-synced clip is made from its scene's stretch of the voice, so after it too (it has no model to choose).
   const afterVoice = (m: PendingMedia, i: number) => m.kind === "clip" && !!m.from && (!!m.lipSync || models.get(i) === "heygen-video-1");
   await make((m, i) => !afterVoice(m, i));
-  if (first.narration.kind === "voice" && !narrationCurrent(first)) await makeNarration(e, step, run, first, phase);
+  // A film records no narration: its shots say their own lines.
+  if (first.narration.kind === "voice" && !narrationCurrent(first) && !isFilm(first)) await makeNarration(e, step, run, first, phase);
   await make(afterVoice);
   // The presenter speaking the recorded voice, after it.
   if (first.presenter) {
@@ -405,8 +418,11 @@ async function renderAndSave(e: Env, step: WorkflowStep, run: RunInfo, phase: Ph
     const keep = new Set([video, cover, ...referencedAssets(current), isHighlight(current) ? null : current.generated?.voiceAssetId].filter(Boolean) as string[]);
     // The reference sheets the video's pictures are still drawn from stay for its next new picture.
     const sheets = new Set(isHighlight(current) ? [] : pictureSheets(current).map((s) => s.key));
-    const owned = (await e.DB.prepare("SELECT id,json_extract(meta,'$.sheet') AS sheet FROM media_assets WHERE video_id=?").bind(videoId).all<{ id: string; sheet: string | null }>()).results;
-    const stale = owned.filter((r) => !keep.has(r.id) && !(r.sheet && sheets.has(r.sheet))).map((r) => r.id);
+    // So do the samples of the voices a film's shots are said in, for its next new take.
+    const sampled = new Set(isHighlight(current) || !isFilm(current) ? [] : pendingVoices(current));
+    const owned = (await e.DB.prepare("SELECT id,json_extract(meta,'$.sheet') AS sheet,json_extract(meta,'$.sample') AS sample FROM media_assets WHERE video_id=?").bind(videoId)
+      .all<{ id: string; sheet: string | null; sample: string | null }>()).results;
+    const stale = owned.filter((r) => !keep.has(r.id) && !(r.sheet && sheets.has(r.sheet)) && !(r.sample && sampled.has(r.sample))).map((r) => r.id);
     // A clip's moment counts as paid for once the run that charged for it has made it: later edits are priced against
     // it (shared/formats.ts specCredits). A free run keeps the moment paid before; a failed run is refunded and records nothing.
     const credits = (await e.DB.prepare("SELECT credits FROM runs WHERE id=?").bind(run.id).first<{ credits: number }>())?.credits ?? 0;
@@ -600,9 +616,9 @@ async function lineAudio(e: Env, run: RunInfo, m: PendingMedia) {
   const n = Number(m.path[1]);
   if (isHighlight(spec) || !Number.isInteger(n)) throw new Error("GENERATION_FAILED");
   const narration = await narrationContext(e, run.user_id, spec);
-  const timing = storyTiming(spec.scenes, narration.words, Math.min(180, narration.duration));
+  const timing = storyTiming(spec.scenes, narration.words, Math.min(180, narration.duration), narration.cuts);
   const part = storySegments(timing, spec.scenes.map((s) => s.transition)).find((p) => p.scene === n);
-  const recording = part && await e.MEDIA.get(narration.key);
+  const recording = part && narration.key ? await e.MEDIA.get(narration.key) : null;
   if (!part || !recording) throw new Error("GENERATION_FAILED");
   const file = new Uint8Array(await recording.arrayBuffer()), header = new DataView(file.buffer, file.byteOffset, 44);
   // The AI voice's own recording: a plain WAV, 16-bit (server/providers/elevenlabs.ts wav).
@@ -618,6 +634,80 @@ async function lineAudio(e: Env, run: RunInfo, m: PendingMedia) {
     "INSERT INTO media_assets(id,user_id,video_id,kind,name,object_key,mime,bytes,duration,status,meta,created_at,updated_at) VALUES (?,?,?,'voice',?,?,'audio/wav',?,?,'ready','{\"ai\":true,\"line\":true}',?,?)",
   ).bind(assetId, run.user_id, run.video_id, `Line of scene ${n + 1}`, key, audio.length, pcm.length / frame / rate, now(), now()));
   return inputUrl(e, run.id, key);
+}
+
+/** The voices a film's shots are said in: each speaker's, and the video's own for a line nobody of the cast says. */
+const pendingVoices = (spec: StorySpec) => (spec.narration.kind === "voice" ? [...new Set(spec.scenes.map((s) => s.voiceId || (spec.narration as { voiceId: string }).voiceId))] : []);
+const SAMPLE = "SELECT object_key FROM media_assets WHERE video_id=? AND user_id=? AND kind='voice' AND status='ready' AND json_extract(meta,'$.sample')=? ORDER BY created_at DESC LIMIT 1";
+/**
+ * A short recording of a voice, for the shots of a film said in it (shared/drama.ts): the AI voice reading a few of
+ * the episode's own lines (so it is in the episode's language), between the two and fifteen seconds the video model
+ * takes as a reference. Made once per video and voice and kept with the video as a voice file (meta.sample), so a
+ * shot made again later sounds like the others.
+ */
+async function voiceSample(e: Env, run: RunInfo, spec: StorySpec, voiceId: string) {
+  const known = await e.DB.prepare(SAMPLE).bind(run.video_id, run.user_id, voiceId).first<{ object_key: string }>();
+  if (known) return known.object_key;
+  await e.DB.prepare("UPDATE runs SET phase='voice',updated_at=? WHERE id=?").bind(now(), run.id).run();
+  const narrator = spec.narration.kind === "voice" ? spec.narration.voiceId : voiceId;
+  const spoken = await speak(e, voiceId, voiceSampleText(spec.scenes, voiceId, narrator), spec.language || "en", "original", undefined, run.user_id);
+  // The AI voice's own recording: 24 kHz, 16-bit mono (server/providers/elevenlabs.ts), cut or followed by silence to fit.
+  const rate = 24000, frame = 2, recorded = spoken.audio.subarray(44);
+  const pcm = new Uint8Array(Math.min(Math.floor(VOICE_SAMPLE_SECONDS.max * rate) * frame, Math.max(Math.ceil(VOICE_SAMPLE_SECONDS.min * rate) * frame, recorded.length)));
+  pcm.set(recorded.subarray(0, pcm.length));
+  const assetId = uid(), key = mediaKey(run.user_id, assetId, "wav"), audio = wav(pcm, rate);
+  await e.MEDIA.put(key, audio, { httpMetadata: { contentType: "audio/wav" } });
+  await recordFile(e, key, e.DB.prepare(
+    "INSERT INTO media_assets(id,user_id,video_id,kind,name,object_key,mime,bytes,duration,status,meta,created_at,updated_at) VALUES (?,?,?,'voice','Voice sample',?,'audio/wav',?,?,'ready',?,?,?)",
+  ).bind(assetId, run.user_id, run.video_id, key, audio.length, pcm.length / frame / rate, JSON.stringify({ ai: true, sample: voiceId }), now(), now()));
+  return key;
+}
+/** The capability link of the video's sample of a voice (made before its shots). */
+async function voiceSampleUrl(e: Env, run: RunInfo, voiceId: string) {
+  const sample = await e.DB.prepare(SAMPLE).bind(run.video_id, run.user_id, voiceId).first<{ object_key: string }>();
+  if (!sample) throw new Error("VOICE_FAILED");
+  return inputUrl(e, run.id, sample.object_key);
+}
+
+type Take = { key: string; trim: number; seconds: number; words: CaptionWord[] };
+/** Listening to a short clip: a minute is plenty, and it is asked once (each call is billed). */
+const listen = { retries: { limit: 0, delay: "1 second" as const }, timeout: "3 minutes" as const };
+/**
+ * A film's shot, paid once, and its take (shared/drama.ts): the clip is listened to (ElevenLabs Scribe) for where its
+ * line starts and ends and when each word is said. A clip in which the line was not heard (the model said something
+ * else, or nothing) is made once more, at no charge to the owner, and the better of the two is kept; a clip nobody
+ * could listen to is kept whole, its words spread over it.
+ */
+async function makeTake(e: Env, step: WorkflowStep, run: RunInfo, name: string, m: PendingMedia, phase: Phase): Promise<{ assetId: string; take: Take }> {
+  const from = () => sourcePicture(e, run, m);
+  const first = await generateMedia(e, step, run, name, m, phase, from);
+  const heard = await step.do(`${name}-heard`, listen, () => hearTake(e, run, m, first));
+  if (heard.score < 0 || heard.score >= TAKE_HEARD) return { assetId: first, take: heard.take };
+  console.warn("Line not heard in a shot, making it again", { runId: run.id, name, heard: Math.round(heard.score * 100) });
+  // The first take stands when the second can't be made (refused, failed): the episode is still made.
+  const second = await generateMedia(e, step, run, `${name}-again`, m, phase, from).catch((error) => {
+    console.warn("Second take not made", { runId: run.id, name, code: error instanceof Error && /^[A-Z_]{3,40}$/.test(error.message) ? error.message : "INTERNAL" });
+    return null;
+  });
+  if (!second) return { assetId: first, take: heard.take };
+  const again = await step.do(`${name}-again-heard`, listen, () => hearTake(e, run, m, second));
+  return again.score >= heard.score ? { assetId: second, take: again.take } : { assetId: first, take: heard.take };
+}
+/** What is heard in a shot's clip, as its take; `score` is the share of the line heard (-1: it could not be listened to). */
+async function hearTake(e: Env, run: RunInfo, m: PendingMedia, assetId: string): Promise<{ score: number; take: Take }> {
+  const spec = await loadSpec(e, run.video_id);
+  const scene = isHighlight(spec) ? undefined : spec.scenes[Number(m.path[1])];
+  const a = await e.DB.prepare("SELECT object_key,duration FROM media_assets WHERE id=? AND user_id=? AND status='ready'").bind(assetId, run.user_id).first<{ object_key: string; duration: number }>();
+  if (isHighlight(spec) || !scene || !a || spec.narration.kind !== "voice") throw new Error("GENERATION_FAILED");
+  let said: CaptionWord[] | null = null;
+  try {
+    const file = await e.MEDIA.get(a.object_key);
+    if (file) said = (await transcribe(e, { body: file.body, size: file.size, type: "video/mp4", name: "shot.mp4" }, a.duration)).words;
+  } catch (error) {
+    console.warn("Shot not listened to", { runId: run.id, code: error instanceof Error && /^[A-Z_]{3,40}$/.test(error.message) ? error.message : "INTERNAL" });
+  }
+  const { score, ...take } = takeOf(scene.text, said ?? [], a.duration > 0.5 ? a.duration : m.acted?.seconds ?? 5);
+  return { score: said ? score : -1, take: { key: takeKey(scene, spec.narration.voiceId), ...take } };
 }
 
 /** The capability link of the picture a clip is made from: the asset in field `from` of the same scene. */

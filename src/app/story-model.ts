@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { answerOrder, post } from "../lib";
-import { narrationCurrent, type StorySpec } from "../../shared/formats";
+import { filmClock, narrationCurrent, type StorySpec } from "../../shared/formats";
 import { estimatedTimings, storyScript, storySegments, storyTiming, textWords, type StoryTiming } from "../../shared/story";
 export { mergeScenes, moveEdge, splitScene, toggleKey } from "../../shared/story";
 import type { CaptionWord } from "../../shared/captions";
@@ -69,6 +69,9 @@ export function useStoryClock(spec: StorySpec, upload: UploadTiming | null, rend
   const recorded = narrationCurrent(spec) && spec.generated?.words.length ? spec.generated.words : null;
   return useMemo(() => {
     let said: CaptionWord[], duration: number, source: StoryClock["source"];
+    // A film (shared/drama.ts) runs on its takes' clock: each shot as long as its clip's line, its words where they are said.
+    const film = filmClock(spec);
+    if (film) return { said: film.words, duration: film.duration, source: "voice", timing: storyTiming(spec.scenes, film.words, film.duration, film.cuts) };
     if (spec.narration.kind === "upload") {
       said = upload?.words || [];
       duration = upload?.duration || (said.at(-1)?.end ?? 0) + 0.5;
@@ -84,7 +87,7 @@ export function useStoryClock(spec: StorySpec, upload: UploadTiming | null, rend
     }
     duration = Math.max(1, duration);
     return { said, duration, source, timing: storyTiming(spec.scenes, said, duration) };
-  }, [spec.narration.kind, spec.scenes, upload, recorded, renderedSeconds, script]);
+  }, [spec, upload, recorded, renderedSeconds, script]);
 }
 export const segmentsOf = (spec: StorySpec, timing: StoryTiming) => storySegments(timing, spec.scenes.map((s) => s.transition));
 

@@ -12,7 +12,7 @@ import { isAdmin } from "./auth";
 import { avatarFor } from "./avatars";
 import { heygenEnabled } from "./providers/heygen";
 import {
-  isHighlight, paidMoment, playedSounds, presenterNeeded, referencedAssets, referencedLibrary, specCredits, specHook, specSchema, visualPart, type HighlightSpec, type Spec, type StorySpec,
+  isFilm, isHighlight, paidMoment, playedSounds, presenterNeeded, referencedAssets, referencedLibrary, specCredits, specHook, specSchema, visualPart, type HighlightSpec, type Spec, type StorySpec,
 } from "../shared/formats";
 import { storyScript, STORY_MAX_CHARS, STORY_MAX_SECONDS } from "../shared/story";
 import { creditsLabel } from "../shared/credits";
@@ -133,11 +133,20 @@ export async function newVideoCredits(env: Env, userId: string, spec: Spec) {
     : null;
   return specCredits(spec, true, recording?.duration || undefined);
 }
-/** Cinematic videos (shared/film.ts) and lip-synced scenes (shared/drama.ts) are tests: only administrators make one, or make one again. */
+/**
+ * Cinematic videos (shared/film.ts), lip-synced scenes and films of acted shots (shared/drama.ts) are tests: only
+ * administrators make one, or make one again. A film's sound is its shots': it has no background clip, no presenter
+ * and no recording of the owner's.
+ */
 function checkFilm(env: Env, user: DbUser, spec: Spec) {
-  if (isHighlight(spec) || isAdmin(env, user)) return;
-  if (spec.film) throw new HTTPException(403, { message: "Cinematic videos are still being tested and aren't available yet." });
-  if (spec.scenes.some((s) => s.lipSync)) throw new HTTPException(403, { message: "Lip-synced scenes are still being tested and aren't available yet." });
+  if (isHighlight(spec)) return;
+  const shots = spec.scenes.some((s) => s.acted);
+  if (!isAdmin(env, user)) {
+    if (shots) throw new HTTPException(403, { message: "Films of acted shots are still being tested and aren't available yet." });
+    if (spec.film) throw new HTTPException(403, { message: "Cinematic videos are still being tested and aren't available yet." });
+    if (spec.scenes.some((s) => s.lipSync)) throw new HTTPException(403, { message: "Lip-synced scenes are still being tested and aren't available yet." });
+  }
+  if (shots && !isFilm(spec)) throw new HTTPException(400, { message: "A film's shots speak for themselves: remove the background clip, the presenter or your recording." });
 }
 export async function createVideo(
   env: Env, user: DbUser, spec: Spec, a: Allowance, key: string,

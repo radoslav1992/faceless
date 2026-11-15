@@ -64,7 +64,15 @@ under `/api/admin` answers 404 to anyone else.
   the ones before (the series page lists them under **Story so far**) and ends on a cliffhanger; cast members speak in
   their own voices over the pictures. With **Lip-sync** on, every scene a character says becomes a clip of its
   picture with the lips moving to the line (fal's MiniMax H3 Max Lip Sync, about $0.08 a second, charged 2 credits per
-  5 seconds of those scenes). After the last episode the series pauses and
+  5 seconds of those scenes). With **Film** on instead, the episode is written as short shots with no narrator and
+  every shot is a clip in which the character plays the moment and says the line (fal's MiniMax H3 Max
+  `reference-to-video`, about $0.08 a second of clip: roughly $3 for a 30-second episode, charged 2 credits per shot
+  on top of the episode). Each clip is listened to with ElevenLabs Scribe; one in which the line was not heard is
+  made once more (`Line not heard in a shot, making it again` in the logs), which fal bills and the owner is not
+  charged for. The voices come from a short ElevenLabs sample of each cast member's voice, so they are like the
+  chosen voices, not identical to them. Any shot can be made again from the episode's editor (**New take**, 2
+  credits). A shot the content filter refuses fails the episode (refunded); making it again continues from the
+  shots already made, so change that shot's words or picture first. After the last episode the series pauses and
   says so; raise the number of episodes and resume to go on. Rejecting or deleting an episode takes it out of the
   story the next one is written from. Episodes cost what any episode of that length does; a dialogue is a few short
   ElevenLabs calls, one per speaker's stretch, where a narrated episode is one.

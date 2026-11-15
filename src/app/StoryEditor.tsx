@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Film, Image as ImageIcon, Library, Merge, RefreshCw, Scissors, Sparkles, Star, Trash2, Type, Wand2 } from "lucide-react";
+import { Clapperboard, Film, Image as ImageIcon, Library, Merge, RefreshCw, Scissors, Sparkles, Star, Trash2, Type, Wand2 } from "lucide-react";
 import { api, fileUrl, useAuth, useAvatars, useVoices, type Asset, type LibraryItem } from "../lib";
 import { Switch } from "../ui";
 import { CaptionStylePicker, EditorSection } from "./CaptionPickers";
@@ -12,7 +12,8 @@ import { SceneSound, SoundSection, useSoundLibrary } from "./sound-ui";
 import {
   clockText, mergeScenes, moveEdge, sceneIndex, segmentsOf, splitScene, toggleKey, useStoryClock, useStoryPlayer, type UploadTiming,
 } from "./story-model";
-import { narrationCurrent, pendingMedia, presenterCurrent, presenterNeeded, showsPresenter, specCredits, spokenSeconds, type StorySpec } from "../../shared/formats";
+import { filmClock, isFilm, narrationCurrent, pendingMedia, presenterCurrent, presenterNeeded, showsPresenter, specCredits, spokenSeconds, type StorySpec } from "../../shared/formats";
+import { shotSeconds, takeKey } from "../../shared/drama";
 import { presenterLayoutInfo, presenterQualityInfo } from "../../shared/presenter";
 import {
   clipFor, normWord, placeOf, storyLengths, storyScript, storyStyles, storyTransitions, textWords, transitionInfo, voiceToneNames, voiceTones, STORY_MAX_CHARS, STORY_MAX_SCENES,
@@ -62,6 +63,8 @@ function useStoryMedia(spec: StorySpec) {
   }, [spec.scenes, remember]);
   const picture = useCallback((s: StoryScene, seconds: number): ScenePicture => {
     // An AI clip starts from its picture: shown until the clip's frames are there.
+    // A film's shot plays its take with its own sound: the line is said in the clip.
+    if (s.source === "clip" && s.clipId && s.acted) return { url: fileUrl(s.clipId), kind: "video", sound: true, trim: s.take?.trim ?? 0, ...(s.imageId && { poster: fileUrl(s.imageId) }) };
     if (s.source === "clip" && s.clipId) return { url: fileUrl(s.clipId), kind: "video", ...(s.imageId && { poster: fileUrl(s.imageId) }) };
     if ((s.source === "image" || s.source === "clip") && s.imageId) return { url: fileUrl(s.imageId), kind: "image" };
     if (s.source === "own" && s.assetId && known[s.assetId]) return { url: known[s.assetId].url, kind: known[s.assetId].kind, loop: known[s.assetId].duration < seconds - 1 };
@@ -139,7 +142,9 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
   };
   const { byId } = useVoices();
   const voiceName = spec.narration.kind === "voice" ? byId((spec.narration as { voiceId: string }).voiceId)?.name || "AI voice" : "Your recording";
-  const voiceLabel = spec.narration.kind === "upload" ? `Your recording · ${clockText(clock.duration)}` : `AI voice · ${voiceName}${clock.source === "estimate" ? " · made with the video" : ""}`;
+  const film = isFilm(spec);
+  const voiceLabel = film ? `The shots' own sound${filmClock(spec) ? "" : " · made with the video"}`
+    : spec.narration.kind === "upload" ? `Your recording · ${clockText(clock.duration)}` : `AI voice · ${voiceName}${clock.source === "estimate" ? " · made with the video" : ""}`;
   const long = clock.duration > STORY_MAX_SECONDS;
   return (
     <div className="story-editor">
@@ -147,7 +152,9 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
         <div className="preview-phone">
           <StoryPreview segments={segments} scenes={timed} pictures={pictures} captions={captions} headline={headline} player={player} audioUrl={audioUrl}
             label={`Preview of the narrated video, ${spec.scenes.length} scenes, ${clockText(clock.duration)}`} />
-          <p className="muted small story-note">{clock.source === "estimate"
+          <p className="muted small story-note">{film
+            ? (filmClock(spec) ? "A film: the preview plays the shots with their own sound, cut where the render cuts them; the music plays in the made video." : "A film: its shots are made with the video. Until then, the preview times the lines from the script.")
+            : clock.source === "estimate"
             ? "Until the voice is made, the preview times the words from the script."
             : clock.source === "recording" && !clock.said.length ? "No word timings yet: scenes are spread over the recording and no subtitles are shown." : "The preview plays the voice with the scenes, transitions and subtitles in sync; the music and sound effects play in the made video."}</p>
         </div>
@@ -159,7 +166,7 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
           onDelete={() => { setScenes(spec.scenes.filter((_, i) => i !== selected)); setSelected(Math.max(0, selected - 1)); }} />
       </div>
       <StoryTimeline timing={clock.timing} segments={segments} duration={clock.duration} pictures={pictures} thumbs={thumbs} selected={selected} player={player}
-        estimated={clock.source === "estimate"} voiceLabel={voiceLabel} music={music} onMusic={onMusic}
+        estimated={clock.source === "estimate"} estimatedNote={film ? "Estimated times until the shots are made" : undefined} voiceLabel={voiceLabel} music={music} onMusic={onMusic}
         onSelect={setSelected} onMoveEdge={(k, first) => setScenes(moveEdge(spec.scenes, k, first))} />
       {long && <p className="notice bad">This voice is {clockText(clock.duration)} long: a video can be up to 3 minutes. Shorten the script or the recording.</p>}
       <EditorSection title="On-screen title" hint="A line at the top: a POV line or a creature's name all along, or a title card for the first seconds."
@@ -185,13 +192,14 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
           </div>
         )}
       </EditorSection>
-      <PresenterSection spec={spec} onChange={onChange} />
-      <EditorSection title="Background clip" hint="One clip loops behind the whole video instead of a picture per scene (storytime). No AI pictures are made."
+      {/* A film's shots speak for themselves: no presenter, and no clip behind them. */}
+      {!film && <PresenterSection spec={spec} onChange={onChange} />}
+      {!film && <EditorSection title="Background clip" hint="One clip loops behind the whole video instead of a picture per scene (storytime). No AI pictures are made."
         action={spec.backdrop
           ? <button type="button" className="btn sm ghost" onClick={() => onChange({ ...spec, backdrop: null })}>Use pictures</button>
           : <button type="button" className="btn sm" onClick={onBackdrop}><Film size={14} aria-hidden="true" /> Choose clip</button>}>
         {spec.backdrop && <div className="row wrap" style={{ gap: 8 }}><span className="small">{backdrop?.name || "Library clip"}</span><button type="button" className="btn sm" onClick={onBackdrop}>Swap</button></div>}
-      </EditorSection>
+      </EditorSection>}
       <EditorSection title="Subtitles" hint="Word by word over the whole voice. Key word: Title Case, one key word per line in lime."
         action={<Switch checked={spec.captions.enabled} onChange={(enabled) => onChange({ ...spec, captions: { ...spec.captions, enabled } })} label="Show subtitles" />}>
         {spec.captions.enabled && <CaptionStylePicker label="Subtitle style" value={spec.captions.style} onChange={(style) => onChange({ ...spec, captions: { ...spec.captions, style } })} />}
@@ -242,6 +250,10 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
   // The other scenes become clips of the quality this one has (regular when it is still a picture).
   const quality: ClipQuality = scene.source === "clip" ? scene.clipQuality : "regular";
   const made = (scene.source === "image" && scene.imageId) || (scene.source === "clip" && scene.clipId);
+  // A film's shot (shared/drama.ts): an acted clip that says the scene's words; other words need a new take.
+  const shot = !!scene.acted, narrator = spec.narration.kind === "voice" ? spec.narration.voiceId : "";
+  const taken = shot && !!scene.clipId && scene.take?.key === takeKey(scene, narrator);
+  const takePrice = clipCredits([{ seconds: shot ? clipFor(shotSeconds(scene.text)) : scene.clipSeconds, quality: shot ? "high" : scene.clipQuality }]);
   const own = scene.assetId ? known[scene.assetId] : undefined, lib = scene.libraryId ? known[scene.libraryId] : undefined;
   // The places the writer named (videos saved before places have none); a scene set in one is drawn like its others.
   const places = spec.places ?? [], place = placeOf(places, scene.place);
@@ -255,6 +267,7 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
         <label className="field"><span className="small">Words (spoken)</span>
           <textarea className="textarea" rows={3} maxLength={600} value={scene.text} onChange={(e) => onChange({ text: e.target.value.replace(/\s+/g, " ") })} />
           {narrationCurrent(spec) && <span className="hint">The voice is recorded: new words record it again (see the price below).</span>}
+          {shot && <span className="hint">{scene.speaker ? `${scene.speaker} says this in the shot` : "Said off screen in the shot"}{taken ? `: new words make the shot again (${creditsLabel(takePrice)}).` : "."}</span>}
         </label>
       ) : <span className="small strong-label">Words (from your recording)</span>}
       {voice && (
@@ -263,7 +276,7 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
             <option value="">{index ? "Same as before" : "Natural"}</option>
             {voiceTones.map((t) => <option key={t} value={t}>{voiceToneNames[t]}</option>)}
           </select>
-          <span className="hint">How the AI voice says this scene, and the scenes after it until another tone.{narrationCurrent(spec) ? " A new tone records the voice again." : ""}</span>
+          <span className="hint">{shot ? `How the line is said.${taken ? " A new tone makes the shot again." : ""}` : `How the AI voice says this scene, and the scenes after it until another tone.${narrationCurrent(spec) ? " A new tone records the voice again." : ""}`}</span>
         </label>
       )}
       <div className="word-chips" role="group" aria-label="Words of this scene: choose one to mark it or split before it">
@@ -286,8 +299,13 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
           {presenter} speaks this scene on camera.{spec.presenter!.layout === "mix" ? " Choose My media or Library to show a picture of yours instead." : ""}
         </p>
       )}
+      {shot && (
+        <p className="notice small">
+          An acted shot: the clip is made from this picture and the line is said in it{taken ? ` (${scene.take!.seconds.toFixed(1)} s)` : ""}. A take can miss a word or a face: make it again until it's right.
+        </p>
+      )}
       {!(showsPresenter(spec, index) && spec.presenter!.layout === "full") && <>
-      <div className="seg small-seg story-sources" role="group" aria-label="Where the picture comes from">
+      {!shot && <div className="seg small-seg story-sources" role="group" aria-label="Where the picture comes from">
         {(["image", "clip", "own", "library"] as const).map((s) => {
           const Icon = sourceIcons[s], cost = price(s);
           return (
@@ -297,7 +315,7 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
             </button>
           );
         })}
-      </div>
+      </div>}
       {(scene.source === "image" || scene.source === "clip") && allClips.count > (scene.source === "image" ? 1 : 0) && (
         <button type="button" className="btn sm wrap" onClick={() => allClips.apply(quality)}>
           <Film size={14} aria-hidden="true" /> {scene.source === "clip" ? `Same for the other ${allClips.count} picture scene${allClips.count === 1 ? "" : "s"}` : `AI clips for all ${allClips.count} picture scenes`}{quality === "high" ? ", high quality" : ""} · {creditsLabel(allClips.credits(quality))}
@@ -322,7 +340,7 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
               </span>
             </label>
           )}
-          {scene.source === "clip" && (<>
+          {scene.source === "clip" && !shot && (<>
             <div className="field"><span className="small">Clip quality</span>
               <div className="seg small-seg" role="group" aria-label="Clip quality">
                 {clipQualities.map((q) => (
@@ -350,8 +368,18 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
             </div>
           </>)}
           {made
-            ? <button type="button" className="btn sm" onClick={() => onChange({ imageId: undefined, clipId: undefined })}><RefreshCw size={14} aria-hidden="true" /> New picture · 1 credit per {PICTURES_PER_CREDIT}</button>
-            : <p className="muted small">Made when you make the video, in the {storyStyles[spec.style].name.toLowerCase()} style{spec.subject ? ", with your main character" : ""}.</p>}
+            ? (
+              <div className="row wrap" style={{ gap: 6 }}>
+                {/* The same picture, played again: another take of the clip (a film's shot says its line anew). */}
+                {scene.source === "clip" && scene.clipId && (
+                  <button type="button" className="btn sm" onClick={() => onChange({ clipId: undefined, take: undefined })}><Clapperboard size={14} aria-hidden="true" /> New take · {creditsLabel(takePrice)}</button>
+                )}
+                <button type="button" className="btn sm" onClick={() => onChange({ imageId: undefined, clipId: undefined, take: undefined })}>
+                  <RefreshCw size={14} aria-hidden="true" /> New picture{scene.source === "clip" ? " and take" : ""} · 1 credit per {PICTURES_PER_CREDIT}{scene.source === "clip" ? ` + ${creditsLabel(takePrice)}` : ""}
+                </button>
+              </div>
+            )
+            : <p className="muted small">{scene.source === "clip" && scene.imageId ? `A new ${shot ? "take" : "clip"} is made from this picture when you save (${creditsLabel(takePrice)}).` : `Made when you make the video, in the ${storyStyles[spec.style].name.toLowerCase()} style${spec.subject ? ", with your main character" : ""}.`}</p>}
         </>
       )}
       {scene.source === "own" && (
@@ -392,7 +420,7 @@ export function storyPrice(spec: StorySpec, initial: boolean, recordingSeconds?:
     script, pictures, clips, seconds,
     presenter: spec.presenter && presenterNeeded(spec) ? presenterCredits(spokenSeconds(spec), spec.presenter.quality) : 0,
     video: initial ? videoCredits(seconds) : 0,
-    voice: !initial && voiceAgain ? voiceCredits(script) : 0,
+    voice: !initial && voiceAgain && !isFilm(spec) ? voiceCredits(script) : 0,
     redo: initial ? 0 : pictureCredits(pictures),
     clipCredits: clipCredits(clips),
     total: specCredits(spec, initial, recordingSeconds),
@@ -410,17 +438,19 @@ function StoryPlan({ spec, creditsLeft, music, initial, recordingSeconds }: { sp
     p.presenter ? `${presenterQualityInfo[spec.presenter.quality].name} quality, ${presenterLayoutInfo[spec.presenter.layout].name.toLowerCase()}` : "unchanged",
     p.presenter,
   ]] : [];
+  // A film (shared/drama.ts): its clips are its shots, and it has no narration to record.
+  const film = isFilm(spec), clipsRow = film ? "Shots" : "Animated scenes";
   const rows: [string, string, number | null][] = initial
     ? [
       [`New video · about ${clockText(p.seconds)}`, `${spec.narration.kind === "voice" ? `AI voice ${voiceName}` : "your recording"}, ${spec.backdrop ? "a background clip" : `${p.pictures} AI pictures in ${storyStyles[spec.style].name}`}`, p.video],
-      ["Animated scenes", p.clips.length ? p.clips.map((c) => `${c.seconds} s${c.quality === "high" ? " HQ" : ""}`).join(", ") : "none", p.clipCredits],
+      [clipsRow, p.clips.length ? p.clips.map((c) => `${c.seconds} s${c.quality === "high" ? " HQ" : ""}`).join(", ") : "none", p.clipCredits],
       ...presenter,
       ["Subtitles, transitions" + (music ? ", music" : "") + (spec.sounds?.enabled ? ", sound effects" : ""), "rendering", 0],
     ]
     : [
-      [`New narration${voiceName ? ` · ${voiceName}` : ""}`, p.voice ? `${p.script.length.toLocaleString("en-US")} characters` : "unchanged", p.voice],
+      ...(film ? [] : [[`New narration${voiceName ? ` · ${voiceName}` : ""}`, p.voice ? `${p.script.length.toLocaleString("en-US")} characters` : "unchanged", p.voice] as [string, string, number | null]]),
       [`New pictures · ${storyStyles[spec.style].name}`, p.pictures ? `${p.pictures} to make` : "none", p.redo],
-      ["Animated scenes", p.clips.length ? p.clips.map((c) => `${c.seconds} s${c.quality === "high" ? " HQ" : ""}`).join(", ") : "none", p.clipCredits],
+      [clipsRow, p.clips.length ? p.clips.map((c) => `${c.seconds} s${c.quality === "high" ? " HQ" : ""}`).join(", ") : "none", p.clipCredits],
       ...presenter,
       ["Subtitles, transitions, timing" + (music ? ", music" : "") + (spec.sounds?.enabled ? ", sound effects" : ""), "rendering", 0],
     ];
