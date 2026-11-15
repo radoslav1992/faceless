@@ -15,7 +15,8 @@ import "./post.css";
 
 /** A scene's picture: a made or chosen image or clip, or what is still to make or choose (`label`: AI picture, AI clip…). */
 /** A scene's picture; a `synced` video plays at the voice's time (the presenter, made for the whole voice). */
-export type ScenePicture = { url: string; kind: "image" | "video"; loop?: boolean; poster?: string; synced?: boolean } | { pending: string; label?: string };
+/** `sound`: a film's shot (shared/drama.ts), played with its own sound from `trim` seconds in: its line is said in it. */
+export type ScenePicture = { url: string; kind: "image" | "video"; loop?: boolean; poster?: string; synced?: boolean; sound?: boolean; trim?: number } | { pending: string; label?: string };
 
 const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 type Look = { opacity: number; transform: string; clip: string; mask: string };
@@ -75,7 +76,7 @@ export function StoryPreview({ segments, scenes, pictures, captions, headline = 
           if (was || el.style.visibility !== "hidden") { el.dataset.on = ""; el.style.visibility = "hidden"; video?.pause(); }
           return;
         }
-        const local = el.dataset.synced === "1" ? t : Math.max(0, (f - seg.from) / FPS);
+        const local = el.dataset.synced === "1" ? t : Number(el.dataset.trim || 0) + Math.max(0, (f - seg.from) / FPS);
         if (!was) {
           el.dataset.on = "1";
           el.style.visibility = "visible";
@@ -121,11 +122,11 @@ export function StoryPreview({ segments, scenes, pictures, captions, headline = 
       {segments.map((seg, k) => {
         const pic = pictures[seg.scene];
         return (
-          <div key={`${seg.scene}:${"url" in pic ? pic.url : "pending"}`} ref={(el) => { layers.current[k] = el; }} className="sp-layer" data-synced={"synced" in pic && pic.synced ? "1" : undefined}>
+          <div key={`${seg.scene}:${"url" in pic ? pic.url : "pending"}`} ref={(el) => { layers.current[k] = el; }} className="sp-layer" data-synced={"synced" in pic && pic.synced ? "1" : undefined} data-trim={"trim" in pic && pic.trim ? pic.trim : undefined}>
             {"pending" in pic
               ? <div className="sp-pending"><span>Scene {seg.scene + 1} · {pic.label ?? "AI picture"}</span><p>{pic.pending || "Describe this picture"}</p></div>
               : pic.kind === "video"
-                ? <video src={pic.url} poster={pic.poster} muted playsInline loop={!!pic.loop} preload="auto" />
+                ? <video src={pic.url} poster={pic.poster} muted={!pic.sound} playsInline loop={!!pic.loop} preload="auto" />
                 : <img src={pic.url} alt="" />}
           </div>
         );

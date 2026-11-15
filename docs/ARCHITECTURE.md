@@ -167,8 +167,40 @@ refuses a drama to anyone but administrators and on other than story styles).
   as a high-quality clip of the scene's length (2 credits per 5 s), counted in the episode's price (`lipSyncCredits`),
   and made again whenever the voice is recorded again (`pendingMedia`). Only administrators can make a video with
   lip-synced scenes (`checkFilm`).
-The series page shows the story so far (`story` in `GET /api/series/:id`). Not in it: the cinematic look. Edits that
-move a lip-synced scene's edges after it is made (free edits) are not followed by a new lip-sync.
+- **Film** (an option of a drama, `film`, in place of lip-sync). The episode is shot like a film.
+  - *Written in shots.* The writer is asked for `filmShots(seconds)` scenes (one per 3.5 s), each one short line (at
+    most `SHOT_MAX_WORDS` words) with what the camera shows while it is said: the speaker, the one who listens, or the
+    thing the line is about; no narrator. `shotsSpec` turns every scene into an acted shot (`acted` on the scene: a
+    high-quality clip from its picture, a cut before it) and sets the film look (`film`). A video is a film when every
+    scene is acted (`isFilm`); a spec that mixes acted and other scenes does not validate.
+  - *Every shot says its own line.* The clip is made by fal's MiniMax H3 Max, on the endpoint that takes references
+    (`minimax/h3-max/reference-to-video`, `shotRequest`): the shot's picture as the first frame, the prompt of
+    `shotPrompt` (what happens, the line in quotes, said on screen by the speaker the picture names and off screen
+    otherwise, a camera move, the sound), the length the line needs (`shotSeconds`, billed by the second at about
+    $0.08) and a sample of the speaker's voice as "Audio 1". The sample (`voiceSample`) is the cast member's
+    ElevenLabs voice reading a few of the episode's own lines, 2 to 14 seconds, made once per video and voice and kept
+    with it (`meta.sample`). No narration is recorded or charged.
+  - *Each clip is listened to* (`makeTake`, `hearTake`: ElevenLabs Scribe). `takeOf` matches the words heard against
+    the line: when at least `TAKE_HEARD` (60%) of it was heard, the shot starts a quarter second before its first
+    word and ends a moment after its last; otherwise the clip is made once more, at no charge, and the better of the
+    two is kept. The result is the scene's `take` (`key`: the voice, speaker, tone and words it was made for; `trim`,
+    `seconds`, `words`). A clip nobody could listen to is kept whole, its words spread over it.
+  - *The film's clock is its takes'* (`filmTiming`, `filmClock`): the shots one after another, each as long as its
+    take, with its words where they are said. `storyTiming` takes those starts as `cuts`, so scenes change exactly
+    where the clips do. The render (`planStory`) has no voice track: every segment plays its clip from `trim` at full
+    volume, with hard cuts, the film look, subtitles from the takes' words and music under it. The renderer is
+    unchanged. The editor's preview plays the shots with their own sound on the same clock.
+  - *Price.* Each shot is a high-quality clip: 2 credits up to five seconds, 4 for a longer line; an episode's
+    estimate is `filmCredits` (2 per shot) on top of its length. Sound effects and "animated scenes" are not used.
+  - *Making a shot again.* A take is a draw: a face can drift, a word can be wrong. In the editor, **New take** on
+    any AI clip clears its `clipId` (and `take`), so the next save makes that clip alone again from the same picture,
+    at the clip's price; **New picture and take** redraws the picture first. New words, another tone or another
+    voice for a shot change its `takeKey`, which asks for a new take the same way (`pendingMedia`).
+  - Only administrators can make a video with acted shots, and a film has no background clip, presenter or own
+    recording (`checkFilm`).
+The series page shows the story so far (`story` in `GET /api/series/:id`). Edits that move a lip-synced scene's edges
+after it is made (free edits) are not followed by a new lip-sync; in a film, moving an edge changes two shots' words,
+so both are taken again.
 
 **Cinematic videos** (`shared/film.ts`; a test, for administrators only). A narrated video made the way AI short
 films are, as a flag on the video (`film` in its spec), not a video type, so any story style can be made this way.

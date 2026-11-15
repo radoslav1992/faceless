@@ -301,15 +301,16 @@ export async function makeEpisode(
   const concept = await writeVideo(env, {
     template: s.template, prompt: settings.prompt, seconds: settings.seconds, language: settings.language, style: settings.style,
     subject, recent, music: catalog,
-    ...(drama && episode && { drama: { premise: drama.premise, cast: drama.cast, soFar, episode: episode.n, of: episode.of } }),
+    ...(drama && episode && { drama: { premise: drama.premise, cast: drama.cast, soFar, episode: episode.n, of: episode.of, film: drama.film } }),
   });
   if (!concept) return { error: "We couldn't write this episode right now. Please try again in a minute.", status: 503, blocked: "failed" };
-  const sounds = settings.sounds ? await chooseSounds(env, { userId: user.id, scenes: concept.scenes, create: true }) : null;
+  // A film's shots bring their own sound: no sound effects are chosen for it.
+  const sounds = settings.sounds && !drama?.film ? await chooseSounds(env, { userId: user.id, scenes: concept.scenes, create: true }) : null;
   const picked = settings.music.trackId || (concept.music && catalog.find((m) => m.ref === concept.music)?.id) || catalog[0]?.id;
   const spec = conceptToSpec(concept, {
     kind: template.kind, voiceId: settings.voiceId, style: settings.style, language: settings.language, captions: settings.captions,
-    subject, animate: settings.animate, hashtags: settings.hashtags, backdropId, sounds,
-    ...(drama && episode && { cast: drama.cast, episode, lipSync: drama.lipSync }),
+    subject, animate: drama?.film ? 0 : settings.animate, hashtags: settings.hashtags, backdropId, sounds,
+    ...(drama && episode && { cast: drama.cast, episode, lipSync: drama.lipSync && !drama.film, film: drama.film }),
     music: picked && settings.music.mood !== "none" ? { trackId: picked, volume: settings.music.volume } : null,
   });
   if (!spec) return { error: "The episode we wrote didn't come out right. Please try again.", status: 502, blocked: "failed" };

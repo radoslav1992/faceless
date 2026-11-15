@@ -14,7 +14,7 @@ import { defaultSeriesSettings, episodeCredits, episodeLengths, languages, lengt
 import { videosPerMonth } from "../../shared/schedule";
 import { storyStyles } from "../../shared/story";
 import { comingSoon, platforms, type PlatformId } from "../../shared/social";
-import { DRAMA_CAST_MAX, dramaSchema, type CastMember, type Drama } from "../../shared/drama";
+import { DRAMA_CAST_MAX, dramaSchema, filmCredits, type CastMember, type Drama } from "../../shared/drama";
 import { CLIP_CREDITS, CLIP_SECONDS } from "../../shared/credits";
 import { planById } from "../../shared/plans";
 import { creditsLabel } from "../../shared/credits";
@@ -58,7 +58,7 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
         <Section title="Drama" hint="One continuing story told in episodes by a cast of characters, each with their own voice. Every episode picks up where the last one ended and stops on a cliffhanger; the last one ends the story.">
           <span className="row" style={{ gap: 10 }}>
             <Switch checked={!!drama} label="Drama series"
-              onChange={(on) => set({ drama: on ? { premise: "", episodes: 10, cast: [{ name: "", role: "", look: "", voiceId: settings.voiceId }], lipSync: false } : undefined })} />
+              onChange={(on) => set({ drama: on ? { premise: "", episodes: 10, cast: [{ name: "", role: "", look: "", voiceId: settings.voiceId }], lipSync: false, film: false } : undefined })} />
             <span>Drama series <span className="chip" style={{ marginLeft: 6 }}>Admin test</span></span>
           </span>
           {drama && (
@@ -73,13 +73,22 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
               </label>
               <div className="field">
                 <span className="row" style={{ gap: 10 }}>
+                  <Switch checked={drama.film} onChange={(film) => setDrama({ film, ...(film && { lipSync: false }) })} label="Film" />
+                  <span>Film</span>
+                </span>
+                <span className="hint">
+                  Shot like a film: the episode is written as short shots with no narrator, and every shot is a video clip in which the character plays the moment and says the line, in a voice like the one you chose for them, cut hard from shot to shot. Costs about {creditsLabel(filmCredits(settings.seconds))} on top of an episode of this length ({CLIP_CREDITS.high} per shot). Takes can miss: open an episode to make any shot again.
+                </span>
+              </div>
+              {!drama.film && <div className="field">
+                <span className="row" style={{ gap: 10 }}>
                   <Switch checked={drama.lipSync} onChange={(lipSync) => setDrama({ lipSync })} label="Lip-sync" />
                   <span>Lip-sync</span>
                 </span>
                 <span className="hint">
                   The cast's lips move with their lines: every scene a character says becomes a clip of its picture, lip-synced to their voice. Costs {CLIP_CREDITS.high} credits per {CLIP_SECONDS} seconds of those scenes, on top of the episode. Off: the characters speak over still pictures.
                 </span>
-              </div>
+              </div>}
               <div className="stack" style={{ gap: 10 }}>
                 <span className="label">Cast <span className="muted small">(up to {DRAMA_CAST_MAX}; the narrator is the series' voice below)</span></span>
                 {drama.cast.map((c, i) => (
@@ -147,11 +156,11 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
               <input className="input" maxLength={300} value={settings.subject} placeholder="A small robot with a round blue head and one antenna" onChange={(e) => set({ subject: e.target.value })} />
             </label>
           )}
-          <label className="field"><span className="small">Animated scenes per episode</span>
+          {!drama?.film && <label className="field"><span className="small">Animated scenes per episode</span>
             <select className="select" value={settings.animate} onChange={(e) => set({ animate: Number(e.target.value) })}>
               {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n ? `First ${n} scene${n > 1 ? "s" : ""} (+${n} credit${n > 1 ? "s" : ""})` : "None (pictures move slowly)"}</option>)}
             </select>
-          </label>
+          </label>}
         </Section>
       )}
       <Section title="Music, sound effects and subtitles">
@@ -162,10 +171,11 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
             <input type="range" min={0} max={1} step={0.05} value={settings.music.volume} onChange={(e) => set({ music: { ...settings.music, volume: Number(e.target.value) } })} />
           </label>
         </div>
-        <div className="row between">
+        {/* A film's shots bring their own sound. */}
+        {!drama?.film && <div className="row between">
           <span className="small">Sound effects <span className="muted">(a whoosh on scene changes and sounds for scenes you'd hear)</span></span>
           <Switch checked={settings.sounds} onChange={(sounds) => set({ sounds })} label="Sound effects" />
-        </div>
+        </div>}
         <div className="row between"><span className="small">Subtitles</span><Switch checked={settings.captions.enabled} onChange={(enabled) => set({ captions: { ...settings.captions, enabled } })} label="Subtitles" /></div>
         {settings.captions.enabled && <CaptionStylePicker label="Subtitle style" value={settings.captions.style} onChange={(style) => set({ captions: { ...settings.captions, style } })} />}
       </Section>

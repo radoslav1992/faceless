@@ -3,10 +3,10 @@ import worker from "../server/index";
 import { runEpisode } from "../server/series";
 import { joinSpeech, speakDialogue, TURN_PAUSE } from "../server/providers/elevenlabs";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
-import { castSubject, dramaSchema, lipSyncCredits } from "../shared/drama";
-import { CLIP_CREDITS } from "../shared/credits";
-import { narrationKey, narrationVoice, voicedScript, voiceRuns } from "../shared/story";
-import { narrationCurrent, specCredits, storySpec } from "../shared/formats";
+import { castSubject, dramaSchema, filmCredits, filmShots, lipSyncCredits, SHOT_MAX_WORDS, shotPrompt, shotSeconds, shotsSpec, shotStill, takeKey, takeOf, voiceSampleText } from "../shared/drama";
+import { CLIP_CREDITS, videoCredits } from "../shared/credits";
+import { FPS, narrationKey, narrationVoice, splitScene, storySegments, storyTiming, textWords, voicedScript, voiceRuns } from "../shared/story";
+import { filmClock, isFilm, narrationCurrent, pendingMedia, specCredits, storySpec } from "../shared/formats";
 import { episodeCredits, seriesSettingsSchema, seriesSubject } from "../shared/series";
 
 // Drama series (a test, for administrators): a series with a cast and a premise whose episodes continue one story.
@@ -66,7 +66,7 @@ describe("drama series", () => {
     ]) expect(dramaSchema.safeParse(bad).success).toBe(false);
     const made = await s.create(s.admin);
     expect(made.status).toBe(201);
-    expect(made.data.series.settings.drama).toEqual({ ...drama, lipSync: false });
+    expect(made.data.series.settings.drama).toEqual({ ...drama, lipSync: false, film: false });
     // The cast is the series' recurring characters, each called by name in every picture.
     expect(seriesSubject(seriesSettingsSchema.parse(s.settings()))).toBe("Mara: a woman of 30, short black hair, a red coat; Ilya: a thin man of 25 in a grey hoodie");
     expect(castSubject(cast).length).toBeLessThanOrEqual(300);
@@ -185,5 +185,125 @@ describe("drama series", () => {
     expect(spoken.words[3].start).toBeCloseTo(1 + TURN_PAUSE, 2);
     expect(spoken.words.at(-1)!.end).toBeCloseTo(spoken.seconds, 2);
     expect(joinSpeech([]).seconds).toBe(0);
+  });
+
+  it("shoot an episode as a film when asked: written in shots, every one an acted clip, priced by its shots", async () => {
+    const s = setup();
+    const plain = seriesSettingsSchema.parse(s.settings()), filmed = seriesSettingsSchema.parse(s.settings({ drama: { ...drama, film: true, lipSync: true }, animate: 2 }));
+    // A shot per three and a half seconds, each a high-quality clip; nothing else is animated or lip-synced in a film.
+    expect(filmShots(45)).toBe(13);
+    expect(filmCredits(45)).toBe(13 * CLIP_CREDITS.high);
+    expect(episodeCredits(filmed)).toBe(videoCredits(45) + filmCredits(45));
+    expect(episodeCredits(plain)).toBe(videoCredits(45));
+    const id = (await s.create(s.admin, { settings: s.settings({ drama: { ...drama, film: true, lipSync: true }, animate: 2 }) })).data.series.id as string;
+    expect(await runEpisode(s.env, id, s.row(id).next_slot)).toMatchObject({ state: "made" });
+    // The writer is asked for shots: one short line each, no narrator, the camera on the speaker or cutting away.
+    const { instructions } = s.asked.at(-1)!;
+    expect(instructions).toContain("You write the shooting script of an episode of a short vertical drama");
+    expect(instructions).toContain("split into exactly 13 scenes");
+    expect(instructions).toContain(`at most ${SHOT_MAX_WORDS} words`);
+    expect(instructions).toContain("There is no narrator");
+    expect(instructions).toContain("cut away instead while the line is heard off screen");
+    expect(instructions).not.toContain("the narrator only bridges time and place");
+    const [first] = s.videos(id);
+    // Every scene is an acted shot from its picture, cut in hard, with the film look; its speaker's voice goes with it.
+    expect(first.spec.film).toBe(true);
+    expect(isFilm(first.spec)).toBe(true);
+    expect(first.spec.scenes.map((x: any) => [x.source, x.acted, x.clipQuality, x.transition, x.lipSync ?? null, x.speaker ?? null, x.voiceId ?? null])).toEqual([
+      ["clip", true, "high", "cut", null, "Mara", "sarah"], ["clip", true, "high", "cut", null, "Ilya", "liam"], ["clip", true, "high", "cut", null, null, null], ["clip", true, "high", "cut", null, "Mara", "sarah"],
+    ]);
+    // Its shots bring their own sound: no sound effects were chosen, and no narration will be recorded or charged.
+    expect(first.spec.sounds).toBeUndefined();
+    expect(first.spec.scenes.every((x: any) => !x.soundId)).toBe(true);
+    const run = s.sqlite.prepare("SELECT credits FROM runs WHERE video_id=?").get(first.id) as any;
+    expect(run.credits).toBe(specCredits(first.spec, true));
+    expect(run.credits).toBe(videoCredits(8) + 4 * CLIP_CREDITS.high);
+    expect(run.credits).toBeLessThanOrEqual(episodeCredits(filmed));
+    expect(pendingMedia(first.spec).filter((m) => m.acted).map((m) => m.acted!.voiceId)).toEqual(["sarah", "liam", "george", "sarah"]);
+  });
+
+  it("describe a shot to the video model: the line said on screen by the speaker it shows, off screen otherwise, in the speaker's voice", () => {
+    const seen = { description: "Close-up of Mara in the corridor, arms crossed", text: 'Where were you  last "night"?', speaker: "Mara", tone: "whispers" as const };
+    expect(shotPrompt(seen, 0, "English")).toBe(
+      "Close-up of Mara in the corridor, arms crossed. Mara says in a whisper, \"Where were you last 'night'?\" A slow push-in. Natural acting at real speed, Mara's lips moving with the words; "
+      + "keep the characters, their clothes, the place and the look exactly as in the image. No subtitles or text on screen. Sound: the voice is the voice of Audio 1, close and clear, speaking English; the quiet ambience of the place; no music.",
+    );
+    // A cutaway (the picture does not show the speaker) and a line nobody of the cast says are heard off screen.
+    expect(shotPrompt({ ...seen, description: "A sealed letter on a steel tray", tone: "" }, 1)).toContain("Off screen, Mara's voice says, \"Where were you last 'night'?\" Nobody on screen speaks. A locked-off camera.");
+    expect(shotPrompt({ description: "A dark hospital corridor", text: "The lights go out.", tone: "" }, 2)).toContain("Off screen, a narrator's voice says, \"The lights go out.\"");
+    // The picture a shot starts from shows the speaker's face when they are in it.
+    expect(shotStill(seen)).toContain("Mara's face is clearly visible");
+    expect(shotStill({ description: "A sealed letter", speaker: "Mara" })).not.toContain("face");
+    // The clip is asked for the line's length and a moment around it, in half seconds, from 3 up.
+    expect(shotSeconds("No.")).toBe(3);
+    expect(shotSeconds("Where were you last night? I waited until the morning.")).toBe(5);
+    expect(shotSeconds("x".repeat(400))).toBe(14);
+    // The voice's sample reads its own lines of the episode, then others' when those are few.
+    const lines = [{ text: "Where were you?", voiceId: "sarah" }, { text: "The lights go out across the whole ward, one room after another, until the corridor is dark." }, { text: "Not yet.", voiceId: "liam" }];
+    expect(voiceSampleText(lines, "liam", "george")).toBe("Not yet. Where were you? The lights go out across the whole ward, one room after another, until the corridor is dark.");
+    expect(voiceSampleText(lines, "george", "george").startsWith("The lights go out")).toBe(true);
+    expect(voiceSampleText([{ text: "word ".repeat(80) }], "george", "george").length).toBeLessThanOrEqual(180);
+  });
+
+  it("take a shot from what is heard in its clip, and put the film on its takes' clock", () => {
+    const text = "Where were you last night?";
+    const heard = (from: number, list = textWords(text)) => list.map((w, i) => ({ text: w, start: from + i * 0.3, end: from + i * 0.3 + 0.25 }));
+    // The line was heard: the shot starts a moment before its first word and ends a moment after its last.
+    const take = takeOf(text, heard(1), 5);
+    expect(take.score).toBe(1);
+    // (On the frame grid: a quarter of a second before the first word, to the nearest frame.)
+    expect(take.trim).toBeCloseTo(0.75, 1);
+    expect(take.seconds).toBeCloseTo(1 + 4 * 0.3 + 0.25 + 0.45 - take.trim, 1);
+    expect(take.words.map((w) => w.text)).toEqual(textWords(text));
+    expect(take.words[0].start).toBeCloseTo(1 - take.trim, 2);
+    expect(Math.abs(take.trim * FPS - Math.round(take.trim * FPS))).toBeLessThan(1e-6);
+    expect(Math.abs(take.seconds * FPS - Math.round(take.seconds * FPS))).toBeLessThan(1e-6);
+    // A word said differently still counts as heard; a line starting at once is not trimmed below zero.
+    expect(takeOf(text, heard(0.1, ["Where", "were", "you", "last", "evening"]), 5)).toMatchObject({ score: 0.8, trim: 0 });
+    // Something else was said (or nothing): the whole clip, the words spread over it, and a score that asks for another take.
+    const missed = takeOf(text, heard(1, ["I", "have", "no", "idea"]), 5);
+    expect(missed).toMatchObject({ score: 0, trim: 0, seconds: 5 });
+    expect(missed.words.map((w) => w.text)).toEqual(textWords(text));
+    expect(missed.words.at(-1)!.end).toBeLessThanOrEqual(5);
+    expect(takeOf(text, [], 4.2)).toMatchObject({ score: 0, trim: 0 });
+
+    // A film: every scene an acted shot. Its clock is its takes one after another.
+    const spec = shotsSpec(storySpec.parse({
+      narration: { kind: "voice", voiceId: "george" },
+      scenes: [{ text, description: "Mara waits", voiceId: "sarah", speaker: "Mara" }, { text: "Not yet.", description: "Ilya by the window", voiceId: "liam", speaker: "Ilya" }, { text: "The lights go out.", description: "A dark ward" }],
+    }));
+    expect(spec.film).toBe(true);
+    expect(filmClock(spec)).toBeNull();
+    expect(pendingMedia(spec).filter((m) => m.kind === "clip")).toHaveLength(3);
+    const taken = { ...spec, scenes: spec.scenes.map((x, i) => ({ ...x, imageId: crypto.randomUUID(), clipId: crypto.randomUUID(), take: { key: takeKey(x, "george"), ...(({ score: _s, ...t }) => t)(takeOf(x.text, heard(0.5 + i, textWords(x.text)), 5)) } })) };
+    const clock = filmClock(taken)!;
+    expect(clock.cuts).toHaveLength(3);
+    expect(clock.cuts[0]).toBe(0);
+    expect(clock.cuts[1]).toBeCloseTo(taken.scenes[0].take.seconds, 5);
+    expect(clock.duration).toBeCloseTo(taken.scenes.reduce((n, x) => n + x.take.seconds, 0), 5);
+    expect(clock.words.map((w) => w.text)).toEqual(taken.scenes.flatMap((x) => textWords(x.text)));
+    // Each shot's words lie inside it, and the scenes cut exactly where the clips do (never between two words).
+    const timing = storyTiming(taken.scenes, clock.words, clock.duration, clock.cuts);
+    expect(timing.scenes.map((x) => x.startFrame)).toEqual(clock.cuts.map((c) => Math.round(c * FPS)));
+    timing.scenes.forEach((x) => { expect(timing.words[x.first].start).toBeGreaterThanOrEqual(x.start - 0.01); expect(timing.words[x.last].end).toBeLessThanOrEqual(x.end + 0.01); });
+    expect(storySegments(timing, taken.scenes.map((x) => x.transition)).every((p) => !p.transition)).toBe(true);
+    expect(pendingMedia(taken)).toHaveLength(0);
+    // A made film is priced by what an edit asks for again: nothing; never a narration, which it has none of.
+    expect(specCredits(taken, false)).toBe(0);
+    expect(narrationCurrent(taken)).toBe(false);
+    // Other words, another tone or another voice need a new take of that shot alone; a new take of the same words too.
+    for (const change of [{ text: "Where were you?" }, { tone: "sad" as const }, { voiceId: "liam" }, { clipId: undefined, take: undefined }]) {
+      const edited = { ...taken, scenes: taken.scenes.map((x, i) => (i === 0 ? { ...x, ...change } : x)) };
+      expect(pendingMedia(edited).map((m) => [m.kind, m.path[1], !!m.acted])).toEqual([["clip", 0, true]]);
+      expect(specCredits(edited, false)).toBe(CLIP_CREDITS.high);
+      expect(filmClock(edited)).toBeNull();
+    }
+    // A split shot keeps the film whole: both halves are shots, the new one without a picture or a take.
+    const split = splitScene(taken.scenes, 0, 2);
+    expect(split[1]).toMatchObject({ acted: true, text: "you last night?", transition: "cut" });
+    expect([split[1].imageId, split[1].clipId, split[1].take]).toEqual([undefined, undefined, undefined]);
+    // A film is acted from its first shot to its last.
+    expect(storySpec.safeParse({ ...taken, scenes: taken.scenes.map((x, i) => (i === 1 ? { ...x, acted: undefined } : x)) }).success).toBe(false);
+    expect(storySpec.safeParse({ ...taken, scenes: taken.scenes.map((x, i) => (i === 1 ? { ...x, source: "image" } : x)) }).success).toBe(false);
   });
 });

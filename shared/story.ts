@@ -136,6 +136,17 @@ export const storySceneSchema = z
      * the voice from the picture and that stretch of the recording; made again whenever the voice is recorded again.
      */
     lipSync: z.literal(true).optional(),
+    /**
+     * A shot of a film (shared/drama.ts): the scene's clip is acted, made from its picture with the scene's words
+     * said in it, so the clip's own sound is the scene's voice and no narration is recorded. `take` is the clip as it
+     * came out, kept by the run that made it: the words it was made for (`key`: other words need a new take), where
+     * the line starts in the clip (`trim`), how long the shot lasts (`seconds`) and when each word is said in it.
+     */
+    acted: z.literal(true).optional(),
+    take: z.object({
+      key: z.string().max(80), trim: z.number().min(0).max(20), seconds: z.number().min(0.5).max(20),
+      words: z.array(z.object({ text: z.string().max(80), start: z.number().min(0).max(30), end: z.number().min(0).max(30) })).max(200).default([]),
+    }).optional(),
   })
   .refine((s) => s.source !== "own" || !!s.assetId, "Choose a picture or video for each scene with your own media.")
   .refine((s) => s.source !== "library" || !!s.libraryId, "Choose a library clip or picture for each scene that uses one.")
@@ -319,9 +330,10 @@ export type StoryTiming = {
 /**
  * Every scene on the voice's clock. A scene starts in the middle of the pause before its first word, on the frame grid
  * (the first one at 0) and lasts until the next one starts (the last one until the end of the voice). Each lasts at
- * least half a second: edges are pushed apart where words come too fast.
+ * least half a second: edges are pushed apart where words come too fast. With `cuts` (a film, shared/drama.ts: its
+ * sound is its clips'), each scene starts at its own.
  */
-export function storyTiming(scenes: Pick<StoryScene, "text" | "keys">[], said: CaptionWord[], duration: number): StoryTiming {
+export function storyTiming(scenes: Pick<StoryScene, "text" | "keys">[], said: CaptionWord[], duration: number, cuts?: number[]): StoryTiming {
   const counts = scenes.map((s) => textWords(s.text).length);
   const written = scenes.flatMap((s) => textWords(s.text));
   const words = timedScript(written, said, duration);
@@ -339,7 +351,8 @@ export function storyTiming(scenes: Pick<StoryScene, "text" | "keys">[], said: C
   const firsts: number[] = [];
   at = 0;
   for (const n of counts) { firsts.push(at); at += n; }
-  const edges = firsts.map((f, k) => {
+  // A film's shots start where their clips do (`cuts`: each scene's start in seconds), never between two words.
+  const edges = cuts?.length === counts.length ? cuts.map((c, k) => (k ? Math.round(c * FPS) : 0)) : firsts.map((f, k) => {
     if (k === 0) return 0;
     const before = words[f - 1], next = words[f];
     return Math.round(((before.end + next.start) / 2) * FPS);
@@ -413,7 +426,7 @@ export function splitScene(scenes: StoryScene[], k: number, at: number): StorySc
   const w = words(scenes[k]);
   if (at < 1 || at >= w.length) return scenes;
   const s = scenes[k], a = w.slice(0, at).join(" "), b = w.slice(at).join(" ");
-  const second: StoryScene = { ...s, text: b, keys: keysIn(b, s.keys), imageId: undefined, clipId: undefined, transition: "auto" };
+  const second: StoryScene = { ...s, text: b, keys: keysIn(b, s.keys), imageId: undefined, clipId: undefined, take: undefined, transition: s.acted ? "cut" : "auto" };
   return [...scenes.slice(0, k), { ...s, text: a, keys: keysIn(a, s.keys) }, second, ...scenes.slice(k + 1)];
 }
 /** Joins scene `k` with the next one: their words, the first one's picture. */

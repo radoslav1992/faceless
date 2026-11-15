@@ -157,6 +157,21 @@ export const LIP_SYNC_MODEL = "minimax/h3-max/lip-sync/image-to-video";
 export const lipSyncRequest = (image: string, audio: string) => ({ model: LIP_SYNC_MODEL, body: { image_url: image, audio_url: audio, resolution: "768P" } });
 /** Submits a lip-sync once (a ticket like any clip's: its status and result are read the same way). */
 export const submitFalLipSync = (e: Env, image: string, audio: string) => { const { model, body } = lipSyncRequest(image, audio); return submitQueue(e, model, body); };
+/**
+ * A film's shot (shared/drama.ts): MiniMax H3 Max plays the moment from the shot's picture (its first frame, which
+ * also gives the clip its 9:16 shape) and says the line written in the prompt, with the place's sound, in one pass.
+ * `voice` is a short recording of the speaker's voice, the prompt's "Audio 1": the endpoint that takes references
+ * keeps the voice like it from shot to shot. The request, as fal's schema for the endpoint has it: `duration` in
+ * seconds (0.92 to 15; billed by the second, $0.08 at 768P) and `prompt_expansion_mode`, which the schema requires
+ * ("balanced" is fal's default: it fills in the look, never the words in quotes).
+ */
+export const SHOT_MODEL = "minimax/h3-max/reference-to-video";
+export const shotRequest = (shot: { image: string; prompt: string; seconds: number; voice: string }) => ({
+  model: SHOT_MODEL,
+  body: { prompt: shot.prompt, image_url: shot.image, duration: Math.min(15, Math.max(1, shot.seconds)), resolution: "768P", prompt_expansion_mode: "balanced", reference_audio_urls: [shot.voice] },
+});
+/** Submits a shot once (a ticket like any clip's: its status and result are read the same way). */
+export const submitFalShot = (e: Env, shot: Parameters<typeof shotRequest>[0]) => { const { model, body } = shotRequest(shot); return submitQueue(e, model, body); };
 /** Submits once; the caller stores the ticket before anything else so a retry polls instead of paying again. */
 export async function submitFal(e: Env, kind: "image" | "clip", prompt: string, options: FalOptions = {}): Promise<FalTicket> {
   const { model, body } = falRequest(kind, prompt, { ...options, ...pictureModels(e, options.fallback), quality: imageQuality(e) });

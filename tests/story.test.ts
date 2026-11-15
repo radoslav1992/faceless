@@ -11,8 +11,9 @@ import { attention } from "../server/operations";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 import { languages, seriesSettingsSchema } from "../shared/series";
 import { FILM_AMBIENCE, filmSpec } from "../shared/film";
-import { lipSyncSpec } from "../shared/drama";
-import { estimatedSeconds, narrationCurrent, pendingMedia, pictureSheets, specCredits, specSchema, storySpec, type StorySpec } from "../shared/formats";
+import { lipSyncSpec, shotSeconds, shotsSpec, takeKey, takeOf, voiceSampleText } from "../shared/drama";
+import { SCRIBE_URL } from "../server/speech";
+import { filmClock, estimatedSeconds, narrationCurrent, pendingMedia, pictureSheets, specCredits, specSchema, storySpec, type StorySpec } from "../shared/formats";
 import {
   AUTO_TRANSITIONS, characterSheetKey, clipFor, estimatedTimings, mergeScenes, moveEdge, narrationKey, placeOf, splitScene, toggleKey, resolveTransition, scenePrompt, scenesFromCounts, splitScenes, storyScript, storySegments,
   storyStyleIds, storyStyles, storyTiming, textWords, timedScript, transitionInfo, transitionKinds, voicedScript, FPS, STORY_MAX_SCENES,
@@ -1072,6 +1073,126 @@ describe("narrated videos in the content run", () => {
     const reworded = { ...video.spec, scenes: video.spec.scenes.map((s: any, i: number) => (i === 1 ? { ...s, text: "Where were you? Tell me now." } : s)) };
     expect(pendingMedia(reworded).filter((m) => m.lipSync)).toHaveLength(1);
     expect(pendingMedia(video.spec).filter((m) => m.lipSync)).toHaveLength(0);
+  });
+
+  it("shoots a film: every shot an acted clip that says its line, listened to, retaken when the line is missed, and cut on its takes", async () => {
+    const { env, sqlite, user, spec, used, run } = await setup();
+    env.FAL_REFERENCE_MODEL = "off";
+    const calls = providers();
+    // Scribe hears each clip's line from half a second in, five words a second; the second shot's first take says something else.
+    const heard = (text: string) => textWords(text).map((w, i) => ({ text: w, start: 0.5 + i * 0.2, end: 0.5 + i * 0.2 + 0.18, type: "word" }));
+    const listened: (number | "missed")[] = [0, "missed", 1, 2, 3, 4];
+    let listens = 0;
+    const others = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: any, init: any = {}) => {
+      if (String(input?.url ?? input) !== SCRIBE_URL) return others(input, init);
+      const line = listened[listens++];
+      return Response.json({ language_code: "eng", words: heard(line === "missed" || line === undefined ? "Something else entirely was said here" : said[line][0]) });
+    });
+    // Mara says shots 2 and 4: the picture of shot 2 shows her, shot 4 cuts away; the rest is said off screen in the video's voice.
+    const film = shotsSpec<StorySpec>({ ...spec, scenes: spec.scenes.map((s, i) => ({
+      ...s, source: "image" as const, assetId: undefined, ...(i === 1 && { description: "Close-up of Mara at the reef, looking up" }), ...((i === 1 || i === 3) && { voiceId: "sarah", speaker: "Mara" }),
+    })) });
+    expect(film.scenes.every((s) => s.acted && s.source === "clip" && s.transition === "cut" && s.clipQuality === "high")).toBe(true);
+    // Its price: the video by its length and every shot as a high-quality clip (a long line is a ten-second one); no narration.
+    expect(film.scenes.map((s) => s.clipSeconds)).toEqual([5, 10, 5, 5, 5]);
+    expect(specCredits(film, true)).toBe(videoCredits(estimatedSeconds(film)) + CLIP_CREDITS.high * 6);
+    // A test for administrators.
+    expect(await call(worker, env, "POST", "/api/videos", { spec: film, idempotencyKey: crypto.randomUUID() }, user.cookie)).toMatchObject({ status: 403, data: { error: expect.stringContaining("Films of acted shots") } });
+    sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
+    const before = used();
+    const created = await call(worker, env, "POST", "/api/videos", { spec: film, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(created.status).toBe(201);
+    expect(used() - before).toBe(specCredits(film, true));
+    await run();
+    const video = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
+    expect(video.renderStatus).toBe("ready");
+    const state = JSON.parse((sqlite.prepare("SELECT provider FROM runs WHERE video_id=?").get(video.id) as any).provider);
+    const file = (link: string) => state.inputs[Number(/\/api\/render-inputs\/[0-9a-f-]{36}\/(\d+)\?token=/.exec(link)![1])] as string;
+    // No narration is recorded: the only speech made is a sample of each voice, reading the episode's own lines.
+    const spoken = calls.filter((c) => c.url.includes("/v1/text-to-speech/"));
+    expect(spoken.map((c) => [c.url.split("/")[5], c.body.text])).toEqual([
+      ["JBFqnCBsd6RMkjVDRZzb", voiceSampleText(film.scenes, "george", "george")], ["EXAVITQu4vr4xnSDxMaL", voiceSampleText(film.scenes, "sarah", "george")],
+    ]);
+    expect(video.spec.generated).toBeUndefined();
+    expect(calls.some((c) => c.url === ALIGNMENT_URL)).toBe(false);
+    // Every shot goes to the video model with its picture, its line, the length it needs and its voice's sample; the
+    // second shot twice, because its line was not heard in the first take.
+    const shots = calls.filter((c) => c.method === "POST" && c.url === "https://queue.fal.run/minimax/h3-max/reference-to-video");
+    expect(shots).toHaveLength(6);
+    expect(listens).toBe(6);
+    expect(Object.keys(shots[0].body).sort()).toEqual(["duration", "image_url", "prompt", "prompt_expansion_mode", "reference_audio_urls", "resolution"]);
+    expect(shots[0].body).toMatchObject({ duration: shotSeconds(said[0][0]), resolution: "768P", prompt_expansion_mode: "balanced" });
+    expect(shots[0].body.prompt).toContain(`Off screen, a narrator's voice says, "${said[0][0]}" Nobody on screen speaks.`);
+    expect(shots[1].body.prompt).toContain(`Close-up of Mara at the reef, looking up. Mara says, "${said[1][0]}"`);
+    expect(shots[2].body).toEqual(shots[1].body);
+    expect(shots[4].body.prompt).toContain(`Off screen, Mara's voice says, "${said[3][0]}"`);
+    const picture = (n: number) => (sqlite.prepare("SELECT object_key FROM media_assets WHERE id=?").get(video.spec.scenes[n].imageId) as any).object_key;
+    expect(file(shots[0].body.image_url)).toBe(picture(0));
+    expect(file(shots[1].body.image_url)).toBe(picture(1));
+    // The sample: the speaker's voice, cut to the fourteen seconds the model takes; Mara's shots get hers.
+    const [george, sarah] = [shots[0], shots[1]].map((c) => file(c.body.reference_audio_urls[0]));
+    expect(george).not.toBe(sarah);
+    expect([shots[3], shots[4], shots[5]].map((c) => file(c.body.reference_audio_urls[0]))).toEqual([george, sarah, george]);
+    expect((await env.MEDIA.get(george))!.size).toBe(44 + 14 * 48000);
+    // The pictures a shot starts from are frames of a film, the speaker's face in view where the shot shows them.
+    const stills = calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/") && !c.url.includes("minimax"));
+    expect(stills).toHaveLength(5);
+    expect(stills[1].body.prompt).toContain("Mara's face is clearly visible, about to speak.");
+    expect(stills[0].body.prompt).toContain("A frame from a film");
+    expect(stills[0].body.prompt).not.toContain("face is clearly visible");
+    // Each shot keeps its take: its line from a quarter second before the first word to a moment after the last.
+    const takes = video.spec.scenes.map((s: any) => s.take);
+    video.spec.scenes.forEach((s: any, n: number) => {
+      const { score, ...take } = takeOf(s.text, heard(s.text).map((w) => ({ ...w, start: Math.round(w.start * 100) / 100, end: Math.round(w.end * 100) / 100 })), 5);
+      expect(score).toBe(1);
+      expect(s.take).toEqual({ key: takeKey(s, "george"), ...take });
+      expect(s.take.trim).toBeCloseTo(0.25, 1);
+      expect(s.clipId).toBeTruthy();
+      expect(n).toBeLessThan(5);
+    });
+    // The missed take is not kept; the samples are, for the shots made again later.
+    const files = sqlite.prepare("SELECT kind,json_extract(meta,'$.sample') AS sample FROM media_assets WHERE video_id=?").all(video.id) as any[];
+    expect(files.filter((f) => f.kind === "ai_clip")).toHaveLength(5);
+    expect(files.filter((f) => f.sample).map((f) => f.sample).sort()).toEqual(["george", "sarah"]);
+    // The render: the shots one after another with their own sound, cut where the clips are, no voice track, the film look.
+    const clock = filmClock(video.spec)!;
+    expect(clock.duration).toBeCloseTo(takes.reduce((n: number, t: any) => n + t.seconds, 0), 5);
+    const compose = env.MEDIA_RENDERER.log.filter((p: any) => p.operation === "compose").at(-1);
+    expect(compose.voice).toBeNull();
+    expect(compose.look).toBe("film");
+    expect(compose.sounds).toBeUndefined();
+    expect(compose.segments.map((x: any) => [x.kind, x.audio, x.transition ?? null])).toEqual(takes.map(() => ["video", 1, null]));
+    compose.segments.forEach((x: any, n: number) => { expect(x.trim).toBeCloseTo(takes[n].trim, 2); expect(x.duration).toBeCloseTo(takes[n].seconds, 5); });
+    expect(compose.ass).toContain("Dialogue:");
+    expect(video.duration).toBeGreaterThan(0);
+
+    // A shot made again: the same picture and line, a new take, charged as that one clip; nothing else is made.
+    listened.push(2);
+    const retake = { ...video.spec, scenes: video.spec.scenes.map((s: any, i: number) => (i === 2 ? { ...s, clipId: undefined, take: undefined } : s)) };
+    expect(pendingMedia(retake).map((m) => [m.kind, m.path[1]])).toEqual([["clip", 2]]);
+    const charged = used();
+    const saved = await call(worker, env, "PUT", `/api/videos/${video.id}`, { spec: retake, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(saved).toMatchObject({ status: 200, data: { rendering: true, credits: CLIP_CREDITS.high } });
+    expect(used() - charged).toBe(CLIP_CREDITS.high);
+    await run();
+    const again = (await call(worker, env, "GET", `/api/videos/${video.id}`, undefined, user.cookie)).data.video;
+    expect(again.renderStatus).toBe("ready");
+    expect(calls.filter((c) => c.method === "POST" && c.url === "https://queue.fal.run/minimax/h3-max/reference-to-video")).toHaveLength(7);
+    expect(calls.filter((c) => c.url.includes("/v1/text-to-speech/"))).toHaveLength(2);
+    expect(calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/") && !c.url.includes("minimax"))).toHaveLength(5);
+    expect(again.spec.scenes[2].clipId).not.toBe(video.spec.scenes[2].clipId);
+    expect(again.spec.scenes[2].take).toEqual(video.spec.scenes[2].take);
+    expect(again.spec.scenes.map((s: any) => s.clipId).filter((_: any, i: number) => i !== 2)).toEqual(video.spec.scenes.map((s: any) => s.clipId).filter((_: any, i: number) => i !== 2));
+    expect((sqlite.prepare("SELECT COUNT(*) AS n FROM media_assets WHERE video_id=? AND kind='ai_clip'").get(video.id) as any).n).toBe(5);
+    // New words for a shot are a new take of it, and never a narration to record.
+    const reworded = { ...again.spec, scenes: again.spec.scenes.map((s: any, i: number) => (i === 0 ? { ...s, text: "Octopuses have three hearts." } : s)) };
+    expect(pendingMedia(reworded).map((m) => [m.kind, m.path[1], m.acted?.voiceId])).toEqual([["clip", 0, "george"]]);
+    expect(specCredits(reworded, false)).toBe(CLIP_CREDITS.high);
+    // A film's shots speak for themselves: never under the owner's recording.
+    const dubbed = { ...film, narration: { kind: "upload" as const, assetId: crypto.randomUUID(), script: "" } };
+    expect(specSchema.safeParse(dubbed).success).toBe(true);
+    expect(pendingMedia(dubbed as StorySpec).filter((m) => m.acted)).toHaveLength(5);
   });
 
   it("draws every picture from its own text when FAL_REFERENCE_MODEL is off", async () => {
