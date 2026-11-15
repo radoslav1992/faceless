@@ -9,8 +9,9 @@ import { LONG_VIDEO_SECONDS } from "./speech";
 import { trackSchema } from "./track";
 import { SOUND_VOLUME } from "./sounds";
 import { filmClipPrompt, filmStill } from "./film";
+import { lipSyncPrompt } from "./drama";
 import {
-  characterSheetPrompt, clipPrompt, fingerprint, narrationKey, narrationSchema, placeKey, placeOf, placeSchema, placeSheetPrompt, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_PLACES, STORY_MAX_SCENES, voicedScript, type StoryStyle,
+  characterSheetPrompt, clipPrompt, fingerprint, narrationKey, narrationSchema, narrationVoice, placeKey, placeOf, placeSchema, placeSheetPrompt, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_PLACES, STORY_MAX_SCENES, voicedScript, type StoryStyle,
 } from "./story";
 
 // The editable description ("spec") of a video, one of two formats:
@@ -109,6 +110,11 @@ export const storySpec = z.object({
   topic: z.string().trim().max(60).default(""),
   /** A cinematic video (shared/film.ts; administrators only, server/videos.ts): film framing and sound, a film look. */
   film: z.literal(true).optional(),
+  /**
+   * An episode of a drama (shared/drama.ts): its number in the season, the season's length, and what happens in it,
+   * which the writer of the next episode reads. Set when the episode is written.
+   */
+  episode: z.object({ n: z.number().int().min(1).max(999), of: z.number().int().min(1).max(999), summary: z.string().trim().max(600).default("") }).optional(),
 });
 export type StorySpec = z.infer<typeof storySpec>;
 
@@ -171,13 +177,13 @@ export const paidMoment = (spec: HighlightSpec) => {
 
 /** The AI voice is recorded for the video's current words and voice (no new recording is paid). */
 export function narrationCurrent(spec: StorySpec) {
-  return spec.narration.kind === "voice" && !!spec.generated?.voiceAssetId && spec.generated.key === narrationKey(spec.narration.voiceId, voicedScript(spec.scenes));
+  return spec.narration.kind === "voice" && !!spec.generated?.voiceAssetId && spec.generated.key === narrationKey(narrationVoice(spec.narration.voiceId, spec.scenes), voicedScript(spec.scenes));
 }
 
 /** What a presenter video is made from: the avatar, its quality and the AI voice's words (a change needs a new one). */
 export const presenterKey = (spec: StorySpec) =>
   spec.presenter && spec.narration.kind === "voice"
-    ? `${spec.presenter.avatarId}:${spec.presenter.quality}:${narrationKey(spec.narration.voiceId, voicedScript(spec.scenes))}` : "";
+    ? `${spec.presenter.avatarId}:${spec.presenter.quality}:${narrationKey(narrationVoice(spec.narration.voiceId, spec.scenes), voicedScript(spec.scenes))}` : "";
 /**
  * The presenter's video is made for the video's current avatar, quality and words, from the recording it keeps (no
  * new one is paid). A new recording always needs a new presenter video: the lips follow the recording.
@@ -204,6 +210,8 @@ export type PendingMedia = {
   sheet?: string;
   /** A cinematic video's clip: made with its own ambient sound where the model can (shared/film.ts). */
   audio?: boolean;
+  /** A talking scene's clip: the picture lip-synced to the scene's stretch of the voice, so made after it (shared/drama.ts). */
+  lipSync?: boolean;
 };
 /** A reference sheet a story's pictures are drawn from (shared/story.ts); `key` names what it is drawn from. */
 export type PictureSheet = { kind: "character" | "place"; prompt: string; key: string; place?: string };
@@ -231,8 +239,12 @@ export function pendingMedia(spec: Spec): PendingMedia[] {
     if ((s.source === "image" || s.source === "clip") && !s.imageId && !showsPresenter(spec, i))
       out.push({ kind: "image", prompt: scenePrompt(s.description, spec.subject, spec.style, spec.look, placeOf(spec.places, s.place)) + (spec.film ? filmStill(i) : ""), path: ["scenes", i], key: "imageId" });
   });
+  // A lip-synced clip follows the voice it was made to: a voice still to be recorded (new words, another voice) needs it again.
+  const voiceChanges = spec.narration.kind === "voice" && !narrationCurrent(spec);
   spec.scenes.forEach((s, i) => {
-    if (s.source === "clip" && !s.clipId && !showsPresenter(spec, i))
+    if (s.source === "clip" && s.lipSync && (!s.clipId || voiceChanges) && !showsPresenter(spec, i))
+      out.push({ kind: "clip", prompt: lipSyncPrompt(s.speaker, s.text), path: ["scenes", i], key: "clipId", from: "imageId", seconds: s.clipSeconds, quality: s.clipQuality, lipSync: true });
+    else if (s.source === "clip" && !s.clipId && !showsPresenter(spec, i))
       out.push({
         kind: "clip", prompt: spec.film ? filmClipPrompt(s.description, i) : clipPrompt(s.description), path: ["scenes", i], key: "clipId", from: "imageId",
         seconds: s.clipSeconds, quality: s.clipQuality, clipModel: s.clipModel, ...(spec.film && { audio: true }),

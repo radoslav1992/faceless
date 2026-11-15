@@ -39,7 +39,11 @@ export type Series = {
   blocked: string | null; credits: number; createdAt: number; updatedAt: number; videos?: number; review?: number; coverAssetId?: string | null;
   /** The main character as drawn for every episode (null: not drawn yet, or the series has none). */
   characterAssetId?: string | null;
+  /** Why the last slot was skipped: "credits", "trial" and "storage" are solved in Billing. */
+  blockedBy?: string | null;
 };
+/** A drama's episodes in order, with what happens in each (GET /series/:id of a drama). */
+export type StoryEpisode = { n: number; videoId: string; title: string; summary: string };
 export type Account = { id: string; platform: PlatformId; name: string; handle: string | null; avatarUrl: string | null; status: "active" | "expired" | "revoked"; createdAt: number };
 export type Asset = {
   id: string; kind: string; name: string; mime: string; bytes: number; duration: number; width: number; height: number;

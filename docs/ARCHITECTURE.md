@@ -138,6 +138,38 @@ started 30 seconds), 1 credit per 5 new pictures, and new clips. A video never m
 refunded) costs what a new one does when it is made again, whatever its failed run made. Changes to the caption, hashtags or title need no new render; other free changes
 (subtitles, music, sound effects, transitions, timing) re-render for 0 credits.
 
+**Drama series** (`shared/drama.ts`; a test, for administrators only). A series that tells one continuing story in
+episodes, as a setting of a story series (`drama` in its settings), not a page or a template of its own: schedule,
+channels, review and notices are the series'. Its settings add a **premise**, a number of **episodes** and a **cast**
+of up to three, each with a name, who they are, a look and a voice (`dramaSchema`; checked in `checkSettings`, which
+refuses a drama to anyone but administrators and on other than story styles).
+- **The story goes on.** Each episode's video keeps its number and a summary of what happens in it (`episode` in the
+  spec). `makeEpisode` reads them back in order (`storySoFar`: the episodes that still exist and were not rejected),
+  numbers the next one after the last, and gives the writer the premise, the cast and the story so far (`drama` in
+  `WriteRequest`, `dramaRules`): continue where it ended, change something, end on a cliffhanger, and in the last
+  episode end the story. The writer also returns each scene's `speaker` and the episode's `summary` (`dramaJson`).
+  Titles are "Ep. N: …".
+- **The cast speaks.** A scene a cast member says gets their voice (`voiceId` and `speaker` on the scene); the
+  narrator's scenes are said in the series' voice. `makeNarration` speaks each stretch of one voice with its own call
+  (`voiceRuns`, `speakDialogue`) and joins them into one recording with a short pause between speakers
+  (`joinSpeech`), so everything after it (timing, subtitles, the render) works as with one voice. The recording's key
+  includes the scenes' voices (`narrationVoice`), and every scene's voice must be one its owner may use.
+- **The cast looks the same.** The cast is the series' recurring characters (`seriesSubject`: "Mara: …; Ilya: …"),
+  drawn together on the series' one character sheet and kept for every episode (**One main character**, below).
+- **The season ends.** Asked for an episode past the last, `makeEpisode` answers `finished`; `runEpisode` then pauses
+  the series, keeps the reason and e-mails the owner once. More episodes in Settings and Resume carry the story on.
+- **Lip-sync** (an option of a drama, `lipSync`). Every scene a cast member says becomes a clip of its picture with
+  the lips moving to that scene's words (`lipSyncSpec`: `lipSync` on the scene, a cut before it). It is made after
+  the voice: `lineAudio` cuts the scene's stretch out of the recording (from where its segment starts in the render,
+  so clip and recording stay in step), adds silence up to the 5 seconds the model asks for, and sends it with the
+  scene's picture to fal's MiniMax H3 Max Lip Sync (`minimax/h3-max/lip-sync/image-to-video`: `image_url`,
+  `audio_url`, `resolution` 768P; about $0.08 a second). The clip plays silent over the one recording. It is charged
+  as a high-quality clip of the scene's length (2 credits per 5 s), counted in the episode's price (`lipSyncCredits`),
+  and made again whenever the voice is recorded again (`pendingMedia`). Only administrators can make a video with
+  lip-synced scenes (`checkFilm`).
+The series page shows the story so far (`story` in `GET /api/series/:id`). Not in it: the cinematic look. Edits that
+move a lip-synced scene's edges after it is made (free edits) are not followed by a new lip-sync.
+
 **Cinematic videos** (`shared/film.ts`; a test, for administrators only). A narrated video made the way AI short
 films are, as a flag on the video (`film` in its spec), not a video type, so any story style can be made this way.
 In Create an administrator switches Cinematic on and chooses the clips' quality and, of the models they may choose
