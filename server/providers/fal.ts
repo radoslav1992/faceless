@@ -77,12 +77,15 @@ export type FalOptions = {
 };
 /**
  * A reference sheet of the video a picture is drawn from (shared/formats.ts pictureSheets): what its recurring
- * characters look like ("character"), or how the place the scene is set in is built ("place").
+ * characters look like ("character"), how the place the scene is set in is built ("place"), or, in a film, the
+ * master shot of the scene the shot belongs to ("scene").
  */
-export type Reference = { url: string; role: "character" | "place" };
+export type Reference = { url: string; role: "character" | "place" | "scene" };
 const referenceUse: Record<Reference["role"], string> = {
   character: "shows only what the recurring characters look like: draw the ones this scene shows with exactly these faces, hair, bodies, clothing and colours, but in the pose, action and place this scene describes, never standing as in the reference; leave out any it does not mention.",
   place: "shows only how the place is built: keep its layout, walls, floor, furniture, objects, light and colours, but put the camera where this scene says and frame the picture anew; never copy the reference's view.",
+  // A film's master shot (shared/story.ts masterShotPrompt): the new picture is another camera's view of the same moment.
+  scene: "is the master shot of this very scene, seen from further back: the new picture is the same moment from the camera position this scene describes. Keep the same room with its walls, furniture, objects, light and colours, and the same people in the same clothes, in the same spots, holding the same things; only the camera moves (closer, from another side). Never copy the reference's framing, and leave out anyone this scene does not mention.",
 };
 /** How the references are used, after the scene: each only for what it shows, never as the picture to draw. */
 export function referencePrompt(references: Reference[]) {

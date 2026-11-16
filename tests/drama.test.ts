@@ -3,7 +3,7 @@ import worker from "../server/index";
 import { runEpisode } from "../server/series";
 import { joinSpeech, speakDialogue, TURN_PAUSE } from "../server/providers/elevenlabs";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
-import { castSubject, dramaSchema, filmCredits, filmShots, lipSyncCredits, SHOT_MAX_WORDS, shotPrompt, shotSeconds, shotsSpec, shotStill, takeKey, takeOf, voiceSampleText } from "../shared/drama";
+import { castSubject, dramaSchema, filmCredits, filmPlaces, filmShots, lipSyncCredits, SHOT_MAX_WORDS, shotPrompt, shotSeconds, shotsSpec, shotStill, takeKey, takeOf, voiceSampleText } from "../shared/drama";
 import { CLIP_CREDITS, videoCredits } from "../shared/credits";
 import { FPS, narrationKey, narrationVoice, splitScene, storySegments, storyTiming, textWords, voicedScript, voiceRuns } from "../shared/story";
 import { filmClock, isFilm, narrationCurrent, pendingMedia, specCredits, storySpec } from "../shared/formats";
@@ -205,6 +205,13 @@ describe("drama series", () => {
     expect(instructions).toContain("There is no narrator");
     expect(instructions).toContain("cut away instead while the line is heard off screen");
     expect(instructions).not.toContain("the narrator only bridges time and place");
+    // And for scenes that hold together: one place per scene, lines that fit who is there, a place for every shot.
+    expect(instructions).toContain("The episode plays as scenes. A scene is a run of shots that follow each other in one place at one moment");
+    expect(instructions).toContain("Whoever a line is kept from (the guests, the boss, a rival) is somewhere else for the whole scene");
+    expect(instructions).toContain("at most 2 of them (one is often enough), and every shot's `place` is the label of the place its scene is set in");
+    expect(filmPlaces(30)).toBe(2);
+    expect(filmPlaces(60)).toBe(3);
+    expect(filmPlaces(120)).toBe(4);
     const [first] = s.videos(id);
     // Every scene is an acted shot from its picture, cut in hard, with the film look; its speaker's voice goes with it.
     expect(first.spec.film).toBe(true);

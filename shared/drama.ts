@@ -119,14 +119,22 @@ export const takeKey = (scene: Pick<StoryScene, "text" | "voiceId" | "speaker" |
 /** A written episode as a film: every scene an acted shot made from its picture, cut in hard, with the film look. */
 export function shotsSpec<T extends { scenes: StoryScene[]; backdrop?: unknown; presenter?: unknown }>(spec: T): T {
   if (spec.backdrop || spec.presenter) return spec;
+  // Every shot is set somewhere: one that names no place is in the place of the shot before it (the first ones, of
+  // the first place named), so it is drawn from that place's master shot like its neighbours.
+  let place = spec.scenes.find((s) => s.place.trim())?.place ?? "";
   return {
     ...spec, film: true as const,
-    scenes: spec.scenes.map((s) => ({
-      ...s, source: "clip" as const, acted: true as const, clipSeconds: clipFor(shotSeconds(s.text)), clipQuality: "high" as const, transition: "cut" as const,
-      assetId: undefined, libraryId: undefined, soundId: undefined, lipSync: undefined,
-    })),
+    scenes: spec.scenes.map((s) => {
+      place = s.place.trim() ? s.place : place;
+      return {
+        ...s, place, source: "clip" as const, acted: true as const, clipSeconds: clipFor(shotSeconds(s.text)), clipQuality: "high" as const, transition: "cut" as const,
+        assetId: undefined, libraryId: undefined, soundId: undefined, lipSync: undefined,
+      };
+    }),
   };
 }
+/** How many places a film of `seconds` plays in at most: a scene needs time, so a short episode has one or two. */
+export const filmPlaces = (seconds: number) => (seconds <= 45 ? 2 : seconds <= 90 ? 3 : 4);
 
 /** How a line is said, in a shot's description (the tones of shared/story.ts). */
 const DELIVERY: Record<VoiceTone, string> = {

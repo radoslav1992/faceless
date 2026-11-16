@@ -173,6 +173,15 @@ refuses a drama to anyone but administrators and on other than story styles).
     thing the line is about; no narrator. `shotsSpec` turns every scene into an acted shot (`acted` on the scene: a
     high-quality clip from its picture, a cut before it) and sets the film look (`film`). A video is a film when every
     scene is acted (`isFilm`); a spec that mixes acted and other scenes does not validate.
+  - *Scenes hold together.* The writer is told that the episode plays as scenes: a run of shots in one place at one
+    moment, the people staying where they are; that the story changes place only between scenes; that a line fits
+    where it is said and who is there; and that it has at most `filmPlaces(seconds)` places, every shot naming its
+    own (a shot that names none takes the place of the shot before it, `shotsSpec`). For each place with two or more
+    shots, `pictureSheets` adds a **master shot** after the place's own sheet (`masterShotPrompt`: the place with the
+    people of its scenes in it, drawn from the characters' and the place's sheets). Every shot set there is drawn
+    from the characters' sheet and that master shot (reference role `scene`: the same room, people, clothes and
+    positions, only the camera moves), so the room no longer changes from cut to cut. A master shot is kept with the
+    video like the other sheets, so a picture made again later is drawn from the same one.
   - *Every shot says its own line.* The clip is made by fal's MiniMax H3 Max, on the endpoint that takes references
     (`minimax/h3-max/reference-to-video`, `shotRequest`): the shot's picture as the first frame, the prompt of
     `shotPrompt` (what happens, the line in quotes, said on screen by the speaker the picture names and off screen

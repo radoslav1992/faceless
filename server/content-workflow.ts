@@ -289,7 +289,7 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
   // AI pictures and clips the video asks for (clips are made from their pictures), the pictures drawn from the video's
   // reference sheets, made before them.
   const pending = pendingMedia(first);
-  const sheets = pending.some((m) => m.kind === "image") ? await makeSheets(e, step, run, first, phase) : { places: {} };
+  const sheets = pending.some((m) => m.kind === "image") ? await makeSheets(e, step, run, first, phase) : { places: {}, scenes: {} };
   // A film's shots are said in voices like their speakers': a short sample of each, made once and kept with the video.
   const voices = [...new Set(pending.flatMap((m) => (m.acted ? [m.acted.voiceId] : [])))];
   for (const [n, voiceId] of voices.entries()) await step.do(`voice-sample-${n}`, once, () => voiceSample(e, run, first, voiceId));
@@ -482,7 +482,7 @@ async function trackMoment(e: Env, step: WorkflowStep, run: RunInfo, spec: Highl
 }
 
 /** A video's reference sheets as stored files: the characters' and each place's (by placeKey). */
-type Sheets = { character?: string; places: Record<string, string> };
+type Sheets = { character?: string; places: Record<string, string>; scenes: Record<string, string> };
 /**
  * A picture, paid once; one the model refused (its filter is sometimes wrong) is drawn once more with the fallback
  * model, and a second refusal is thrown.
@@ -560,7 +560,7 @@ async function makeClip(e: Env, step: WorkflowStep, run: RunInfo, name: string, 
  * FAL_REFERENCE_MODEL is "off"; a sheet refused twice is left out (its scenes are drawn without it).
  */
 async function makeSheets(e: Env, step: WorkflowStep, run: RunInfo, spec: StorySpec, phase: Phase): Promise<Sheets> {
-  const out: Sheets = { places: {} };
+  const out: Sheets = { places: {}, scenes: {} };
   if (!referenceModel(e)) return out;
   for (const [n, sheet] of pictureSheets(spec).entries()) {
     const key = await step.do(`sheet-${n}`, safe, async () => {
@@ -572,7 +572,9 @@ async function makeSheets(e: Env, step: WorkflowStep, run: RunInfo, spec: StoryS
       return sheet.kind === "character" ? seriesCharacter(e, run.video_id, run.user_id, sheet.key) : null;
     }) ?? await (async () => {
       const m: PendingMedia = { kind: "image", prompt: sheet.prompt, path: [], key: "", sheet: sheet.key };
-      const assetId = await drawPicture(e, step, run, `sheet-${n}-draw`, m, phase).catch((error) => {
+      // A film's master shot of a place is drawn from the sheets made before it: the characters' and the place's.
+      const from = sheet.kind === "scene" ? () => referencePictures(e, run, out, sheet.place) : undefined;
+      const assetId = await drawPicture(e, step, run, `sheet-${n}-draw`, m, phase, from).catch((error) => {
         if ((error as Error)?.message !== "GENERATION_REJECTED") throw error;
         return null;
       });
@@ -583,19 +585,24 @@ async function makeSheets(e: Env, step: WorkflowStep, run: RunInfo, spec: StoryS
     })();
     if (!key) continue;
     if (sheet.kind === "character") out.character = key;
+    else if (sheet.kind === "scene" && sheet.place) out.scenes[sheet.place] = key;
     else if (sheet.place) out.places[sheet.place] = key;
   }
   return out;
 }
 /**
  * The reference sheets a scene's picture is drawn from: the characters' and, when several scenes are set in its
- * place, the place's; never another scene's picture, so no framing or mistake is carried from scene to scene.
+ * place, the place's (in a film: the master shot of the place); never another scene's picture, so no framing or
+ * mistake is carried from scene to scene.
  */
 async function referencePictures(e: Env, run: RunInfo, sheets: Sheets, place = ""): Promise<Reference[]> {
   const refs: Reference[] = [];
   if (sheets.character) refs.push({ url: await inputUrl(e, run.id, sheets.character), role: "character" });
-  const here = sheets.places[placeKey(place)];
-  if (place.trim() && here) refs.push({ url: await inputUrl(e, run.id, here), role: "place" });
+  // A film's shot is drawn from the master shot of its place (the room with its people in it), which stands in for
+  // the empty place: every cut of a scene then shows the same room and the same people.
+  const master = sheets.scenes[placeKey(place)], here = sheets.places[placeKey(place)];
+  if (place.trim() && master) refs.push({ url: await inputUrl(e, run.id, master), role: "scene" });
+  else if (place.trim() && here) refs.push({ url: await inputUrl(e, run.id, here), role: "place" });
   return refs;
 }
 

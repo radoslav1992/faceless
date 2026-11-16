@@ -12,7 +12,7 @@ import { filmClipPrompt, filmStill } from "./film";
 import { acted, filmTiming, lipSyncPrompt, shotPrompt, shotSeconds, shotStill, takeKey } from "./drama";
 import { languageName } from "./series";
 import {
-  characterSheetPrompt, clipFor, clipPrompt, fingerprint, narrationKey, narrationSchema, narrationVoice, placeKey, placeOf, placeSchema, placeSheetPrompt, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_PLACES, STORY_MAX_SCENES, voicedScript, type StoryStyle,
+  characterSheetPrompt, clipFor, clipPrompt, fingerprint, masterShotPrompt, narrationKey, narrationSchema, narrationVoice, placeKey, placeOf, placeSchema, placeSheetPrompt, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_PLACES, STORY_MAX_SCENES, voicedScript, type StoryStyle,
 } from "./story";
 
 // The editable description ("spec") of a video, one of two formats:
@@ -225,8 +225,12 @@ export type PendingMedia = {
   /** A film's shot: an acted clip that says its line in a voice like `voiceId`'s, asked for `seconds` long (shared/drama.ts). */
   acted?: { voiceId: string; seconds: number };
 };
-/** A reference sheet a story's pictures are drawn from (shared/story.ts); `key` names what it is drawn from. */
-export type PictureSheet = { kind: "character" | "place"; prompt: string; key: string; place?: string };
+/**
+ * A reference sheet a story's pictures are drawn from (shared/story.ts); `key` names what it is drawn from. A film
+ * (shared/drama.ts) also has a master shot of each place ("scene"): the place with the people of its scenes in it,
+ * drawn from the place's and the characters' sheets, from which every shot set there is drawn.
+ */
+export type PictureSheet = { kind: "character" | "place" | "scene"; prompt: string; key: string; place?: string };
 /**
  * The reference sheets of a story: its recurring characters (when it has a subject) and each place (by placeKey) at
  * least two of its AI pictures are set in; none with fewer than two AI pictures or a background clip.
@@ -236,8 +240,15 @@ export function pictureSheets(spec: StorySpec): PictureSheet[] {
   if (drawn.length < 2) return [];
   const sheet = (kind: PictureSheet["kind"], prompt: string, place?: string): PictureSheet => ({ kind, prompt, key: `sheet:${fingerprint(prompt)}`, ...(place && { place }) });
   const out = spec.subject?.trim() ? [sheet("character", characterSheetPrompt(spec.subject, spec.style))] : [];
+  // A film's cast: everyone who says a line in it. The people of a place are those who speak or are named in its shots.
+  const cast = isFilm(spec) ? [...new Set(spec.scenes.flatMap((s) => (s.speaker?.trim() ? [s.speaker.trim()] : [])))] : [];
   for (const p of spec.places ?? []) {
-    if (drawn.filter((s) => placeOf([p], s.place)).length >= 2) out.push(sheet("place", placeSheetPrompt(p, spec.style, spec.look), placeKey(p.label)));
+    const here = drawn.filter((s) => placeOf([p], s.place));
+    if (here.length < 2) continue;
+    out.push(sheet("place", placeSheetPrompt(p, spec.style, spec.look), placeKey(p.label)));
+    if (!isFilm(spec)) continue;
+    const people = cast.filter((name) => here.some((s) => s.speaker?.trim() === name || s.description.toLowerCase().includes(name.toLowerCase())));
+    out.push(sheet("scene", masterShotPrompt(p, people, spec.style, spec.look), placeKey(p.label)));
   }
   return out;
 }

@@ -1195,6 +1195,61 @@ describe("narrated videos in the content run", () => {
     expect(pendingMedia(dubbed as StorySpec).filter((m) => m.acted)).toHaveLength(5);
   });
 
+  it("keeps a film's scenes in one room: a master shot of each place, drawn once, from which every shot set there is drawn", async () => {
+    const { env, sqlite, user, spec, run } = await setup();
+    sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
+    const calls = providers();
+    let listens = 0;
+    const others = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: any, init: any = {}) => {
+      if (String(input?.url ?? input) !== SCRIBE_URL) return others(input, init);
+      return Response.json({ language_code: "eng", words: textWords(said[listens++ % 5][0]).map((w, i) => ({ text: w, start: 0.5 + i * 0.2, end: 0.68 + i * 0.2, type: "word" })) });
+    });
+    // Two scenes: three shots in the kitchen, two in the dining room. Mara speaks in the kitchen; the third shot names no place.
+    const places = [{ label: "the kitchen", description: "A narrow steel kitchen, a stove on the left, a pass window at the back" }, { label: "the dining room", description: "A small candle-lit room with six tables" }];
+    const film = shotsSpec<StorySpec>({ ...spec, places, scenes: spec.scenes.map((s, i) => ({
+      ...s, source: "image" as const, assetId: undefined, place: i < 2 ? "the kitchen" : i === 2 ? "" : "The Dining Room", ...(i === 1 && { voiceId: "sarah", speaker: "Mara", description: "Close-up of Mara at the stove" }),
+    })) });
+    // A shot that names no place is in the place of the shot before it.
+    expect(film.scenes.map((s) => s.place)).toEqual(["the kitchen", "the kitchen", "the kitchen", "The Dining Room", "The Dining Room"]);
+    // Its sheets: the characters, and for each place the empty place and then the master shot with the scene's people in it.
+    const sheets = pictureSheets(film);
+    expect(sheets.map((x) => [x.kind, x.place ?? null])).toEqual([["character", null], ["place", "the kitchen"], ["scene", "the kitchen"], ["place", "the dining room"], ["scene", "the dining room"]]);
+    expect(sheets[2].prompt).toMatch(/^Master shot of a film scene set in the kitchen: A narrow steel kitchen.* with Mara in it, each where they are during the scene/);
+    expect(sheets[4].prompt).toContain("as the scene finds it, with nobody in the foreground");
+    // Only a film has master shots.
+    expect(pictureSheets({ ...film, scenes: film.scenes.map((s) => ({ ...s, acted: undefined, take: undefined, source: "image" as const })) }).some((x) => x.kind === "scene")).toBe(false);
+    const created = await call(worker, env, "POST", "/api/videos", { spec: film, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(created.status).toBe(201);
+    await run();
+    const video = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
+    expect(video.renderStatus).toBe("ready");
+    const state = JSON.parse((sqlite.prepare("SELECT provider FROM runs WHERE video_id=?").get(video.id) as any).provider);
+    const file = (link: string) => state.inputs[Number(/\/api\/render-inputs\/[0-9a-f-]{36}\/(\d+)\?token=/.exec(link)![1])] as string;
+    const sheetFile = (key: string) => (sqlite.prepare("SELECT object_key FROM media_assets WHERE video_id=? AND json_extract(meta,'$.sheet')=?").get(video.id, key) as any).object_key as string;
+    const drawn = calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/") && !c.url.includes("minimax"));
+    // Five sheets, then five shots.
+    expect(drawn).toHaveLength(10);
+    // A master shot is drawn from the characters' sheet and its place's.
+    const master = drawn.find((c) => c.body.prompt.includes("Master shot of a film scene set in the kitchen"))!;
+    expect(master.body.image_urls.map(file)).toEqual([sheetFile(sheets[0].key), sheetFile(sheets[1].key)]);
+    // Every shot is drawn from the characters' sheet and the master shot of its place: the same room and people, another camera.
+    const stills = drawn.slice(5);
+    expect(stills.map((c) => c.body.image_urls.map(file))).toEqual([
+      ...[0, 1, 2].map(() => [sheetFile(sheets[0].key), sheetFile(sheets[2].key)]), ...[3, 4].map(() => [sheetFile(sheets[0].key), sheetFile(sheets[4].key)]),
+    ]);
+    expect(stills[1].body.prompt).toContain("Reference picture 2 is the master shot of this very scene, seen from further back");
+    expect(stills[1].body.prompt).toContain("only the camera moves");
+    // A new picture for one shot later is drawn from the same master shot: no sheet is drawn again.
+    const redo = { ...video.spec, scenes: video.spec.scenes.map((x: any, i: number) => (i === 0 ? { ...x, imageId: undefined, clipId: undefined, take: undefined } : x)) };
+    expect((await call(worker, env, "PUT", `/api/videos/${video.id}`, { spec: redo, idempotencyKey: crypto.randomUUID() }, user.cookie)).status).toBe(200);
+    await run();
+    const after = calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/") && !c.url.includes("minimax"));
+    expect(after).toHaveLength(11);
+    const again = JSON.parse((sqlite.prepare("SELECT provider FROM runs WHERE video_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(video.id) as any).provider);
+    expect(after[10].body.image_urls.map((link: string) => again.inputs[Number(/\/(\d+)\?token=/.exec(link)![1])])).toEqual([sheetFile(sheets[0].key), sheetFile(sheets[2].key)]);
+  });
+
   it("draws every picture from its own text when FAL_REFERENCE_MODEL is off", async () => {
     const { env, user, spec, run } = await setup();
     env.FAL_REFERENCE_MODEL = "off";
