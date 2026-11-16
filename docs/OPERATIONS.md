@@ -82,12 +82,14 @@ under `/api/admin` answers 404 to anyone else.
   says so; raise the number of episodes and resume to go on. Rejecting or deleting an episode takes it out of the
   story the next one is written from. Episodes cost what any episode of that length does; a dialogue is a few short
   ElevenLabs calls, one per speaker's stretch, where a narrated episode is one.
-- **Cinematic videos (a test)**: in Create, administrators see a **Cinematic** switch (not on Storytime): every scene
-  becomes an AI clip with a camera move, scenes cut hard, the clips' ambient sound plays under the voice and the video
-  gets a film look. Choose the clips' quality and model there; to compare models, list them in
-  `FAL_CLIP_MODEL_ADMIN` (for example `minimax-h3,flux-3-max`: both can make sound, Kling's clips are silent). It
-  costs credits like any video with every scene animated (a 60-second one about 15 to 35), and fal bills each clip.
-  Nobody else can draft or make one.
+- **Cinematic videos**: in Create, everyone has a **Cinematic** switch (not on Storytime): every scene becomes an AI
+  clip with a camera move, scenes cut hard and the video gets a film look. People choose the clips' quality; the
+  clips are made with everyone's model (`FAL_CLIP_MODEL`, Kling unless set: its clips are silent, so the video has
+  the voice and the music; a model that makes sound, such as `minimax-h3` or `flux-3-max`, adds the clips' ambience
+  quietly under the voice). Administrators also choose the model per video, from those listed in
+  `FAL_CLIP_MODEL_ADMIN`, to compare them. It costs credits like any video with every scene animated (a 60-second
+  one about 15 to 35, shown on the draft before anything is charged), and fal bills each clip: watch the clip spend
+  after turning it on for everyone.
 - **Presenters**: the AI presenters people can put on camera (with `HEYGEN_API_KEY` set). **Add from HeyGen** pages
   through HeyGen's stock avatars (filters: gender, HQ only, name or tag among the ones loaded): pick one, confirm your
   HeyGen plan lets you offer it, add it. **Add by ID** takes a look ID: of a HeyGen stock avatar you found in HeyGen,

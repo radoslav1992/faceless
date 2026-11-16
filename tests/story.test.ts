@@ -927,17 +927,31 @@ describe("narrated videos in the content run", () => {
     expect((await call(worker, env, "GET", `/api/videos/${second.id}`, undefined, user.cookie)).status).toBe(200);
   });
 
-  it("makes a cinematic video for an administrator: every scene a clip with film framing and sound, cut hard, with a film look", async () => {
+  it("makes a cinematic video: every scene a clip with film framing and sound, cut hard, with a film look; only an administrator picks the model", async () => {
     const { env, sqlite, user, spec, run } = await setup();
-    // Asked for by anyone else, a cinematic draft or video is refused.
-    const brief = { template: "script", script: "The reef wakes slowly. A small octopus leaves its den. It finds a silver coin in the sand. Then a shadow passes overhead.", film: { quality: "regular", model: "flux-3-max" } };
-    expect(await call(worker, env, "POST", "/api/story/draft", brief, user.cookie)).toMatchObject({ status: 403, data: { error: expect.stringContaining("still being tested") } });
+    env.FAL_CLIP_MODEL_ADMIN = "flux-3-max";
+    // Anyone can draft one: every scene a clip of the quality asked for. A model is an administrator's choice, so
+    // anyone else's is left out of the draft.
+    const brief = { template: "script", script: "The reef wakes slowly. A small octopus leaves its den. It finds a silver coin in the sand. Then a shadow passes overhead.", film: { quality: "high", model: "flux-3-max" } };
+    const mock = providers();
+    env.AI.run = async () => ({ status: "completed", output_text: JSON.stringify({ subject: "", look: "", title: "The reef", places: [], scenes: [] }) });
+    const draft = await call(worker, env, "POST", "/api/story/draft", brief, user.cookie);
+    expect(draft.status).toBe(200);
+    expect(draft.data.spec.film).toBe(true);
+    expect(draft.data.spec.scenes.every((s: any) => s.source === "clip" && s.transition === "cut" && s.clipQuality === "high" && s.clipModel === undefined)).toBe(true);
+    // And anyone can make one: a model named in the spec all the same is ignored when its clips are made (Kling, everyone's).
     const filmed = filmSpec(spec, { quality: "regular", model: "flux-3-max" });
-    expect((await call(worker, env, "POST", "/api/videos", { spec: filmed, idempotencyKey: crypto.randomUUID() }, user.cookie)).status).toBe(403);
+    const theirs = await call(worker, env, "POST", "/api/videos", { spec: filmed, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(theirs.status).toBe(201);
+    await run();
+    expect((await call(worker, env, "GET", `/api/videos/${theirs.data.id}`, undefined, user.cookie)).data.video).toMatchObject({ renderStatus: "ready", spec: { film: true } });
+    expect(mock.filter((c) => c.method === "POST" && c.url.includes("flux-3-max"))).toHaveLength(0);
+    expect(mock.filter((c) => c.method === "POST" && c.url.includes("kling-video")).length).toBe(4);
     // An administrator's: the AI pictures become clips as long as their scenes, of the chosen quality and model; the
     // owner's own picture stays; every scene changes on a cut.
     sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
-    env.FAL_CLIP_MODEL_ADMIN = "flux-3-max";
+    const asAdmin = await call(worker, env, "POST", "/api/story/draft", brief, user.cookie);
+    expect(asAdmin.data.spec.scenes.every((s: any) => s.clipModel === "flux-3-max")).toBe(true);
     expect(filmed.film).toBe(true);
     expect(filmed.scenes.map((s) => [s.source, s.transition])).toEqual([["clip", "cut"], ["clip", "cut"], ["clip", "cut"], ["own", "cut"], ["clip", "cut"]]);
     expect(filmed.scenes.filter((s) => s.source === "clip").every((s) => s.clipQuality === "regular" && s.clipModel === "flux-3-max" && [5, 10].includes(s.clipSeconds))).toBe(true);

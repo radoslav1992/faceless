@@ -59,7 +59,7 @@ type Form = {
   language: string; voiceId: string; style: StoryStyle; music: MusicMood; musicTrackId: string | null; subject: string;
   /** Sound effects from the library: a whoosh on scene changes and sounds the writer picks (changed in the editor). */
   sounds: boolean;
-  /** Cinematic (administrators only, shared/film.ts): every scene an AI clip of this quality and model. */
+  /** Cinematic (shared/film.ts): every scene an AI clip of this quality and, for an administrator, model. */
   film: boolean; filmQuality: ClipQuality; filmModel: ClipModel | "";
 };
 /** Text that reads like a whole story rather than a topic: long, or several lines. */
@@ -110,8 +110,8 @@ export function Create() {
   useOfferedVoice(form.voiceId, (voiceId) => set({ voiceId }));
   const left = user ? Math.max(0, user.limit - user.used) : null;
   const t = template ? templates[template] : null;
-  // Cinematic videos are a test for administrators; not for a story over one background clip.
-  const canFilm = !!user?.admin && !!t && t.kind !== "backdrop";
+  // Any video can be cinematic, except a story over one background clip (it has no scenes to film).
+  const canFilm = !!t && t.kind !== "backdrop";
   const cinematic = canFilm && form.film;
   const ready = !!t && (t.kind === "script" ? form.script.trim().length >= 20 : t.kind === "mashup" ? true : t.kind === "backdrop" ? true : form.prompt.trim().length >= 2 || template === "random");
   const write = async () => {
@@ -162,7 +162,7 @@ export function Create() {
         <div className="page-head">
           <div>
             <button type="button" className="link" onClick={() => setSpec(null)}><ArrowLeft size={15} aria-hidden="true" /> Back to the brief</button>
-            <h1 style={{ marginTop: 8 }}>{spec.title || t.name}{spec.film && <span className="chip" style={{ marginLeft: 10, verticalAlign: 6 }}>Cinematic · admin test</span>}</h1>
+            <h1 style={{ marginTop: 8 }}>{spec.title || t.name}{spec.film && <span className="chip" style={{ marginLeft: 10, verticalAlign: 6 }}>Cinematic</span>}</h1>
             <p>Edit anything below. Nothing is made or charged until you press Make video.{spec.film ? " Every scene is an AI clip: the price counts each one." : ""}</p>
           </div>
           <div className="toolbar">
@@ -258,10 +258,10 @@ export function Create() {
             <div className="field">
               <span className="row" style={{ gap: 10 }}>
                 <Switch checked={form.film} onChange={(film) => set({ film })} label="Cinematic" />
-                <span>Cinematic <span className="chip" style={{ marginLeft: 6 }}>Admin test</span></span>
+                <span>Cinematic</span>
               </span>
               <span className="hint">
-                Made like an AI short film: every scene is an AI clip with its own camera move, scenes change on hard cuts, the clips' ambient sound plays under the voice, and the whole video gets a film look (grade and grain). Each clip costs credits on top of the video; the draft shows the total.
+                Made like an AI short film: every scene is an AI clip with its own camera move, scenes change on hard cuts, and the whole video gets a film look (grade and grain). Each clip costs credits on top of the video; the draft shows the total before anything is charged.
               </span>
               {form.film && (
                 <div className="form-row" style={{ marginTop: 8 }}>

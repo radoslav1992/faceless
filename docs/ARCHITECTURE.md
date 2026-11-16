@@ -222,10 +222,11 @@ The series page shows the story so far (`story` in `GET /api/series/:id`). Edits
 after it is made (free edits) are not followed by a new lip-sync; in a film, moving an edge changes two shots' words,
 so both are taken again.
 
-**Cinematic videos** (`shared/film.ts`; a test, for administrators only). A narrated video made the way AI short
+**Cinematic videos** (`shared/film.ts`; for everyone). A narrated video made the way AI short
 films are, as a flag on the video (`film` in its spec), not a video type, so any story style can be made this way.
-In Create an administrator switches Cinematic on and chooses the clips' quality and, of the models they may choose
-(`FAL_CLIP_MODEL_ADMIN`), one; the draft (`film` in the request, `filmSpec`) turns every AI picture into a clip as
+In Create anyone switches Cinematic on and chooses the clips' quality; an administrator also chooses, of the models
+they may choose (`FAL_CLIP_MODEL_ADMIN`), one (anyone else's choice of a model is dropped from the draft, and ignored
+when a clip is made); the draft (`film` in the request, `filmSpec`) turns every AI picture into a clip as
 long as its scene (5 or 10 s by the script's estimated timing) and every scene change into a cut. Then:
 - each scene's picture is framed as a film still, the shots in turn (`filmStill`: wide, medium, close-up…), still
   drawn from the video's reference sheets;
@@ -235,9 +236,9 @@ long as its scene (5 or 10 s by the script's estimated timing) and every scene c
   out the whoosh of scene changes, and lays the renderer's `look: "film"` over the picture under the captions (a
   little contrast, less colour and a warm cast, a vignette and grain: `LOOKS` in `renderer/server.py`, YUV filters
   only, about half a second per second of video).
-It costs what its parts do: the video by its length plus every clip by its length and quality. Drafting, making and
-making again one are refused to anyone but administrators (`draftVideo`, `checkFilm` in `server/videos.ts`); series
-and the API never make one. Not in it yet: takes are not judged or made again, and the shots and moves follow the
+It costs what its parts do: the video by its length plus every clip by its length and quality. Anyone can draft, make and
+make one again (`draftVideo`; `checkFilm` in `server/videos.ts` still keeps lip-synced scenes and a film's shots to
+administrators); series and the API never make one. Not in it yet: takes are not judged or made again, and the shots and moves follow the
 scene's number, not the script.
 
 **Voices** (`server/voices.ts`, `voices` table, Admin → Voices in `src/app/AdminVoices.tsx`). Administrators import a
