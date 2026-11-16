@@ -491,7 +491,7 @@ const draftSchema = z.object({
   animate: z.number().int().min(0).max(3).default(0),
   /** Sound effects from the library (shared/sounds.ts): a whoosh on scene changes and sounds the writer picks. */
   sounds: z.boolean().default(true),
-  /** A cinematic video (shared/film.ts; from administrators only): its clips' quality and, if they chose one, model. */
+  /** A cinematic video (shared/film.ts): its clips' quality and, from an administrator who chose one, their model. */
   film: z.object({ quality: z.enum(clipQualities).default("regular"), model: z.enum(clipModels).optional() }).optional(),
 });
 export type DraftRequest = z.input<typeof draftSchema>;
@@ -501,8 +501,8 @@ export type DraftRequest = z.input<typeof draftSchema>;
  */
 export async function draftVideo(env: Env, userId: string, input: DraftRequest, recent: string[] = [], admin = false): Promise<StorySpec> {
   const d = draftSchema.parse(input);
-  // Cinematic videos are a test for administrators (`admin`): anyone else's request for one is refused, not ignored.
-  if (d.film && !admin) throw new HTTPException(403, { message: "Cinematic videos are still being tested and aren't available yet." });
+  // Anyone can make a cinematic video; only an administrator (`admin`) chooses its clips' model, to compare them.
+  const film = d.film && (admin ? d.film : { quality: d.film.quality });
   const t = templateOf(d.template);
   // A voice asked for must be offered; the template's own is replaced by the default voice when it was hidden.
   if (d.voiceId && !(await voiceUsable(env, d.voiceId, null, userId))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
@@ -542,7 +542,7 @@ export async function draftVideo(env: Env, userId: string, input: DraftRequest, 
     backdropId, sounds,
   });
   if (!spec) throw new HTTPException(502, { message: "The video we wrote didn't come out right. Please try again." });
-  return d.film ? filmSpec(spec, d.film) : spec;
+  return film ? filmSpec(spec, film) : spec;
 }
 /** Create: a draft from a template (free; the text model only, 40 an hour and 200 a day). */
 story.post("/draft", async (c) => {
