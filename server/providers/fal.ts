@@ -169,9 +169,18 @@ export const submitFalLipSync = (e: Env, image: string, audio: string) => { cons
  * ("balanced" is fal's default: it fills in the look, never the words in quotes).
  */
 export const SHOT_MODEL = "minimax/h3-max/reference-to-video";
-export const shotRequest = (shot: { image: string; prompt: string; seconds: number; voice: string }) => ({
+/**
+ * `voice`: the sample of the speaker's voice (a shot that says its line; a cutaway has none). `sheet`: the cast's
+ * reference sheet, the prompt's "Image 1", for a shot that shows one of the cast: the model keeps their faces and
+ * clothes like it while they move.
+ */
+export const SHEET_NOTE = "Image 1 is the cast's reference sheet: keep everyone who appears looking exactly as on it, with the same face, hair and clothes.";
+export const shotRequest = (shot: { image: string; prompt: string; seconds: number; voice?: string; sheet?: string }) => ({
   model: SHOT_MODEL,
-  body: { prompt: shot.prompt, image_url: shot.image, duration: Math.min(15, Math.max(1, shot.seconds)), resolution: "768P", prompt_expansion_mode: "balanced", reference_audio_urls: [shot.voice] },
+  body: {
+    prompt: shot.sheet ? `${shot.prompt} ${SHEET_NOTE}` : shot.prompt, image_url: shot.image, duration: Math.min(15, Math.max(1, shot.seconds)), resolution: "768P", prompt_expansion_mode: "balanced",
+    ...(shot.voice && { reference_audio_urls: [shot.voice] }), ...(shot.sheet && { reference_image_urls: [shot.sheet] }),
+  },
 });
 /** Submits a shot once (a ticket like any clip's: its status and result are read the same way). */
 export const submitFalShot = (e: Env, shot: Parameters<typeof shotRequest>[0]) => { const { model, body } = shotRequest(shot); return submitQueue(e, model, body); };

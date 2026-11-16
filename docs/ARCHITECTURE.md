@@ -167,7 +167,18 @@ refuses a drama to anyone but administrators and on other than story styles).
   as a high-quality clip of the scene's length (2 credits per 5 s), counted in the episode's price (`lipSyncCredits`),
   and made again whenever the voice is recorded again (`pendingMedia`). Only administrators can make a video with
   lip-synced scenes (`checkFilm`).
-- **Film** (an option of a drama, `film`, in place of lip-sync). The episode is shot like a film.
+- **Film** (an option of a drama, `film`, in place of lip-sync). The episode is shot like a film: written in shots,
+  every one a video clip, in scenes that hold together. Who speaks is `filmVoices`:
+  - *The cast's exact voices* (`"exact"`, the default; `shotsSpec(spec, "exact")`). The episode keeps its narration:
+    the dialogue is recorded once in the cast's ElevenLabs voices, as in any drama, and gives the film its clock. A
+    shot whose picture shows its speaker (`speakerSeen`) is lip-synced to the line (`lipSync`, as above); any other
+    (the listener, a thing, the narrator's line) is a **cutaway** (`cutaway` on the scene): the picture brought to
+    life without speech (`cutawayPrompt`) by the shot model (`minimax/h3-max/reference-to-video`), made after the
+    voice and asked for as long as its scene is on screen (`clipLength`, from 2 seconds). Every clip plays silent
+    under the recording, so the room's sound does not come and go between cuts. A shot that shows one of the cast
+    goes to the shot model with the cast's sheet as "Image 1" (`castSheetUrl`, `SHEET_NOTE`); the lip-sync model
+    takes only the picture and the sound, so a lip-synced shot keeps its people from the picture alone.
+  - *The video model's own voice* (`"model"`): acted shots that say their own lines, described below.
   - *Written in shots.* The writer is asked for `filmShots(seconds)` scenes (one per 3.5 s), each one short line (at
     most `SHOT_MAX_WORDS` words) with what the camera shows while it is said: the speaker, the one who listens, or the
     thing the line is about; no narrator. `shotsSpec` turns every scene into an acted shot (`acted` on the scene: a

@@ -310,7 +310,7 @@ export async function makeEpisode(
   const spec = conceptToSpec(concept, {
     kind: template.kind, voiceId: settings.voiceId, style: settings.style, language: settings.language, captions: settings.captions,
     subject, animate: drama?.film ? 0 : settings.animate, hashtags: settings.hashtags, backdropId, sounds,
-    ...(drama && episode && { cast: drama.cast, episode, lipSync: drama.lipSync && !drama.film, film: drama.film }),
+    ...(drama && episode && { cast: drama.cast, episode, lipSync: drama.lipSync && !drama.film, film: drama.film, filmVoices: drama.filmVoices }),
     music: picked && settings.music.mood !== "none" ? { trackId: picked, volume: settings.music.volume } : null,
   });
   if (!spec) return { error: "The episode we wrote didn't come out right. Please try again.", status: 502, blocked: "failed" };

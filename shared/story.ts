@@ -142,6 +142,12 @@ export const storySceneSchema = z
      * came out, kept by the run that made it: the words it was made for (`key`: other words need a new take), where
      * the line starts in the clip (`trim`), how long the shot lasts (`seconds`) and when each word is said in it.
      */
+    /**
+     * A shot of a film that keeps its narration (shared/drama.ts, voices "exact"): nobody speaks on screen in it (the
+     * line is heard over it), so its clip is the picture brought to life without speech, as long as the scene, by
+     * the film's shot model. A shot whose speaker is seen is `lipSync` instead.
+     */
+    cutaway: z.literal(true).optional(),
     acted: z.literal(true).optional(),
     take: z.object({
       key: z.string().max(80), trim: z.number().min(0).max(20), seconds: z.number().min(0.5).max(20),

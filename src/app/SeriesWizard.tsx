@@ -58,7 +58,7 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
         <Section title="Drama" hint="One continuing story told in episodes by a cast of characters, each with their own voice. Every episode picks up where the last one ended and stops on a cliffhanger; the last one ends the story.">
           <span className="row" style={{ gap: 10 }}>
             <Switch checked={!!drama} label="Drama series"
-              onChange={(on) => set({ drama: on ? { premise: "", episodes: 10, cast: [{ name: "", role: "", look: "", voiceId: settings.voiceId }], lipSync: false, film: false } : undefined })} />
+              onChange={(on) => set({ drama: on ? { premise: "", episodes: 10, cast: [{ name: "", role: "", look: "", voiceId: settings.voiceId }], lipSync: false, film: false, filmVoices: "exact" } : undefined })} />
             <span>Drama series <span className="chip" style={{ marginLeft: 6 }}>Admin test</span></span>
           </span>
           {drama && (
@@ -77,9 +77,23 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
                   <span>Film</span>
                 </span>
                 <span className="hint">
-                  Shot like a film: the episode is written as short shots with no narrator, and every shot is a video clip in which the character plays the moment and says the line, in a voice like the one you chose for them, cut hard from shot to shot. Costs about {creditsLabel(filmCredits(settings.seconds))} on top of an episode of this length ({CLIP_CREDITS.high} per shot). Takes can miss: open an episode to make any shot again.
+                  Shot like a film: the episode is written as short shots with no narrator, in scenes that each stay in one room, and every shot is a video clip, cut hard from one to the next. Costs about {creditsLabel(filmCredits(settings.seconds))} on top of an episode of this length ({CLIP_CREDITS.high} per shot). Takes can miss: open an episode to make any shot again.
                 </span>
               </div>
+              {drama.film && (
+                <div className="field">
+                  <span className="small">Voices in the film</span>
+                  <div className="seg small-seg" role="group" aria-label="Voices in the film">
+                    <button type="button" aria-pressed={drama.filmVoices === "exact"} onClick={() => setDrama({ filmVoices: "exact" })}>The cast's own voices, lip-synced</button>
+                    <button type="button" aria-pressed={drama.filmVoices === "model"} onClick={() => setDrama({ filmVoices: "model" })}>Spoken by the video model</button>
+                  </div>
+                  <span className="hint">
+                    {drama.filmVoices === "exact"
+                      ? "The dialogue is recorded in exactly the voices you chose. A shot that shows the speaker is lip-synced to the line; a cutaway plays under it."
+                      : "The video model plays each shot and says the line itself, in a voice like the one you chose: more acting, but the voice is an imitation and a line can come out wrong."}
+                  </span>
+                </div>
+              )}
               {!drama.film && <div className="field">
                 <span className="row" style={{ gap: 10 }}>
                   <Switch checked={drama.lipSync} onChange={(lipSync) => setDrama({ lipSync })} label="Lip-sync" />

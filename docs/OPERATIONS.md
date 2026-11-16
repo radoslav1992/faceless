@@ -64,7 +64,13 @@ under `/api/admin` answers 404 to anyone else.
   the ones before (the series page lists them under **Story so far**) and ends on a cliffhanger; cast members speak in
   their own voices over the pictures. With **Lip-sync** on, every scene a character says becomes a clip of its
   picture with the lips moving to the line (fal's MiniMax H3 Max Lip Sync, about $0.08 a second, charged 2 credits per
-  5 seconds of those scenes). With **Film** on instead, the episode is written as short shots with no narrator and
+  5 seconds of those scenes). With **Film** on instead, the episode is written as short shots with no narrator, in
+  scenes that each stay in one room (every shot there is drawn from one master picture of the room), and every shot
+  is a clip. **Voices in the film** chooses who speaks. *The cast's own voices, lip-synced* (the default): the
+  dialogue is recorded in exactly the chosen voices; a shot that shows the speaker is lip-synced to the line and any
+  other is a silent cutaway under it (both about $0.08 a second at fal; a lip-synced shot is billed for at least 5
+  seconds). Changing a line records the dialogue again and syncs every speaking shot again, which the editor prices
+  before saving. *Spoken by the video model*:
   every shot is a clip in which the character plays the moment and says the line (fal's MiniMax H3 Max
   `reference-to-video`, about $0.08 a second of clip: roughly $3 for a 30-second episode, charged 2 credits per shot
   on top of the episode). Each clip is listened to with ElevenLabs Scribe; one in which the line was not heard is
