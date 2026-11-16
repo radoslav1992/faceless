@@ -199,16 +199,23 @@ async function generateMedia(
     const refs = references ? await references() : [];
     // A film's shot is said in a voice like its speaker's: the sample of it made for this video (voiceSample).
     const voice = m.acted ? await voiceSampleUrl(e, run, m.acted.voiceId) : undefined;
+    // A shot that shows one of the cast goes to the video model with the cast's sheet, so they keep their faces and clothes.
+    const sheet = m.acted || m.cutaway ? await castSheetUrl(e, run, m) : undefined;
+    // A cutaway is as long as its scene is on screen (the model bills by the second), now that the voice is recorded.
+    const length = m.cutaway ? await clipLength(e, run, m, 2) : 0;
     if (fallback && !canFallBack(e, refs.length > 0)) throw new Error("GENERATION_REJECTED");
     // A model chosen for the scene counts only when its owner is an administrator who may choose it.
-    const clipModel = kind === "clip" && !m.lipSync && !m.acted ? instead ?? await sceneClipModel(e, run, m) : undefined;
+    const clipModel = kind === "clip" && !m.lipSync && !m.acted && !m.cutaway ? instead ?? await sceneClipModel(e, run, m) : undefined;
     await patchState(e, run.id, (s) => { (s.claims ||= {})[name] = true; });
     await phase(kind === "clip" ? "clip" : "images");
     // A talking scene: its picture, lip-synced to its stretch of the voice (made before this, shared/drama.ts).
     // HeyGen Video makes a clip from the scene's picture (the Idempotency-Key finds a resent request's job).
     // A film's shot: its picture played and its line said by the video model (shared/drama.ts).
     const t: MediaTicket = m.acted && voice
-      ? await submitFalShot(e, { image: image ?? await sourcePicture(e, run, m), prompt: m.prompt, seconds: m.acted.seconds, voice })
+      ? await submitFalShot(e, { image: image ?? await sourcePicture(e, run, m), prompt: m.prompt, seconds: m.acted.seconds, voice, sheet })
+      // A film's cutaway: its picture brought to life without speech, by the same model as the shots around it.
+      : m.cutaway
+      ? await submitFalShot(e, { image: image ?? await sourcePicture(e, run, m), prompt: m.prompt, seconds: length, sheet })
       : m.lipSync
       ? await submitFalLipSync(e, image ?? await sourcePicture(e, run, m), await lineAudio(e, run, m))
       : clipModel === "heygen-video-1" && image
@@ -255,7 +262,7 @@ async function generateMedia(
     await recordFile(e, key, e.DB.prepare(
       "INSERT OR REPLACE INTO media_assets(id,user_id,video_id,kind,name,object_key,mime,bytes,duration,width,height,status,meta,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'ready',?,?,?)",
     ).bind(assetId, run.user_id, run.video_id, kind === "clip" ? "ai_clip" : "ai_image", `AI ${kind === "clip" ? "clip" : "picture"}: ${m.prompt}`.slice(0, 160), key, actual, bytes, duration, width, height,
-      JSON.stringify({ prompt: m.prompt.slice(0, 400), ai: true, ...(m.sheet && { sheet: m.sheet }), ...(m.acted && { shot: true }), ...(instead && { clipModel: instead, fallback: true }) }), now(), now()));
+      JSON.stringify({ prompt: m.prompt.slice(0, 400), ai: true, ...(m.sheet && { sheet: m.sheet }), ...((m.acted || m.cutaway) && { shot: true }), ...(instead && { clipModel: instead, fallback: true }) }), now(), now()));
     return assetId;
   });
   // Ours is saved: HeyGen's copy goes (retried hourly while HeyGen can't be reached).
@@ -289,7 +296,7 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
   // AI pictures and clips the video asks for (clips are made from their pictures), the pictures drawn from the video's
   // reference sheets, made before them.
   const pending = pendingMedia(first);
-  const sheets = pending.some((m) => m.kind === "image") ? await makeSheets(e, step, run, first, phase) : { places: {} };
+  const sheets = pending.some((m) => m.kind === "image") ? await makeSheets(e, step, run, first, phase) : { places: {}, scenes: {} };
   // A film's shots are said in voices like their speakers': a short sample of each, made once and kept with the video.
   const voices = [...new Set(pending.flatMap((m) => (m.acted ? [m.acted.voiceId] : [])))];
   for (const [n, voiceId] of voices.entries()) await step.do(`voice-sample-${n}`, once, () => voiceSample(e, run, first, voiceId));
@@ -301,7 +308,7 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
       const shot = m.acted ? await makeTake(e, step, run, `ai-${i}`, m, phase) : null;
       const assetId = shot ? shot.assetId : m.kind === "image"
         ? await drawPicture(e, step, run, `ai-${i}`, m, phase, () => referencePictures(e, run, sheets, first.scenes[m.path[1] as number]?.place))
-        : m.lipSync ? await generateMedia(e, step, run, `ai-${i}`, m, phase, () => sourcePicture(e, run, m))
+        : m.lipSync || m.cutaway ? await generateMedia(e, step, run, `ai-${i}`, m, phase, () => sourcePicture(e, run, m))
           : await makeClip(e, step, run, `ai-${i}`, m, phase, models.get(i)!, m.from ? () => sourcePicture(e, run, m) : undefined);
       await step.do(`ai-${i}-apply`, async () => updateSpec(e, videoId, (spec) => {
         let target = spec;
@@ -315,9 +322,10 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
   // the voice's clock (HeyGen bills by the second). Every other clip is made before it, like the pictures: one refused
   // stops the run before the voice is paid for.
   const models = new Map<number, ClipModel>();
-  for (const [i, m] of pending.entries()) if (m.kind === "clip" && !m.lipSync && !m.acted) models.set(i, await step.do(`ai-${i}-model`, () => sceneClipModel(e, run, m)));
-  // A lip-synced clip is made from its scene's stretch of the voice, so after it too (it has no model to choose).
-  const afterVoice = (m: PendingMedia, i: number) => m.kind === "clip" && !!m.from && (!!m.lipSync || models.get(i) === "heygen-video-1");
+  for (const [i, m] of pending.entries()) if (m.kind === "clip" && !m.lipSync && !m.acted && !m.cutaway) models.set(i, await step.do(`ai-${i}-model`, () => sceneClipModel(e, run, m)));
+  // A lip-synced clip is made from its scene's stretch of the voice, so after it too (it has no model to choose); so
+  // is a film's cutaway, asked for as long as its scene is on the voice's clock.
+  const afterVoice = (m: PendingMedia, i: number) => m.kind === "clip" && !!m.from && (!!m.lipSync || !!m.cutaway || models.get(i) === "heygen-video-1");
   await make((m, i) => !afterVoice(m, i));
   // A film records no narration: its shots say their own lines.
   if (first.narration.kind === "voice" && !narrationCurrent(first) && !isFilm(first)) await makeNarration(e, step, run, first, phase);
@@ -482,7 +490,7 @@ async function trackMoment(e: Env, step: WorkflowStep, run: RunInfo, spec: Highl
 }
 
 /** A video's reference sheets as stored files: the characters' and each place's (by placeKey). */
-type Sheets = { character?: string; places: Record<string, string> };
+type Sheets = { character?: string; places: Record<string, string>; scenes: Record<string, string> };
 /**
  * A picture, paid once; one the model refused (its filter is sometimes wrong) is drawn once more with the fallback
  * model, and a second refusal is thrown.
@@ -498,9 +506,10 @@ async function drawPicture(e: Env, step: WorkflowStep, run: RunInfo, name: strin
  * How long a HeyGen Video clip is asked for: the time its scene is on screen (on the voice's clock, transitions
  * included), in whole seconds, from 5 (HeyGen's shortest) up to the length chosen for it (5 or 10, what its credits
  * paid for). HeyGen bills by the second, so a 6-second scene is no longer paid as a 10-second clip. Without the
- * voice's timing (or a scene of its own on screen) it is the chosen length.
+ * voice's timing (or a scene of its own on screen) it is the chosen length. A film's cutaway (MiniMax H3 Max, billed
+ * by the second too) is asked for the same way, from `least` 2 seconds.
  */
-async function clipLength(e: Env, run: RunInfo, m: PendingMedia): Promise<number> {
+async function clipLength(e: Env, run: RunInfo, m: PendingMedia, least: number = CLIP_SECONDS): Promise<number> {
   const chosen = m.seconds === 10 ? 10 : CLIP_SECONDS;
   const n = m.path[0] === "scenes" ? Number(m.path[1]) : NaN;
   if (!Number.isInteger(n)) return chosen;
@@ -508,7 +517,7 @@ async function clipLength(e: Env, run: RunInfo, m: PendingMedia): Promise<number
     const spec = await loadSpec(e, run.video_id);
     if (isHighlight(spec)) return chosen;
     const seconds = sceneOnScreen(spec, await narrationContext(e, run.user_id, spec), n);
-    return seconds == null ? chosen : Math.min(chosen, Math.max(CLIP_SECONDS, Math.ceil(seconds - 0.01)));
+    return seconds == null ? chosen : Math.min(chosen, Math.max(least, Math.ceil(seconds - 0.01)));
   } catch {
     return chosen;
   }
@@ -560,7 +569,7 @@ async function makeClip(e: Env, step: WorkflowStep, run: RunInfo, name: string, 
  * FAL_REFERENCE_MODEL is "off"; a sheet refused twice is left out (its scenes are drawn without it).
  */
 async function makeSheets(e: Env, step: WorkflowStep, run: RunInfo, spec: StorySpec, phase: Phase): Promise<Sheets> {
-  const out: Sheets = { places: {} };
+  const out: Sheets = { places: {}, scenes: {} };
   if (!referenceModel(e)) return out;
   for (const [n, sheet] of pictureSheets(spec).entries()) {
     const key = await step.do(`sheet-${n}`, safe, async () => {
@@ -572,7 +581,9 @@ async function makeSheets(e: Env, step: WorkflowStep, run: RunInfo, spec: StoryS
       return sheet.kind === "character" ? seriesCharacter(e, run.video_id, run.user_id, sheet.key) : null;
     }) ?? await (async () => {
       const m: PendingMedia = { kind: "image", prompt: sheet.prompt, path: [], key: "", sheet: sheet.key };
-      const assetId = await drawPicture(e, step, run, `sheet-${n}-draw`, m, phase).catch((error) => {
+      // A film's master shot of a place is drawn from the sheets made before it: the characters' and the place's.
+      const from = sheet.kind === "scene" ? () => referencePictures(e, run, out, sheet.place) : undefined;
+      const assetId = await drawPicture(e, step, run, `sheet-${n}-draw`, m, phase, from).catch((error) => {
         if ((error as Error)?.message !== "GENERATION_REJECTED") throw error;
         return null;
       });
@@ -583,19 +594,24 @@ async function makeSheets(e: Env, step: WorkflowStep, run: RunInfo, spec: StoryS
     })();
     if (!key) continue;
     if (sheet.kind === "character") out.character = key;
+    else if (sheet.kind === "scene" && sheet.place) out.scenes[sheet.place] = key;
     else if (sheet.place) out.places[sheet.place] = key;
   }
   return out;
 }
 /**
  * The reference sheets a scene's picture is drawn from: the characters' and, when several scenes are set in its
- * place, the place's; never another scene's picture, so no framing or mistake is carried from scene to scene.
+ * place, the place's (in a film: the master shot of the place); never another scene's picture, so no framing or
+ * mistake is carried from scene to scene.
  */
 async function referencePictures(e: Env, run: RunInfo, sheets: Sheets, place = ""): Promise<Reference[]> {
   const refs: Reference[] = [];
   if (sheets.character) refs.push({ url: await inputUrl(e, run.id, sheets.character), role: "character" });
-  const here = sheets.places[placeKey(place)];
-  if (place.trim() && here) refs.push({ url: await inputUrl(e, run.id, here), role: "place" });
+  // A film's shot is drawn from the master shot of its place (the room with its people in it), which stands in for
+  // the empty place: every cut of a scene then shows the same room and the same people.
+  const master = sheets.scenes[placeKey(place)], here = sheets.places[placeKey(place)];
+  if (place.trim() && master) refs.push({ url: await inputUrl(e, run.id, master), role: "scene" });
+  else if (place.trim() && here) refs.push({ url: await inputUrl(e, run.id, here), role: "place" });
   return refs;
 }
 
@@ -667,6 +683,26 @@ async function voiceSampleUrl(e: Env, run: RunInfo, voiceId: string) {
   const sample = await e.DB.prepare(SAMPLE).bind(run.video_id, run.user_id, voiceId).first<{ object_key: string }>();
   if (!sample) throw new Error("VOICE_FAILED");
   return inputUrl(e, run.id, sample.object_key);
+}
+
+/**
+ * The capability link of the cast's reference sheet for a film's shot that shows one of the cast (its picture names
+ * someone who speaks in the film); none for a shot of a thing or an empty place, or when the video has no sheet. The
+ * sheet is the video's own, or its series' (server/characters.ts), as its pictures were drawn from.
+ */
+async function castSheetUrl(e: Env, run: RunInfo, m: PendingMedia) {
+  const spec = await loadSpec(e, run.video_id);
+  const scene = isHighlight(spec) ? undefined : spec.scenes[Number(m.path[1])];
+  if (isHighlight(spec) || !scene || !referenceModel(e)) return undefined;
+  const cast = new Set(spec.scenes.flatMap((s) => (s.speaker?.trim() ? [s.speaker.trim().toLowerCase()] : [])));
+  if (![...cast].some((name) => scene.description.toLowerCase().includes(name))) return undefined;
+  const sheet = pictureSheets(spec).find((s) => s.kind === "character");
+  if (!sheet) return undefined;
+  const known = await e.DB.prepare(
+    "SELECT object_key FROM media_assets WHERE video_id=? AND user_id=? AND kind='ai_image' AND status='ready' AND json_extract(meta,'$.sheet')=? ORDER BY created_at DESC LIMIT 1",
+  ).bind(run.video_id, run.user_id, sheet.key).first<{ object_key: string }>();
+  const key = known?.object_key ?? await seriesCharacter(e, run.video_id, run.user_id, sheet.key);
+  return key ? inputUrl(e, run.id, key) : undefined;
 }
 
 type Take = { key: string; trim: number; seconds: number; words: CaptionWord[] };

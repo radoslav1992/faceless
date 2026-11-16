@@ -32,6 +32,9 @@ import { clipFor, estimatedTimings, fingerprint, FPS, normWord, STORY_MAX_SCENES
 // for about $0.08 a second of clip.
 
 export const DRAMA_CAST_MAX = 3;
+/** Who speaks in a film's shots (dramaSchema.filmVoices). */
+export const filmVoices = ["exact", "model"] as const;
+export type FilmVoices = (typeof filmVoices)[number];
 /** Who says a scene that no cast member says. */
 export const NARRATOR = "narrator";
 const name = z.string().trim().min(1).max(24).regex(/^[\p{L}\p{N}][\p{L}\p{N} .'-]*$/u, "Use letters for a character's name.")
@@ -54,8 +57,14 @@ export const dramaSchema = z.object({
     .refine((cast) => new Set(cast.map((c) => c.name.toLowerCase())).size === cast.length, "Give each character their own name."),
   /** The cast's lips move with their lines (see above): every scene a cast member says is a lip-synced clip. */
   lipSync: z.boolean().default(false),
-  /** Shot like a film (see above): every scene is an acted clip that says its own line. Instead of lip-sync. */
+  /** Shot like a film (see above): every scene is a shot, a video clip of its own. Instead of lip-sync. */
   film: z.boolean().default(false),
+  /**
+   * Who speaks in a film's shots. "exact": the cast's own voices, recorded as one dialogue; a shot that shows its
+   * speaker is lip-synced to the line, any other is a cutaway under it. "model": the video model says each line
+   * itself, in a voice like the speaker's (acted shots).
+   */
+  filmVoices: z.enum(filmVoices).default("exact"),
 });
 export type Drama = z.infer<typeof dramaSchema>;
 
@@ -116,17 +125,48 @@ export const acted = (scenes: Pick<StoryScene, "acted">[]) => scenes.length > 0 
 export const takeKey = (scene: Pick<StoryScene, "text" | "voiceId" | "speaker" | "tone">, narrator: string) =>
   `take:${fingerprint(`${scene.voiceId || narrator}|${scene.speaker || ""}|${scene.tone}|${textWords(scene.text).join(" ")}`)}`;
 
-/** A written episode as a film: every scene an acted shot made from its picture, cut in hard, with the film look. */
-export function shotsSpec<T extends { scenes: StoryScene[]; backdrop?: unknown; presenter?: unknown }>(spec: T): T {
+/**
+ * A written episode as a film: every scene a shot made from its picture, cut in hard, with the film look. With the
+ * video model's own `voices` ("model"), every shot is acted: it says its own line. With the cast's "exact" voices,
+ * the episode keeps its narration (the dialogue, recorded in the cast's voices): a shot that shows its speaker is
+ * lip-synced to the line, and any other (a cutaway, the narrator's line) is a clip without speech under it, each as
+ * long as its scene needs (5 or 10 s, by the script's estimated timing).
+ */
+export function shotsSpec<T extends { scenes: StoryScene[]; backdrop?: unknown; presenter?: unknown }>(spec: T, voices: FilmVoices = "model"): T {
   if (spec.backdrop || spec.presenter) return spec;
+  if (voices === "exact") {
+    const said = estimatedTimings(textWords(storyScript(spec.scenes)));
+    const timing = storyTiming(spec.scenes, said, (said.at(-1)?.end ?? 1) + 0.5);
+    let set = spec.scenes.find((s) => s.place.trim())?.place ?? "";
+    return {
+      ...spec, film: true as const,
+      scenes: spec.scenes.map((s, i) => {
+        set = s.place.trim() ? s.place : set;
+        const on = timing.scenes[i], seen = speakerSeen(s);
+        return {
+          ...s, place: set, source: "clip" as const, clipSeconds: clipFor(on ? on.end - on.start : 5), clipQuality: "high" as const, transition: "cut" as const,
+          assetId: undefined, libraryId: undefined, soundId: undefined, acted: undefined, take: undefined,
+          lipSync: seen ? true as const : undefined, cutaway: seen ? undefined : true as const,
+        };
+      }),
+    };
+  }
+  // Every shot is set somewhere: one that names no place is in the place of the shot before it (the first ones, of
+  // the first place named), so it is drawn from that place's master shot like its neighbours.
+  let place = spec.scenes.find((s) => s.place.trim())?.place ?? "";
   return {
     ...spec, film: true as const,
-    scenes: spec.scenes.map((s) => ({
-      ...s, source: "clip" as const, acted: true as const, clipSeconds: clipFor(shotSeconds(s.text)), clipQuality: "high" as const, transition: "cut" as const,
-      assetId: undefined, libraryId: undefined, soundId: undefined, lipSync: undefined,
-    })),
+    scenes: spec.scenes.map((s) => {
+      place = s.place.trim() ? s.place : place;
+      return {
+        ...s, place, source: "clip" as const, acted: true as const, clipSeconds: clipFor(shotSeconds(s.text)), clipQuality: "high" as const, transition: "cut" as const,
+        assetId: undefined, libraryId: undefined, soundId: undefined, lipSync: undefined,
+      };
+    }),
   };
 }
+/** How many places a film of `seconds` plays in at most: a scene needs time, so a short episode has one or two. */
+export const filmPlaces = (seconds: number) => (seconds <= 45 ? 2 : seconds <= 90 ? 3 : 4);
 
 /** How a line is said, in a shot's description (the tones of shared/story.ts). */
 const DELIVERY: Record<VoiceTone, string> = {
@@ -158,6 +198,16 @@ export function shotPrompt(scene: Pick<StoryScene, "description" | "text" | "spe
     `Sound: the voice is the voice of Audio 1, close and clear${language ? `, speaking ${language}` : ""}; the quiet ambience of the place; no music.`,
   ].join(" ").slice(0, 1500);
 }
+
+/**
+ * What the video model is asked for a cutaway (shot `n` of a film with the cast's exact voices): the picture brought
+ * to life while the line is heard over it. Nobody speaks in it, and it is played without its sound.
+ */
+export const cutawayPrompt = (scene: Pick<StoryScene, "description">, n: number) => [
+  scene.description.trim().replace(/([^.!?])$/, "$1."), `${SHOT_MOVES[n % SHOT_MOVES.length]}.`,
+  "Natural, physically plausible motion at real speed. Nobody speaks: mouths stay closed or still, people listen, look, react or work. Keep the characters, their clothes, the place and the look exactly as in the image.",
+  "No subtitles or text on screen. Sound: the quiet ambience of the place only, no speech, no voices and no music.",
+].join(" ").slice(0, 1500);
 
 /** A take in which at least this share of the line's words was heard is kept; a worse one is made once more. */
 export const TAKE_HEARD = 0.6;

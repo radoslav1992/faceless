@@ -9,10 +9,10 @@ import { LONG_VIDEO_SECONDS } from "./speech";
 import { trackSchema } from "./track";
 import { SOUND_VOLUME } from "./sounds";
 import { filmClipPrompt, filmStill } from "./film";
-import { acted, filmTiming, lipSyncPrompt, shotPrompt, shotSeconds, shotStill, takeKey } from "./drama";
+import { acted, cutawayPrompt, filmTiming, lipSyncPrompt, shotPrompt, shotSeconds, shotStill, takeKey } from "./drama";
 import { languageName } from "./series";
 import {
-  characterSheetPrompt, clipFor, clipPrompt, fingerprint, narrationKey, narrationSchema, narrationVoice, placeKey, placeOf, placeSchema, placeSheetPrompt, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_PLACES, STORY_MAX_SCENES, voicedScript, type StoryStyle,
+  characterSheetPrompt, clipFor, clipPrompt, fingerprint, masterShotPrompt, narrationKey, narrationSchema, narrationVoice, placeKey, placeOf, placeSchema, placeSheetPrompt, scenePrompt, storySceneSchema, storyScript, storyStyleIds, STORY_MAX_CHARS, STORY_MAX_PLACES, STORY_MAX_SCENES, voicedScript, type StoryStyle,
 } from "./story";
 
 // The editable description ("spec") of a video, one of two formats:
@@ -183,6 +183,11 @@ export const paidMoment = (spec: HighlightSpec) => {
  * for it. Never with a background clip, a presenter or the owner's recording (server/videos.ts refuses those).
  */
 export const isFilm = (spec: StorySpec) => spec.narration.kind === "voice" && !spec.backdrop && !spec.presenter && acted(spec.scenes);
+/**
+ * A film of shots (shared/drama.ts), whoever speaks in it: every scene a shot of its own, acted, lip-synced or a
+ * cutaway. Its pictures are drawn from master shots of its places, with the speaker's face in view.
+ */
+export const isShotFilm = (spec: StorySpec) => !!spec.film && !spec.backdrop && spec.scenes.every((s) => s.source === "clip" && (!!s.acted || !!s.lipSync || !!s.cutaway));
 /** A film's clock once every shot has its take (null before, and for any other video). */
 export const filmClock = (spec: StorySpec) => (isFilm(spec) && spec.narration.kind === "voice" ? filmTiming(spec.scenes, spec.narration.voiceId) : null);
 /** The AI voice is recorded for the video's current words and voice (no new recording is paid). */
@@ -224,9 +229,15 @@ export type PendingMedia = {
   lipSync?: boolean;
   /** A film's shot: an acted clip that says its line in a voice like `voiceId`'s, asked for `seconds` long (shared/drama.ts). */
   acted?: { voiceId: string; seconds: number };
+  /** A film's cutaway: a clip without speech from the picture, made after the voice, as long as its scene (shared/drama.ts). */
+  cutaway?: boolean;
 };
-/** A reference sheet a story's pictures are drawn from (shared/story.ts); `key` names what it is drawn from. */
-export type PictureSheet = { kind: "character" | "place"; prompt: string; key: string; place?: string };
+/**
+ * A reference sheet a story's pictures are drawn from (shared/story.ts); `key` names what it is drawn from. A film
+ * (shared/drama.ts) also has a master shot of each place ("scene"): the place with the people of its scenes in it,
+ * drawn from the place's and the characters' sheets, from which every shot set there is drawn.
+ */
+export type PictureSheet = { kind: "character" | "place" | "scene"; prompt: string; key: string; place?: string };
 /**
  * The reference sheets of a story: its recurring characters (when it has a subject) and each place (by placeKey) at
  * least two of its AI pictures are set in; none with fewer than two AI pictures or a background clip.
@@ -236,8 +247,16 @@ export function pictureSheets(spec: StorySpec): PictureSheet[] {
   if (drawn.length < 2) return [];
   const sheet = (kind: PictureSheet["kind"], prompt: string, place?: string): PictureSheet => ({ kind, prompt, key: `sheet:${fingerprint(prompt)}`, ...(place && { place }) });
   const out = spec.subject?.trim() ? [sheet("character", characterSheetPrompt(spec.subject, spec.style))] : [];
+  // A film's cast: everyone who says a line in it. The people of a place are those who speak or are named in its shots.
+  const film = isShotFilm(spec);
+  const cast = film ? [...new Set(spec.scenes.flatMap((s) => (s.speaker?.trim() ? [s.speaker.trim()] : [])))] : [];
   for (const p of spec.places ?? []) {
-    if (drawn.filter((s) => placeOf([p], s.place)).length >= 2) out.push(sheet("place", placeSheetPrompt(p, spec.style, spec.look), placeKey(p.label)));
+    const here = drawn.filter((s) => placeOf([p], s.place));
+    if (here.length < 2) continue;
+    out.push(sheet("place", placeSheetPrompt(p, spec.style, spec.look), placeKey(p.label)));
+    if (!film) continue;
+    const people = cast.filter((name) => here.some((s) => s.speaker?.trim() === name || s.description.toLowerCase().includes(name.toLowerCase())));
+    out.push(sheet("scene", masterShotPrompt(p, people, spec.style, spec.look), placeKey(p.label)));
   }
   return out;
 }
@@ -251,7 +270,7 @@ export function pendingMedia(spec: Spec): PendingMedia[] {
     if ((s.source === "image" || s.source === "clip") && !s.imageId && !showsPresenter(spec, i))
       out.push({
         kind: "image", path: ["scenes", i], key: "imageId",
-        prompt: scenePrompt(s.description, spec.subject, spec.style, spec.look, placeOf(spec.places, s.place)) + (s.acted ? shotStill(s) : spec.film ? filmStill(i) : ""),
+        prompt: scenePrompt(s.description, spec.subject, spec.style, spec.look, placeOf(spec.places, s.place)) + (s.acted || s.cutaway || (spec.film && s.lipSync) ? shotStill(s) : spec.film ? filmStill(i) : ""),
       });
   });
   // A lip-synced clip follows the voice it was made to: a voice still to be recorded (new words, another voice) needs it again.
@@ -267,7 +286,9 @@ export function pendingMedia(spec: Spec): PendingMedia[] {
         });
     } else if (s.source === "clip" && s.lipSync && (!s.clipId || voiceChanges) && !showsPresenter(spec, i))
       out.push({ kind: "clip", prompt: lipSyncPrompt(s.speaker, s.text), path: ["scenes", i], key: "clipId", from: "imageId", seconds: s.clipSeconds, quality: s.clipQuality, lipSync: true });
-    else if (s.source === "clip" && !s.clipId && !showsPresenter(spec, i))
+    else if (s.source === "clip" && s.cutaway && !s.clipId && !showsPresenter(spec, i))
+      out.push({ kind: "clip", prompt: cutawayPrompt(s, i), path: ["scenes", i], key: "clipId", from: "imageId", seconds: s.clipSeconds, quality: s.clipQuality, cutaway: true });
+    else if (s.source === "clip" && !s.cutaway && !s.clipId && !showsPresenter(spec, i))
       out.push({
         kind: "clip", prompt: spec.film ? filmClipPrompt(s.description, i) : clipPrompt(s.description), path: ["scenes", i], key: "clipId", from: "imageId",
         seconds: s.clipSeconds, quality: s.clipQuality, clipModel: s.clipModel, ...(spec.film && { audio: true }),

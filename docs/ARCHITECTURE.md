@@ -167,12 +167,32 @@ refuses a drama to anyone but administrators and on other than story styles).
   as a high-quality clip of the scene's length (2 credits per 5 s), counted in the episode's price (`lipSyncCredits`),
   and made again whenever the voice is recorded again (`pendingMedia`). Only administrators can make a video with
   lip-synced scenes (`checkFilm`).
-- **Film** (an option of a drama, `film`, in place of lip-sync). The episode is shot like a film.
+- **Film** (an option of a drama, `film`, in place of lip-sync). The episode is shot like a film: written in shots,
+  every one a video clip, in scenes that hold together. Who speaks is `filmVoices`:
+  - *The cast's exact voices* (`"exact"`, the default; `shotsSpec(spec, "exact")`). The episode keeps its narration:
+    the dialogue is recorded once in the cast's ElevenLabs voices, as in any drama, and gives the film its clock. A
+    shot whose picture shows its speaker (`speakerSeen`) is lip-synced to the line (`lipSync`, as above); any other
+    (the listener, a thing, the narrator's line) is a **cutaway** (`cutaway` on the scene): the picture brought to
+    life without speech (`cutawayPrompt`) by the shot model (`minimax/h3-max/reference-to-video`), made after the
+    voice and asked for as long as its scene is on screen (`clipLength`, from 2 seconds). Every clip plays silent
+    under the recording, so the room's sound does not come and go between cuts. A shot that shows one of the cast
+    goes to the shot model with the cast's sheet as "Image 1" (`castSheetUrl`, `SHEET_NOTE`); the lip-sync model
+    takes only the picture and the sound, so a lip-synced shot keeps its people from the picture alone.
+  - *The video model's own voice* (`"model"`): acted shots that say their own lines, described below.
   - *Written in shots.* The writer is asked for `filmShots(seconds)` scenes (one per 3.5 s), each one short line (at
     most `SHOT_MAX_WORDS` words) with what the camera shows while it is said: the speaker, the one who listens, or the
     thing the line is about; no narrator. `shotsSpec` turns every scene into an acted shot (`acted` on the scene: a
     high-quality clip from its picture, a cut before it) and sets the film look (`film`). A video is a film when every
     scene is acted (`isFilm`); a spec that mixes acted and other scenes does not validate.
+  - *Scenes hold together.* The writer is told that the episode plays as scenes: a run of shots in one place at one
+    moment, the people staying where they are; that the story changes place only between scenes; that a line fits
+    where it is said and who is there; and that it has at most `filmPlaces(seconds)` places, every shot naming its
+    own (a shot that names none takes the place of the shot before it, `shotsSpec`). For each place with two or more
+    shots, `pictureSheets` adds a **master shot** after the place's own sheet (`masterShotPrompt`: the place with the
+    people of its scenes in it, drawn from the characters' and the place's sheets). Every shot set there is drawn
+    from the characters' sheet and that master shot (reference role `scene`: the same room, people, clothes and
+    positions, only the camera moves), so the room no longer changes from cut to cut. A master shot is kept with the
+    video like the other sheets, so a picture made again later is drawn from the same one.
   - *Every shot says its own line.* The clip is made by fal's MiniMax H3 Max, on the endpoint that takes references
     (`minimax/h3-max/reference-to-video`, `shotRequest`): the shot's picture as the first frame, the prompt of
     `shotPrompt` (what happens, the line in quotes, said on screen by the speaker the picture names and off screen

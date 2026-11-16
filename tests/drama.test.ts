@@ -3,10 +3,10 @@ import worker from "../server/index";
 import { runEpisode } from "../server/series";
 import { joinSpeech, speakDialogue, TURN_PAUSE } from "../server/providers/elevenlabs";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
-import { castSubject, dramaSchema, filmCredits, filmShots, lipSyncCredits, SHOT_MAX_WORDS, shotPrompt, shotSeconds, shotsSpec, shotStill, takeKey, takeOf, voiceSampleText } from "../shared/drama";
+import { castSubject, cutawayPrompt, dramaSchema, filmCredits, filmPlaces, filmShots, lipSyncCredits, SHOT_MAX_WORDS, shotPrompt, shotSeconds, shotsSpec, shotStill, takeKey, takeOf, voiceSampleText } from "../shared/drama";
 import { CLIP_CREDITS, videoCredits } from "../shared/credits";
 import { FPS, narrationKey, narrationVoice, splitScene, storySegments, storyTiming, textWords, voicedScript, voiceRuns } from "../shared/story";
-import { filmClock, isFilm, narrationCurrent, pendingMedia, specCredits, storySpec } from "../shared/formats";
+import { filmClock, isFilm, isShotFilm, narrationCurrent, pendingMedia, specCredits, storySpec } from "../shared/formats";
 import { episodeCredits, seriesSettingsSchema, seriesSubject } from "../shared/series";
 
 // Drama series (a test, for administrators): a series with a cast and a premise whose episodes continue one story.
@@ -66,7 +66,7 @@ describe("drama series", () => {
     ]) expect(dramaSchema.safeParse(bad).success).toBe(false);
     const made = await s.create(s.admin);
     expect(made.status).toBe(201);
-    expect(made.data.series.settings.drama).toEqual({ ...drama, lipSync: false, film: false });
+    expect(made.data.series.settings.drama).toEqual({ ...drama, lipSync: false, film: false, filmVoices: "exact" });
     // The cast is the series' recurring characters, each called by name in every picture.
     expect(seriesSubject(seriesSettingsSchema.parse(s.settings()))).toBe("Mara: a woman of 30, short black hair, a red coat; Ilya: a thin man of 25 in a grey hoodie");
     expect(castSubject(cast).length).toBeLessThanOrEqual(300);
@@ -187,15 +187,48 @@ describe("drama series", () => {
     expect(joinSpeech([]).seconds).toBe(0);
   });
 
-  it("shoot an episode as a film when asked: written in shots, every one an acted clip, priced by its shots", async () => {
+  it("shoot an episode as a film in the cast's exact voices: the dialogue recorded, speakers lip-synced, cutaways under the line", async () => {
     const s = setup();
-    const plain = seriesSettingsSchema.parse(s.settings()), filmed = seriesSettingsSchema.parse(s.settings({ drama: { ...drama, film: true, lipSync: true }, animate: 2 }));
+    // A film speaks in the cast's own voices unless it is set to the video model's.
+    const filmed = seriesSettingsSchema.parse(s.settings({ drama: { ...drama, film: true } }));
+    expect(filmed.drama!.filmVoices).toBe("exact");
+    expect(episodeCredits(filmed)).toBe(videoCredits(45) + filmCredits(45));
+    const id = (await s.create(s.admin, { settings: s.settings({ drama: { ...drama, film: true } }) })).data.series.id as string;
+    expect(await runEpisode(s.env, id, s.row(id).next_slot)).toMatchObject({ state: "made" });
+    // Written as a film all the same.
+    expect(s.asked.at(-1)!.instructions).toContain("You write the shooting script of an episode of a short vertical drama");
+    const [first] = s.videos(id);
+    expect(first.spec.film).toBe(true);
+    expect(isShotFilm(first.spec)).toBe(true);
+    expect(isFilm(first.spec)).toBe(false);
+    // A shot that shows its speaker is lip-synced to their line; the narrator's line plays over a cutaway. None is acted.
+    expect(first.spec.scenes.map((x: any) => [x.source, x.lipSync ?? null, x.cutaway ?? null, x.acted ?? null, x.clipQuality, x.transition, x.speaker ?? null, x.voiceId ?? null])).toEqual([
+      ["clip", true, null, null, "high", "cut", "Mara", "sarah"], ["clip", true, null, null, "high", "cut", "Ilya", "liam"],
+      ["clip", null, true, null, "high", "cut", null, null], ["clip", true, null, null, "high", "cut", "Mara", "sarah"],
+    ]);
+    // The dialogue is recorded (part of the video's price); every shot is a high-quality clip.
+    const media = pendingMedia(first.spec);
+    expect(media.filter((m) => m.kind === "clip").map((m) => [!!m.lipSync, !!m.cutaway, !!m.acted, m.quality])).toEqual([[true, false, false, "high"], [true, false, false, "high"], [false, true, false, "high"], [true, false, false, "high"]]);
+    const run = s.sqlite.prepare("SELECT credits FROM runs WHERE video_id=?").get(first.id) as any;
+    expect(run.credits).toBe(specCredits(first.spec, true));
+    expect(run.credits).toBe(videoCredits(8) + 4 * CLIP_CREDITS.high);
+    expect(first.spec.sounds).toBeUndefined();
+    // A cutaway's prompt: the picture brought to life, nobody speaking.
+    expect(cutawayPrompt({ description: "A sealed letter on a steel tray" }, 1)).toBe(
+      "A sealed letter on a steel tray. A locked-off camera. Natural, physically plausible motion at real speed. Nobody speaks: mouths stay closed or still, people listen, look, react or work. "
+      + "Keep the characters, their clothes, the place and the look exactly as in the image. No subtitles or text on screen. Sound: the quiet ambience of the place only, no speech, no voices and no music.",
+    );
+  });
+
+  it("shoot an episode as a film spoken by the video model: written in shots, every one an acted clip, priced by its shots", async () => {
+    const s = setup();
+    const plain = seriesSettingsSchema.parse(s.settings()), filmed = seriesSettingsSchema.parse(s.settings({ drama: { ...drama, film: true, lipSync: true, filmVoices: "model" }, animate: 2 }));
     // A shot per three and a half seconds, each a high-quality clip; nothing else is animated or lip-synced in a film.
     expect(filmShots(45)).toBe(13);
     expect(filmCredits(45)).toBe(13 * CLIP_CREDITS.high);
     expect(episodeCredits(filmed)).toBe(videoCredits(45) + filmCredits(45));
     expect(episodeCredits(plain)).toBe(videoCredits(45));
-    const id = (await s.create(s.admin, { settings: s.settings({ drama: { ...drama, film: true, lipSync: true }, animate: 2 }) })).data.series.id as string;
+    const id = (await s.create(s.admin, { settings: s.settings({ drama: { ...drama, film: true, lipSync: true, filmVoices: "model" }, animate: 2 }) })).data.series.id as string;
     expect(await runEpisode(s.env, id, s.row(id).next_slot)).toMatchObject({ state: "made" });
     // The writer is asked for shots: one short line each, no narrator, the camera on the speaker or cutting away.
     const { instructions } = s.asked.at(-1)!;
@@ -205,6 +238,13 @@ describe("drama series", () => {
     expect(instructions).toContain("There is no narrator");
     expect(instructions).toContain("cut away instead while the line is heard off screen");
     expect(instructions).not.toContain("the narrator only bridges time and place");
+    // And for scenes that hold together: one place per scene, lines that fit who is there, a place for every shot.
+    expect(instructions).toContain("The episode plays as scenes. A scene is a run of shots that follow each other in one place at one moment");
+    expect(instructions).toContain("Whoever a line is kept from (the guests, the boss, a rival) is somewhere else for the whole scene");
+    expect(instructions).toContain("at most 2 of them (one is often enough), and every shot's `place` is the label of the place its scene is set in");
+    expect(filmPlaces(30)).toBe(2);
+    expect(filmPlaces(60)).toBe(3);
+    expect(filmPlaces(120)).toBe(4);
     const [first] = s.videos(id);
     // Every scene is an acted shot from its picture, cut in hard, with the film look; its speaker's voice goes with it.
     expect(first.spec.film).toBe(true);

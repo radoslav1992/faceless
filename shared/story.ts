@@ -142,6 +142,12 @@ export const storySceneSchema = z
      * came out, kept by the run that made it: the words it was made for (`key`: other words need a new take), where
      * the line starts in the clip (`trim`), how long the shot lasts (`seconds`) and when each word is said in it.
      */
+    /**
+     * A shot of a film that keeps its narration (shared/drama.ts, voices "exact"): nobody speaks on screen in it (the
+     * line is heard over it), so its clip is the picture brought to life without speech, as long as the scene, by
+     * the film's shot model. A shot whose speaker is seen is `lipSync` instead.
+     */
+    cutaway: z.literal(true).optional(),
     acted: z.literal(true).optional(),
     take: z.object({
       key: z.string().max(80), trim: z.number().min(0).max(20), seconds: z.number().min(0.5).max(20),
@@ -466,6 +472,15 @@ export const characterSheetPrompt = (subject: string, style: StoryStyle) =>
 export const characterSheetKey = (subject: string, style: StoryStyle) => `sheet:${fingerprint(characterSheetPrompt(subject, style))}`;
 export const placeSheetPrompt = (place: StoryPlace, style: StoryStyle, look = "") =>
   `Establishing shot of ${bare(place.label)}: ${bare(place.description)}. A wide view of the whole place, empty, with no people or animals.${look.trim() ? ` The world of the video: ${bare(look)}.` : ""} Style: ${storyStyles[style].prompt}. Vertical 9:16 frame.`.slice(0, 1600);
+/**
+ * A film's master shot of a place (shared/drama.ts): the place with the people of its scenes in it, drawn once from
+ * the place's and the characters' sheets. Every shot set there is drawn from it, so the room, the light and the
+ * people's clothes and positions stay the same from cut to cut.
+ */
+export const masterShotPrompt = (place: StoryPlace, people: string[], style: StoryStyle, look = "") =>
+  `Master shot of a film scene set in ${bare(place.label)}: ${bare(place.description)}. A wide view of the whole place${people.length
+    ? ` with ${people.join(" and ")} in it, each where they are during the scene, in the middle of it, nobody posing or looking at the camera`
+    : ", as the scene finds it, with nobody in the foreground"}.${look.trim() ? ` The world of the video: ${bare(look)}.` : ""} Style: ${storyStyles[style].prompt}. Vertical 9:16 frame.`.slice(0, 1600);
 /** The description sent to the clip model with the scene's picture: gentle motion, the picture kept as it is. */
 export const clipPrompt = (description: string) =>
   `${description.trim().replace(/([^.!?])$/, "$1.")} Gentle natural motion of the subject and one slow camera move; keep the drawing style, characters and colours exactly as in the image.`.slice(0, 900);

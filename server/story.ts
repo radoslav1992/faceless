@@ -14,7 +14,7 @@ import { voiceIdSchema } from "../shared/voices";
 import { offeredVoice, voiceUsable } from "./voices";
 import { SPEECH_CHARS_PER_SECOND, clipModels, clipQualities } from "../shared/credits";
 import { filmSpec } from "../shared/film";
-import { castMember, episodeTitle, filmShots, lipSyncSpec, NARRATOR, SHOT_MAX_WORDS, shotsSpec } from "../shared/drama";
+import { type FilmVoices, castMember, episodeTitle, filmPlaces, filmShots, lipSyncSpec, NARRATOR, SHOT_MAX_WORDS, shotsSpec } from "../shared/drama";
 import { isAdmin } from "./auth";
 import { languageCodes, languageName, type LanguageCode } from "../shared/series";
 import { templateIds, templateOf, type TemplateId, type VideoKind } from "../shared/templates";
@@ -217,6 +217,10 @@ const dramaRules = (d: NonNullable<WriteRequest["drama"]>) => [
     `A shot's \`text\` is one short line, at most ${SHOT_MAX_WORDS} words, only the words said out loud, in the first person, as people really talk: no name in front, no quotation marks, no 'she said'. A longer speech is cut into several shots of the same speaker. Speakers answer each other, and every character sounds like themselves.`,
     "Only the cast speaks. Other people may be seen in pictures, never named and never speaking.",
     "Each `picture` is what the camera shows while the line is said. In most shots, the speaker, called by their name, with their expression and what they are doing while they talk (on the phone, pouring a drink, turning away). In about one shot in four, cut away instead while the line is heard off screen: the one who listens and how they take it (called by their name, not speaking), or a close-up of the thing the line is about (a letter, a key, a photograph, a door). Never two people talking in one picture, and never the same framing twice in a row: change the distance and the angle from shot to shot (close-up, medium shot, over the shoulder, wide shot of the room).",
+    // Continuity: a film is cut from shot to shot, so a room that changes or people who jump from place to place show at once.
+    "The episode plays as scenes. A scene is a run of shots that follow each other in one place at one moment: the people in it stay where they are, in the same clothes, holding the same things, unless a line moves them. The story changes place only between scenes, when it really moves there: never in the middle of an exchange, and never there and back.",
+    "What is said must fit where it is said and who is there. People who talk to each other are together in the scene's place. Whoever a line is kept from (the guests, the boss, a rival) is somewhere else for the whole scene, out of sight and hearing: nobody speaks freely about people in one shot and stands next to them in the next.",
+    "Each `picture` says where in the place its people are, in the same words in every shot of the scene (the cook at the stove with a towel over her shoulder; the visitor in the doorway), and shows only people who are in that scene.",
   ] : [
   `Each scene is said by one speaker. \`speaker\`: the name of a cast member exactly as given, or "${NARRATOR}". Most scenes, and at least half, are a character speaking; the narrator only bridges time and place, in one short sentence in the present tense.`,
   "A character's `text` is only the words they say out loud, in the first person, as people really talk: no name in front, no quotation marks, no 'she said'. Speakers answer each other, and every character sounds like themselves.",
@@ -285,6 +289,8 @@ export async function writeVideo(env: Env, r: WriteRequest): Promise<StoryConcep
         : SUBJECT_RULE,
     LOOK_RULE,
     PLACES_RULE,
+    // A film's shots are drawn from a master shot of their place: every shot needs one, and a short episode few of them.
+    ...(film ? [`For this film the places are stricter: at most ${filmPlaces(r.seconds)} of them${r.seconds <= 45 ? " (one is often enough)" : ""}, and every shot's \`place\` is the label of the place its scene is set in, written exactly the same, for cutaways and close-ups too: no shot has an empty place.`] : []),
     CAMERA_RULE,
     film ? TONE_RULE.replace("how the narrator says the scene", "how the line is said") : TONE_RULE,
     `The pictures are drawn as: ${storyStyles[r.style].short.toLowerCase()}.`,
@@ -325,8 +331,10 @@ export type SpecChoices = {
   episode?: { n: number; of: number };
   /** A drama with lip-sync: the scenes its cast says become lip-synced clips (shared/drama.ts lipSyncSpec). */
   lipSync?: boolean;
-  /** A drama shot like a film: every scene an acted shot that says its own line (shared/drama.ts shotsSpec). */
+  /** A drama shot like a film: every scene a shot of its own (shared/drama.ts shotsSpec), spoken in `filmVoices`. */
   film?: boolean;
+  /** Who speaks in a film: the cast's exact voices, lip-synced (unless said), or the video model itself. */
+  filmVoices?: FilmVoices;
 };
 /** A written video as a spec (AI pictures and an AI voice), or null when it does not validate. */
 export function conceptToSpec(k: StoryConcept, c: SpecChoices): StorySpec | null {
@@ -353,7 +361,7 @@ export function conceptToSpec(k: StoryConcept, c: SpecChoices): StorySpec | null
     caption: k.caption, hashtags, title: c.episode ? episodeTitle(c.episode.n, k.title) : k.title, topic: k.topic,
     ...(c.episode && { episode: { ...c.episode, summary: k.summary || k.caption.slice(0, 600) } }),
   });
-  return parsed.success ? (c.film ? shotsSpec(parsed.data) : c.lipSync ? lipSyncSpec(parsed.data) : parsed.data) : null;
+  return parsed.success ? (c.film ? shotsSpec(parsed.data, c.filmVoices ?? "exact") : c.lipSync ? lipSyncSpec(parsed.data) : parsed.data) : null;
 }
 
 /**

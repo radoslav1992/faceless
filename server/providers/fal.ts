@@ -77,12 +77,15 @@ export type FalOptions = {
 };
 /**
  * A reference sheet of the video a picture is drawn from (shared/formats.ts pictureSheets): what its recurring
- * characters look like ("character"), or how the place the scene is set in is built ("place").
+ * characters look like ("character"), how the place the scene is set in is built ("place"), or, in a film, the
+ * master shot of the scene the shot belongs to ("scene").
  */
-export type Reference = { url: string; role: "character" | "place" };
+export type Reference = { url: string; role: "character" | "place" | "scene" };
 const referenceUse: Record<Reference["role"], string> = {
   character: "shows only what the recurring characters look like: draw the ones this scene shows with exactly these faces, hair, bodies, clothing and colours, but in the pose, action and place this scene describes, never standing as in the reference; leave out any it does not mention.",
   place: "shows only how the place is built: keep its layout, walls, floor, furniture, objects, light and colours, but put the camera where this scene says and frame the picture anew; never copy the reference's view.",
+  // A film's master shot (shared/story.ts masterShotPrompt): the new picture is another camera's view of the same moment.
+  scene: "is the master shot of this very scene, seen from further back: the new picture is the same moment from the camera position this scene describes. Keep the same room with its walls, furniture, objects, light and colours, and the same people in the same clothes, in the same spots, holding the same things; only the camera moves (closer, from another side). Never copy the reference's framing, and leave out anyone this scene does not mention.",
 };
 /** How the references are used, after the scene: each only for what it shows, never as the picture to draw. */
 export function referencePrompt(references: Reference[]) {
@@ -166,9 +169,18 @@ export const submitFalLipSync = (e: Env, image: string, audio: string) => { cons
  * ("balanced" is fal's default: it fills in the look, never the words in quotes).
  */
 export const SHOT_MODEL = "minimax/h3-max/reference-to-video";
-export const shotRequest = (shot: { image: string; prompt: string; seconds: number; voice: string }) => ({
+/**
+ * `voice`: the sample of the speaker's voice (a shot that says its line; a cutaway has none). `sheet`: the cast's
+ * reference sheet, the prompt's "Image 1", for a shot that shows one of the cast: the model keeps their faces and
+ * clothes like it while they move.
+ */
+export const SHEET_NOTE = "Image 1 is the cast's reference sheet: keep everyone who appears looking exactly as on it, with the same face, hair and clothes.";
+export const shotRequest = (shot: { image: string; prompt: string; seconds: number; voice?: string; sheet?: string }) => ({
   model: SHOT_MODEL,
-  body: { prompt: shot.prompt, image_url: shot.image, duration: Math.min(15, Math.max(1, shot.seconds)), resolution: "768P", prompt_expansion_mode: "balanced", reference_audio_urls: [shot.voice] },
+  body: {
+    prompt: shot.sheet ? `${shot.prompt} ${SHEET_NOTE}` : shot.prompt, image_url: shot.image, duration: Math.min(15, Math.max(1, shot.seconds)), resolution: "768P", prompt_expansion_mode: "balanced",
+    ...(shot.voice && { reference_audio_urls: [shot.voice] }), ...(shot.sheet && { reference_image_urls: [shot.sheet] }),
+  },
 });
 /** Submits a shot once (a ticket like any clip's: its status and result are read the same way). */
 export const submitFalShot = (e: Env, shot: Parameters<typeof shotRequest>[0]) => { const { model, body } = shotRequest(shot); return submitQueue(e, model, body); };

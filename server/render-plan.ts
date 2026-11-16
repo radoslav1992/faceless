@@ -72,7 +72,8 @@ const total = (segments: ComposeSegment[]) => round(segments.reduce((n, s) => n 
 /**
  * `film`: a cinematic video (shared/film.ts), whose AI clips play their own ambient sound quietly under the voice. A
  * lip-synced clip (shared/drama.ts) is always silent: its sound is the voice already playing. A film's shot plays its
- * take: the clip from where its line starts, at full volume (its sound is the scene's voice).
+ * take: the clip from where its line starts, at full volume (its sound is the scene's voice). A cutaway is silent
+ * like the lip-synced shots around it, so the room's sound does not come and go from cut to cut.
  */
 function sceneSegment(ctx: PlanContext, inputs: Inputs, scene: StoryScene, seconds: number, n: number, film = false): ComposeSegment {
   const id = scene.source === "clip" ? scene.clipId || scene.imageId : scene.source === "image" ? scene.imageId : scene.source === "own" ? scene.assetId : scene.libraryId;
@@ -81,7 +82,7 @@ function sceneSegment(ctx: PlanContext, inputs: Inputs, scene: StoryScene, secon
   if (m.kind !== "video") throw new Error("MEDIA_INPUT");
   if (scene.acted && scene.clipId) return { kind: "video", input: inputs.add(m.key), trim: round(scene.take?.trim ?? 0), duration: seconds, audio: 1 };
   const loop = scene.source !== "clip" && m.duration > 0.5 && m.duration < seconds - 1;
-  return { kind: "video", input: inputs.add(m.key), trim: 0, duration: seconds, audio: film && scene.source === "clip" && !scene.lipSync ? FILM_AMBIENCE : 0, ...(loop && { loop }) };
+  return { kind: "video", input: inputs.add(m.key), trim: 0, duration: seconds, audio: film && scene.source === "clip" && !scene.lipSync && !scene.cutaway ? FILM_AMBIENCE : 0, ...(loop && { loop }) };
 }
 
 /**

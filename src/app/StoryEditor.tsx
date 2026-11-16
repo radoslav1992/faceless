@@ -254,6 +254,8 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
   const shot = !!scene.acted, narrator = spec.narration.kind === "voice" ? spec.narration.voiceId : "";
   const taken = shot && !!scene.clipId && scene.take?.key === takeKey(scene, narrator);
   const takePrice = clipCredits([{ seconds: shot ? clipFor(shotSeconds(scene.text)) : scene.clipSeconds, quality: shot ? "high" : scene.clipQuality }]);
+  // A shot of a film that keeps its narration: lip-synced to the speaker's line, or a cutaway under it.
+  const dubbed = !shot && scene.source === "clip" && (!!scene.cutaway || (!!spec.film && !!scene.lipSync));
   const own = scene.assetId ? known[scene.assetId] : undefined, lib = scene.libraryId ? known[scene.libraryId] : undefined;
   // The places the writer named (videos saved before places have none); a scene set in one is drawn like its others.
   const places = spec.places ?? [], place = placeOf(places, scene.place);
@@ -304,8 +306,15 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
           An acted shot: the clip is made from this picture and the line is said in it{taken ? ` (${scene.take!.seconds.toFixed(1)} s)` : ""}. A take can miss a word or a face: make it again until it's right.
         </p>
       )}
+      {dubbed && (
+        <p className="notice small">
+          {scene.cutaway
+            ? "A cutaway: the clip is made from this picture without anyone speaking, and the line is heard over it."
+            : `A lip-synced shot: the clip is made from this picture, with ${scene.speaker || "the speaker"}'s lips moving to the recorded line.`} Make it again until it's right.
+        </p>
+      )}
       {!(showsPresenter(spec, index) && spec.presenter!.layout === "full") && <>
-      {!shot && <div className="seg small-seg story-sources" role="group" aria-label="Where the picture comes from">
+      {!shot && !dubbed && <div className="seg small-seg story-sources" role="group" aria-label="Where the picture comes from">
         {(["image", "clip", "own", "library"] as const).map((s) => {
           const Icon = sourceIcons[s], cost = price(s);
           return (
@@ -340,7 +349,7 @@ function SceneInspector({ spec, index, scene, seconds, known, onChange, pick, on
               </span>
             </label>
           )}
-          {scene.source === "clip" && !shot && (<>
+          {scene.source === "clip" && !shot && !dubbed && (<>
             <div className="field"><span className="small">Clip quality</span>
               <div className="seg small-seg" role="group" aria-label="Clip quality">
                 {clipQualities.map((q) => (
