@@ -8,6 +8,9 @@ export interface Env {
   CONTENT?: Workflow<{ runId?: string; inspectId?: string; importId?: string; episode?: { seriesId: string; slot: number; first?: boolean } }>;
   PUBLISH?: Workflow<{ publicationId: string }>;
   MEDIA_RENDERER?: DurableObjectNamespace;
+  /** Реч БГ only (wrangler.rechbg.jsonc): Hookstreak's database and bucket, read to copy its library (server/library-import.ts). Never written. */
+  HOOKSTREAK_DB?: D1Database;
+  HOOKSTREAK_MEDIA?: R2Bucket;
   EMAIL?: SendEmail;
   SITE_URL?: string;
   APP_ENV?: string;

@@ -158,13 +158,33 @@ Set `SITE_URL` to `https://rechbg.com`, uncomment the route in `wrangler.rechbg.
 earlier Реч БГ's own config (or its next deploy takes the domain back), move the Stripe webhook to the new address
 and deploy. Accounts and files of the earlier app are not carried over.
 
+## The library
+
+Реч БГ's database starts empty, so it takes Hookstreak's library: music, sound effects, background clips and
+pictures, voices, presenters and example videos. `server/library-import.ts` copies the rows into Реч БГ's database
+and their files into its bucket, twelve files' worth every five minutes from the scheduled maintenance, until all of
+it is there; after that the same pass brings whatever Hookstreak adds.
+
+- Hookstreak's database and bucket are bound to Реч БГ's Worker for this alone (`HOOKSTREAK_DB`,
+  `HOOKSTREAK_MEDIA` in `wrangler.rechbg.jsonc`) and are only read. Hookstreak's own Worker has no such bindings and
+  never runs the import.
+- **It only adds.** A copied item is Реч БГ's own: renaming, hiding or deleting it there is not undone, and a change
+  or removal in Hookstreak does not reach it. An example video is copied only for a style that has none.
+- Not copied: sound effects made for one person's video or still waiting for review, an item whose file is gone,
+  and voices' samples.
+- A voice or a presenter works on Реч БГ when its ElevenLabs or HeyGen account can use it: with the same API keys as
+  Hookstreak they all do.
+- The example videos are Hookstreak's, in English. Replace them in Admin → Examples as Bulgarian ones are made.
+
 ## Still to do
 
 - **Legal pages: open questions.** The texts are in place (see "Legal pages" above); `docs/LEGAL-BG.md` lists what
   the owner or a lawyer still has to decide.
 - **The administrators' screens** and the e-mails to administrators: left in English on purpose.
-- **The libraries** (music, sound effects, voices, example videos, presenters, background clips): Реч БГ's database
-  starts empty, so they are added in its Admin screens or copied from Hookstreak's.
+- **Voice samples**: voices arrive from Hookstreak without their English sample. Admin → Voices makes the missing
+  ones, spoken in Bulgarian (it uses ElevenLabs characters).
+- **Bulgarian names** for the copied library: the items keep Hookstreak's English names, tags and categories until
+  they are edited in Admin → Library.
 - **Messages for failed work** written into a video's record by the server (why a video could not be made) are
   translated only where the catalog happens to have them.
 - **The first deploy and the switch**: the steps under "Deployment".

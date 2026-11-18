@@ -27,10 +27,15 @@ it("gives each site its own Worker, database, bucket and workflows", () => {
   const config = (file: string) => readFileSync(file, "utf8");
   const hookstreak = config("wrangler.jsonc"), rechbg = config("wrangler.rechbg.jsonc");
   const value = (text: string, key: string) => [...text.matchAll(new RegExp(`"${key}": "([^"]+)"`, "g"))].map((m) => m[1]);
+  // Реч БГ's own come first; Hookstreak's are there once more, only to be read for the library (server/library-import.ts).
   for (const key of ["database_id", "database_name", "bucket_name"]) {
-    expect(value(rechbg, key)).toHaveLength(1);
-    expect(value(rechbg, key)).not.toEqual(value(hookstreak, key));
+    const [own, borrowed, ...more] = value(rechbg, key);
+    expect(own).not.toBe(value(hookstreak, key)[0]);
+    expect([borrowed, more]).toEqual([value(hookstreak, key)[0], []]);
   }
+  expect(rechbg).toContain('{ "binding": "HOOKSTREAK_DB", "database_name": "faceless"');
+  expect(rechbg).toContain('{ "binding": "HOOKSTREAK_MEDIA", "bucket_name": "faceless-media" }');
+  expect(hookstreak).not.toContain("HOOKSTREAK_");
   expect(value(rechbg, "name").filter((name) => value(hookstreak, "name").includes(name))).toEqual(["EMAIL", "MEDIA_RENDERER"]);
   expect(hookstreak).toContain(String.raw`"define": { "__SITE__": "\"hookstreak\"" }`);
   expect(rechbg).toContain(String.raw`"define": { "__SITE__": "\"rechbg\"" }`);

@@ -38,9 +38,14 @@
       "database_id": "1124cf5a-4c90-4a18-9c31-552a2fe8a689",
       "migrations_dir": "migrations",
     },
+    { "binding": "HOOKSTREAK_DB", "database_name": "faceless", "database_id": "09be5383-f865-4b98-8739-3b368568cbcd" },
   ],
-  // Реч БГ's own bucket, created empty on 2026-11-18.
-  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "rechbg-media" }],
+  // Реч БГ's own bucket, created empty on 2026-11-18. The second one is Hookstreak's, with its database above: bound
+  // so the maintenance can copy Hookstreak's library into Реч БГ's own (server/library-import.ts). They are only read.
+  "r2_buckets": [
+    { "binding": "MEDIA", "bucket_name": "rechbg-media" },
+    { "binding": "HOOKSTREAK_MEDIA", "bucket_name": "faceless-media" },
+  ],
   // Three renderers, each running one job at a time (server/renderer.ts).
   "containers": [
     { "class_name": "MediaRenderer", "image": "./renderer/Dockerfile", "max_instances": 3, "instance_type": "standard-2" },

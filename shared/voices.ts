@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { z } from "zod";
 
 // Narration voices. Administrators choose and describe them in Admin → Voices (server/voices.ts, table `voices`); the
@@ -22,7 +23,8 @@ export const voiceLabel = (v: Pick<Voice, "name" | "description" | "accent">) =>
 export const SAMPLE_MAX_CHARS = 400;
 /** What a voice's sample says unless an administrator writes something else: about ten seconds of a story. */
 export const sampleText = (name: string) =>
-  `Hi, I'm ${name}. It started as an ordinary night. Then the lights went out, and somewhere downstairs, a door slowly opened. This is how your next story could sound.`;
+  // In the site's language (shared/i18n.ts): Реч БГ's samples are spoken in Bulgarian.
+  t(`Hi, I'm ${name}. It started as an ordinary night. Then the lights went out, and somewhere downstairs, a door slowly opened. This is how your next story could sound.`);
 
 // Cloned voices (server/voice-clones.ts): a person's own voice, made from a sample they upload and offered to them alone.
 
