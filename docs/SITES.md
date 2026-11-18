@@ -65,12 +65,27 @@ How texts reach the catalog:
 - Tone: natural Bulgarian written for the page, not word for word; the reader is addressed politely in the plural
   ("Изберете", "Създайте"); quotation marks are „…“. The home page's headline is the owner's wording.
 
+## Legal pages
+
+Реч БГ has its own terms and privacy policy in Bulgarian, on the same two addresses and with the same anchors the
+app links to (`/terms`, `/privacy`, `#withdrawal`, `#withdrawal-form`, `#affiliates`): `src/public/LegalBg.tsx` shows
+the texts in `src/public/legal-bg.ts`, and `src/App.tsx` loads it in place of `Legal.tsx` on Реч БГ only.
+
+- The wording comes from the earlier Реч БГ site (its terms, privacy, cookies and refund pages, folded into two);
+  every statement about the product was replaced with what Hookstreak's texts and the shared files say.
+  `docs/LEGAL-BG.md` records what was kept, what changed and why, and the open questions.
+- The provider's name, company number (`COMPANY_ID`, shown as ЕИК), address and e-mail come from the site's settings
+  and are shown at the top of both pages and in the standard withdrawal form.
+- Prices and credit numbers are not in the texts: they point to the pricing page.
+- The sentence a customer agrees to before paying ("start my plan straight away", `shared/withdrawal.ts`) is the
+  Bulgarian one the earlier site used, with its own version.
+
 ## Still to do
 
-- **Legal pages** (`src/public/Legal.tsx`, terms and privacy policy): still English on Реч БГ. They need Bulgarian
-  texts for this product and the Bulgarian company, reviewed by the owner.
+- **Legal pages: open questions.** The texts are in place (see "Legal pages" below); `docs/LEGAL-BG.md` lists what
+  the owner or a lawyer still has to decide.
 - **E-mails** the server sends (confirmation, password reset, the consent confirmation after checkout, "your video is
-  ready", reconnect a channel): still English.
+  ready", reconnect a channel): still English. The consent sentence itself is Bulgarian.
 - **The administrators' screens**: left in English on purpose.
 - **Checkout on Реч БГ**: the currency follows the site; the Bulgarian checkout language and always collecting tax
   and address are still to set (`server/billing.ts`).
