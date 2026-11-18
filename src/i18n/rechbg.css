@@ -1,0 +1,3 @@
+/* Реч БГ only (src/i18n/rechbg.ts). Headings in a font that has Cyrillic; Bulgarian letterforms come with lang="bg". */
+:root { --display: "Manrope Variable", "Inter Variable", system-ui, sans-serif; }
+h1, h2, h3 { letter-spacing: -0.03em; }
