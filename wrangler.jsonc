@@ -4,6 +4,9 @@
   "main": "server/index.ts",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
+  // This Worker is Hookstreak (shared/site.ts, docs/SITES.md). Said here so the bundler leaves out the other site's
+  // words and settings; without it the Worker is Hookstreak all the same.
+  "define": { "__SITE__": "\"hookstreak\"" },
   // Dashboard variables and secrets survive GitHub deploys.
   "keep_vars": true,
   // Public settings tied to the domain, set on every deploy (a dashboard value for these names is replaced).

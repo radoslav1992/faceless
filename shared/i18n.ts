@@ -20,27 +20,26 @@ export type Words = {
   /** For what neither covers, tried first: `$1`… are the pattern's groups. */
   patterns?: readonly (readonly [RegExp, string])[];
 };
-export type Catalog = { exact: Readonly<Record<string, string>>; patterns: readonly (readonly [RegExp, string])[] };
+/** A text with changing parts, ready to match: `parts[i]` is the number the template gave the pattern's group i + 1. */
+type Template = { pattern: RegExp; words: string; parts: readonly string[]; grammar: ReadonlySet<string> };
+export type Catalog = { exact: Readonly<Record<string, string>>; patterns: readonly (readonly [RegExp, string])[]; templates: readonly Template[] };
 
 const PART = /\{(\d+)\}/g;
 const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, (character) => "\\" + character);
 /** A locale's words ready to look up: its templates become patterns, those with more fixed words tried first. */
 export function catalogOf(words: Words): Catalog {
   const fixed = (template: string) => template.replace(PART, "").length;
-  const compiled = Object.entries(words.templates ?? {})
+  const templates = Object.entries(words.templates ?? {})
     .sort((a, b) => fixed(b[0]) - fixed(a[0]))
-    .map(([template, said]) => {
-      // The parts are numbered in the order the English has them.
-      const parts = [...template.matchAll(PART)];
-      const order = parts.map((match) => match[1]);
+    .map(([template, said]): Template => {
+      const found = [...template.matchAll(PART)];
       // A part glued to the end of a word is English grammar (the "s" of "credit{2}"): matched, even when empty, and left out.
-      const grammar = new Set(parts.filter((match) => /[A-Za-z]/.test(template[match.index - 1] ?? "")).map((match) => match[1]));
+      const grammar = new Set(found.filter((match) => /[A-Za-z]/.test(template[match.index - 1] ?? "")).map((match) => match[1]));
       const source = template.split(/(\{\d+\})/)
         .map((piece) => (/^\{\d+\}$/.test(piece) ? (grammar.has(piece.slice(1, -1)) ? "([\\s\\S]*?)" : "([\\s\\S]+?)") : literal(piece))).join("");
-      const replacement = said.split("$").join("$$").replace(PART, (_, n: string) => (grammar.has(n) ? "" : "$" + (order.indexOf(n) + 1)));
-      return [new RegExp("^" + source + "$"), replacement] as const;
+      return { pattern: new RegExp("^" + source + "$"), words: said, parts: found.map((match) => match[1]), grammar };
     });
-  return { exact: words.exact, patterns: [...(words.patterns ?? []), ...compiled] };
+  return { exact: words.exact, patterns: words.patterns ?? [], templates };
 }
 // The comparison is on the build's constant itself, so Hookstreak's bundles drop the catalog.
 const siteCatalog: Catalog | null = typeof __SITE__ === "string" && __SITE__ === "rechbg" ? catalogOf(bg) : null;
@@ -55,18 +54,28 @@ const reportable = (s: string) => /[A-Za-z]{2}/.test(s) && !/[Ѐ-ӿ]/.test(s) &&
 export function translator(catalog: Catalog | null, missed?: (text: string) => void) {
   // The same texts are asked for on every render: what each came to (itself, without a translation) is kept.
   const known = new Map<string, string>();
+  /** The translation of a text, or undefined. A template's changing parts are translated too where they have words of their own (a plan's name). */
+  const find = (core: string, depth: number): string | undefined => {
+    if (Object.hasOwn(catalog!.exact, core)) return catalog!.exact[core];
+    for (const [pattern, replacement] of catalog!.patterns) if (pattern.test(core)) return core.replace(pattern, replacement);
+    for (const { pattern, words, parts, grammar } of catalog!.templates) {
+      const match = pattern.exec(core);
+      if (!match) continue;
+      return words.replace(PART, (_, n: string) => {
+        if (grammar.has(n)) return "";
+        const part = match[parts.indexOf(n) + 1] ?? "";
+        return (depth < 2 ? find(part.trim(), depth + 1) : undefined) ?? part;
+      });
+    }
+    return undefined;
+  };
   return (text: string): string => {
     if (!catalog || !text) return text;
     const core = text.trim();
     if (!core) return text;
     let said = known.get(core);
     if (said === undefined) {
-      let found: string | undefined = Object.hasOwn(catalog.exact, core) ? catalog.exact[core] : undefined;
-      if (found === undefined) {
-        for (const [pattern, replacement] of catalog.patterns) {
-          if (pattern.test(core)) { found = core.replace(pattern, replacement); break; }
-        }
-      }
+      const found = find(core, 0);
       if (found === undefined && reportable(core)) missed?.(core);
       said = found ?? core;
       if (known.size < 20000) known.set(core, said);
@@ -86,3 +95,5 @@ export function localized<T>(value: T): T {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, localized(item)])) as T;
   return value;
 }
+/** An e-mail in this site's language: its subject and each of its lines (server/security.ts sendMail). */
+export const mailWords = (subject: string, text: string) => (siteCatalog ? { subject: t(subject), text: text.split("\n").map(t).join("\n") } : { subject, text });

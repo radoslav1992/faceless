@@ -1,3 +1,4 @@
+import { mailWords } from "../shared/i18n";
 import { HTTPException } from "hono/http-exception";
 import type { Context } from "hono";
 import type { Env, ContextVars } from "./types";
@@ -151,6 +152,8 @@ export async function sendMail(
     throw new HTTPException(503, {
       message: "Email is temporarily unavailable.",
     });
+  // Реч БГ's e-mails are in Bulgarian: the subject and each line have their translation (shared/i18n.ts).
+  ({ subject, text } = mailWords(subject, text));
   // Accept the previous display-name format in existing Dashboard variables.
   const sender = env.EMAIL_FROM.trim();
   const named = sender.match(/^([^<>]*)<([^<>]+)>$/);

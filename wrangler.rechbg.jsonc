@@ -1,0 +1,57 @@
+{
+  // Реч БГ: the second site built from this code (docs/SITES.md). Its own Worker, database, bucket, workflows and
+  // renderers; nothing here is shared with Hookstreak (wrangler.jsonc).
+  //   npm run deploy:rechbg
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "rechbg",
+  "main": "server/index.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // The Worker's half of the site switch (shared/site.ts): Bulgarian, euro, Реч БГ's name. The app's half is
+  // SITE=rechbg in the build (vite.config.ts).
+  "define": { "__SITE__": "\"rechbg\"" },
+  // Dashboard variables and secrets survive deploys.
+  "keep_vars": true,
+  "vars": {
+    // rechbg.com has Email Sending set up in Cloudflare (the earlier Реч БГ sends from the same address).
+    "CONTACT_EMAIL": "info@rechbg.com",
+  },
+  // SITE_URL is set in the dashboard, not here: every other host is redirected to it, so while the Worker is tried
+  // out on its workers.dev address that address is its SITE_URL. At the switch, set SITE_URL to https://rechbg.com,
+  // uncomment the route below and deploy: a domain belongs to one Worker, so this moves rechbg.com away from the
+  // earlier Реч БГ Worker (rech-bg), whose own config must then stop listing it.
+  "workers_dev": true,
+  // "routes": [{ "pattern": "rechbg.com", "custom_domain": true }],
+  "assets": {
+    "directory": "./dist-rechbg",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true,
+  },
+  "ai": { "binding": "AI" },
+  "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["info@rechbg.com"] }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "rechbg",
+      // Реч БГ's own database (Western Europe), created empty on 2026-11-18. The deploy applies the migrations.
+      "database_id": "1124cf5a-4c90-4a18-9c31-552a2fe8a689",
+      "migrations_dir": "migrations",
+    },
+  ],
+  // Реч БГ's own bucket, created empty on 2026-11-18.
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "rechbg-media" }],
+  // Three renderers, each running one job at a time (server/renderer.ts).
+  "containers": [
+    { "class_name": "MediaRenderer", "image": "./renderer/Dockerfile", "max_instances": 3, "instance_type": "standard-2" },
+  ],
+  "durable_objects": { "bindings": [{ "name": "MEDIA_RENDERER", "class_name": "MediaRenderer" }] },
+  "migrations": [{ "tag": "renderer-v1", "new_sqlite_classes": ["MediaRenderer"] }],
+  "workflows": [
+    { "name": "rechbg-content", "binding": "CONTENT", "class_name": "ContentGeneration" },
+    { "name": "rechbg-publish", "binding": "PUBLISH", "class_name": "Publication" },
+  ],
+  "triggers": { "crons": ["* * * * *"] },
+  "observability": { "enabled": true },
+  "limits": { "cpu_ms": 120000 },
+}
