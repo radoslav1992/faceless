@@ -1,3 +1,4 @@
+import { CURRENCY } from "../shared/money";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -87,7 +88,7 @@ export async function commissionForPack(env: Env, session: Stripe.Checkout.Sessi
   const intent = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id ?? null;
   await addCommission(env, {
     id: session.id, affiliate, customer: user.id, kind: "pack", intent,
-    amount: (session.amount_total ?? 0) - (session.total_details?.amount_tax ?? 0), currency: session.currency || "usd",
+    amount: (session.amount_total ?? 0) - (session.total_details?.amount_tax ?? 0), currency: session.currency || CURRENCY.code,
   });
 }
 /**
@@ -243,7 +244,7 @@ adminAffiliates.post("/:id/payouts", async (c) => {
   if (available !== d.expected) throw new HTTPException(409, { message: "The balance changed meanwhile. Reload and check it again." });
   if (available <= 0) throw new HTTPException(400, { message: "Nothing to pay out." });
   const payoutId = uid();
-  const currency = (await c.env.DB.prepare("SELECT currency FROM commissions WHERE affiliate_id=? LIMIT 1").bind(id).first<{ currency: string }>())?.currency || "usd";
+  const currency = (await c.env.DB.prepare("SELECT currency FROM commissions WHERE affiliate_id=? LIMIT 1").bind(id).first<{ currency: string }>())?.currency || CURRENCY.code;
   const to = (await c.env.DB.prepare("SELECT payout_email FROM affiliates WHERE user_id=?").bind(id).first<{ payout_email: string }>())?.payout_email || "";
   await c.env.DB.batch([
     c.env.DB.prepare("INSERT INTO affiliate_payouts(id,affiliate_id,paid_to,amount,currency,reference,created_at) VALUES (?,?,?,?,?,?,?)").bind(payoutId, id, to, available, currency, d.reference, t),

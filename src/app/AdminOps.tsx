@@ -1,3 +1,4 @@
+import { SITE } from "../../shared/site";
 import { useState, type FormEvent } from "react";
 import { Activity, Gift, RefreshCw, Undo2 } from "lucide-react";
 import { Spinner, useToast } from "../ui";
@@ -166,7 +167,7 @@ type Quote = {
   withdrawal: { refund: number; refunded: number; status: string; error: string | null; created_at: number } | null;
 };
 type WithdrawalRow = { id: string; email: string | null; currency: string; paid: number; refund: number; refunded: number; status: string; error: string | null; created_at: number };
-const money = (cents: number, currency = "usd") => (cents / 100).toLocaleString("en-US", { style: "currency", currency: currency.toUpperCase() });
+const money = (cents: number, currency = "usd") => (cents / 100).toLocaleString(SITE.locale, { style: "currency", currency: currency.toUpperCase() });
 const percent = (used: number, quota: number) => (quota > 0 ? `${Math.round((Math.min(used, quota) / quota) * 100)}%` : "–");
 const statusNames: Record<string, string> = { completed: "Refunded", refund_failed: "Refund by hand", started: "In progress" };
 const subscriptionNames: Record<string, string> = { active: "active", past_due: "payment failed", unpaid: "unpaid", canceled: "cancelled", incomplete: "checkout not finished", trialing: "trial" };

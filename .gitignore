@@ -10,3 +10,5 @@ test-results/
 playwright-report/
 __pycache__/
 *.pyc
+dist-rechbg
+dist-rechbg-ssr

@@ -1,3 +1,4 @@
+import { SITE } from "../shared/site";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -480,7 +481,7 @@ const draftSchema = z.object({
   title: z.string().trim().max(140).default(""),
   mashup: z.object({ animal: z.string().trim().max(60).default(""), object: z.string().trim().max(60).default("") }).optional(),
   seconds: z.number().int().min(15).max(160).default(60),
-  language: z.enum(languageCodes as [LanguageCode, ...LanguageCode[]]).default("en"),
+  language: z.enum(languageCodes as [LanguageCode, ...LanguageCode[]]).default(SITE.narration as LanguageCode),
   voiceId: voiceIdSchema.optional(),
   style: styleEnum.optional(),
   subject: z.string().trim().max(300).default(""),

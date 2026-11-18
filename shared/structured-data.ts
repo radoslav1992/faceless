@@ -1,3 +1,5 @@
+import { localized } from "./i18n";
+import { CURRENCY } from "./money";
 import { PRODUCT } from "./brand";
 import { plans } from "./plans";
 import { faqPage } from "./faq-page";
@@ -25,11 +27,15 @@ const breadcrumbs = (origin: string, trail: [string, string][]): Thing => ({
 const product = (origin: string): Thing => ({
   "@context": context, "@type": "SoftwareApplication", name: PRODUCT.name, url: `${origin}/`,
   applicationCategory: "MultimediaApplication", operatingSystem: "Web", description: PRODUCT.pitch,
-  offers: plans.map((p) => ({ "@type": "Offer", name: p.name, price: String(p.monthly), priceCurrency: "USD", url: `${origin}/pricing` })),
+  offers: plans.map((p) => ({ "@type": "Offer", name: p.name, price: String(p.monthly), priceCurrency: CURRENCY.code.toUpperCase(), url: `${origin}/pricing` })),
 });
 
 /** The structured data of a public page (none for any other path), each item one JSON-LD document. */
 export function structuredData(path: string, origin: string): Thing[] {
+  // Addresses and types pass through untouched: only texts with a translation change.
+  return localized(englishData(path, origin));
+}
+function englishData(path: string, origin: string): Thing[] {
   const meta = pageMeta(path);
   if (!meta.indexable || !meta.route) return [];
   const route = meta.route;

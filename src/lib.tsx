@@ -1,3 +1,4 @@
+import { SITE } from "../shared/site";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Interval, PlanId } from "../shared/plans";
 import type { Spec } from "../shared/formats";
@@ -258,7 +259,7 @@ export function usePageRestored(fn: () => void) {
   saved.current = fn;
   useEffect(() => onPageRestored(window, () => saved.current()), []);
 }
-export const number = (n: number) => new Intl.NumberFormat("en-US").format(n);
+export const number = (n: number) => new Intl.NumberFormat(SITE.locale).format(n);
 export const seconds = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
 export const bytes = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
 /** "6d 23h left" */
@@ -268,7 +269,7 @@ export function timeLeft(until: number) {
 }
 export const newKey = () => crypto.randomUUID();
 /** "Mon, Oct 12, 6:00 PM" in the viewer's time zone. */
-export const when = (at: number) => new Date(at * 1000).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+export const when = (at: number) => new Date(at * 1000).toLocaleString(SITE.locale, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 /** "in 3h", "in 2d", "5m ago". */
 export function relative(at: number) {
   const d = at - Date.now() / 1000, a = Math.abs(d);

@@ -1,3 +1,4 @@
+import { SITE } from "./site";
 import { z } from "zod";
 import { captionStyles, MAX_WORD_CHARS, type CaptionStyle } from "./captions";
 import { clipCredits, highlightCredits, pictureCredits, presenterCredits, speechSeconds, videoCredits, voiceCredits, type ClipModel, type ClipQuality } from "./credits";
@@ -81,7 +82,7 @@ export const storySpec = z.object({
   kind: z.enum(videoKinds).default("story"),
   narration: narrationSchema,
   /** The narration's language (ISO 639-1), read by the AI voice. */
-  language: z.string().regex(/^[a-z]{2,3}$/).default("en"),
+  language: z.string().regex(/^[a-z]{2,3}$/).default(SITE.narration),
   scenes: z.array(storySceneSchema).min(1).max(STORY_MAX_SCENES)
     .refine((scenes) => storyScript(scenes).length <= STORY_MAX_CHARS * 2, "The script is too long for one video.")
     // A film (shared/drama.ts) is acted from its first shot to its last: its sound is its clips', with no narration to fall back on.

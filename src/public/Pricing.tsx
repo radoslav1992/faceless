@@ -1,3 +1,4 @@
+import { price } from "../../shared/money";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Check } from "lucide-react";
@@ -8,7 +9,7 @@ import { CLIP_CREDITS, CLIP_SECONDS, NARRATION_SECONDS_PER_CREDIT, PICTURES_PER_
 
 // Pricing: the plans (monthly or yearly), credit packs, what credits buy and the questions people ask about them.
 
-const money = (n: number) => (Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`);
+const money = price;
 /** The paid plans as cards with a monthly / yearly switch; `onChoose` (in the app) replaces the sign-up links. */
 export function PlanCards({ current, currentInterval, onChoose, busy }: {
   current?: string; currentInterval?: Interval; onChoose?: (plan: string, interval: Interval) => void; busy?: string | null;

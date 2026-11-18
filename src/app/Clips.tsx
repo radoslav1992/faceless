@@ -1,3 +1,4 @@
+import { SITE } from "../../shared/site";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, CalendarClock, Check, Clapperboard, Film, Link2, Play, Scissors, Sparkles, Trash2, UploadCloud } from "lucide-react";
@@ -506,7 +507,7 @@ function ScheduleClips({ clips, onClose, onDone }: { clips: Video[]; onClose: ()
               <label key={c.id} className="check">
                 <input type="checkbox" checked={videos.includes(c.id)} onChange={(e) => setVideos(e.target.checked ? [...videos, c.id] : videos.filter((x) => x !== c.id))} />
                 <span className="grow">{c.title || c.hook || "Clip"}</span>
-                <span className="muted small">{i >= 0 && start ? new Date((start + i * hours * 3600) * 1000).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : ""}</span>
+                <span className="muted small">{i >= 0 && start ? new Date((start + i * hours * 3600) * 1000).toLocaleString(SITE.locale, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : ""}</span>
               </label>
             );
           })}

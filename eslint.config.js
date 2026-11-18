@@ -6,7 +6,7 @@ import globals from "globals";
 
 // Focused on bugs rather than style: hook rules, accessibility and unsafe patterns.
 export default tseslint.config(
-  { ignores: ["dist", ".wrangler", "node_modules", "renderer", ".claude"] },
+  { ignores: ["dist", "dist-ssr", "dist-rechbg", "dist-rechbg-ssr", ".wrangler", "node_modules", "renderer", ".claude"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

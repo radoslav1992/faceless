@@ -1,3 +1,5 @@
+import { SITE } from "../shared/site";
+import { CURRENCY, price as amount } from "../shared/money";
 import Stripe from "stripe";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -16,6 +18,13 @@ export function stripe(env: Env) {
   if (!env.STRIPE_SECRET_KEY) throw new HTTPException(503, { message: "Payments are not set up yet." });
   return new Stripe(env.STRIPE_SECRET_KEY, { httpClient: Stripe.createFetchHttpClient(), maxNetworkRetries: 2 });
 }
+/**
+ * Whether checkout works out tax and asks for the billing address (and a business's tax number). Hookstreak turns
+ * it on with STRIPE_AUTOMATIC_TAX; Реч БГ always does: its prices include VAT and its invoices need the address.
+ */
+const collectsTax = (e: Env) => e.STRIPE_AUTOMATIC_TAX === "true" || SITE.id === "rechbg";
+/** Stripe's checkout page in the site's language: Bulgarian on Реч БГ, the visitor's own on Hookstreak. */
+const CHECKOUT_LANGUAGE = SITE.id === "rechbg" ? { locale: "bg" as const } : {};
 /** A renewing subscription keeps its last paid period this long while Stripe collects the new invoice. */
 export const RENEWAL_GRACE = 3 * DAY;
 /** Subscriptions an administrator granted (testers, partners): no Stripe behind them, see plan-grants.ts. */
@@ -243,13 +252,14 @@ billing.post("/checkout", async (c) => {
   if (!id) throw new HTTPException(503, { message: "This plan is temporarily unavailable." });
   const p = await s.prices.retrieve(id);
   const chosen = planById(plan);
-  if (!p.active || p.currency !== "usd" || p.unit_amount !== (every === "year" ? chosen.yearly : chosen.monthly) * 100 || p.recurring?.interval !== every || p.recurring.interval_count !== 1)
+  if (!p.active || p.currency !== CURRENCY.code || p.unit_amount !== (every === "year" ? chosen.yearly : chosen.monthly) * 100 || p.recurring?.interval !== every || p.recurring.interval_count !== 1)
     throw new HTTPException(503, { message: "This plan is being updated. Please try again later." });
-  const tax = c.env.STRIPE_AUTOMATIC_TAX === "true";
+  const tax = collectsTax(c.env);
   const session = await s.checkout.sessions.create(
     {
       mode: "subscription",
       customer,
+      ...CHECKOUT_LANGUAGE,
       expires_at: intent.expires_at,
       line_items: [{ price: id, quantity: 1 }],
       allow_promotion_codes: true,
@@ -294,8 +304,9 @@ billing.post("/topup", async (c) => {
     {
       mode: "payment",
       customer,
-      line_items: [{ quantity: 1, price_data: { currency: "usd", unit_amount: pack.price * 100, product_data: { name: `${pack.credits} credits — ${PRODUCT.name}` } } }],
-      ...(c.env.STRIPE_AUTOMATIC_TAX === "true" && { automatic_tax: { enabled: true }, billing_address_collection: "required" as const, customer_update: { address: "auto" as const, name: "auto" as const } }),
+      ...CHECKOUT_LANGUAGE,
+      line_items: [{ quantity: 1, price_data: { currency: CURRENCY.code, unit_amount: pack.price * 100, product_data: { name: `${pack.credits} credits — ${PRODUCT.name}` } } }],
+      ...(collectsTax(c.env) && { automatic_tax: { enabled: true }, billing_address_collection: "required" as const, customer_update: { address: "auto" as const, name: "auto" as const } }),
       client_reference_id: u.id,
       custom_text: { submit: { message: "Credits are added to your account as soon as the payment goes through, and roll over while your plan runs." } },
       metadata,
@@ -321,7 +332,7 @@ export async function creditTopup(e: Env, session: Stripe.Checkout.Session) {
   const intent = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id ?? null;
   await e.DB.batch([
     e.DB.prepare("INSERT OR IGNORE INTO credit_topups(session_id,user_id,pack,credits,amount,currency,payment_intent,created_at) VALUES (?,?,?,?,?,?,?,?)")
-      .bind(session.id, user.id, pack.id, pack.credits, session.amount_total ?? pack.price * 100, session.currency || "usd", intent, now()),
+      .bind(session.id, user.id, pack.id, pack.credits, session.amount_total ?? pack.price * 100, session.currency || CURRENCY.code, intent, now()),
     e.DB.prepare("UPDATE usage_windows SET quota=quota+?1,topped=topped+?1 WHERE id=?2 AND EXISTS(SELECT 1 FROM credit_topups WHERE session_id=?3 AND window_id IS NULL)")
       .bind(pack.credits, a.window, session.id),
     e.DB.prepare("UPDATE credit_topups SET window_id=? WHERE session_id=? AND window_id IS NULL").bind(a.window, session.id),
@@ -494,7 +505,7 @@ export async function confirmContract(e: Env, sessionId: string) {
   if (!row) return;
   const [planId, every] = row.plan.split(":");
   const plan = plans.find((p) => p.id === planId);
-  const price = plan ? (every === "year" ? `$${plan.yearly} a year` : `$${plan.monthly} a month`) : "";
+  const price = plan ? (every === "year" ? `${amount(plan.yearly)} a year` : `${amount(plan.monthly)} a month`) : "";
   const site = (e.SITE_URL || "").replace(/\/$/, "");
   const when = new Date(row.created_at * 1000).toUTCString();
   const contact = e.CONTACT_EMAIL ? `by email to ${e.CONTACT_EMAIL} or ` : "";

@@ -1,3 +1,4 @@
+import { SITE } from "../../shared/site";
 import { useState, type FormEvent } from "react";
 import { Check, Copy, HandCoins, Link2, Pencil } from "lucide-react";
 import { Spinner, useToast } from "../ui";
@@ -18,7 +19,7 @@ type Data = {
   commissions?: Commission[];
   payouts?: { id: string; amount: number; currency: string; createdAt: number }[];
 };
-const money = (cents: number, currency = "usd") => (cents / 100).toLocaleString("en-US", { style: "currency", currency: currency.toUpperCase() });
+const money = (cents: number, currency = "usd") => (cents / 100).toLocaleString(SITE.locale, { style: "currency", currency: currency.toUpperCase() });
 const kindNames: Record<Commission["kind"], string> = { plan: "Plan payment", pack: "Credit pack", reversal: "Refund taken back" };
 const percent = `${Math.round(AFFILIATE_RATE * 100)}%`;
 

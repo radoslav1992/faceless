@@ -1,3 +1,4 @@
+import { t as say } from "../../shared/i18n";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -141,7 +142,7 @@ export function ToolPage() {
           {t.kind !== "script" && t.kind !== "mashup" && (
             <div className="row wrap" style={{ marginTop: 14 }}>
               <span className="muted small">Ideas:</span>
-              {t.examples.map((x) => <button key={x} type="button" className="chip button" onClick={() => setPrompt(x)}>{x}</button>)}
+              {t.examples.map((x) => <button key={x} type="button" className="chip button" onClick={() => setPrompt(say(x))}>{x}</button>)}
             </div>
           )}
         </div>
@@ -172,7 +173,7 @@ export function ToolPage() {
                 {copy.ideas.map((idea) => (
                   <li key={idea}>
                     {t.kind === "script" ? <span>{idea}</span>
-                      : <button type="button" className="text-link" onClick={() => start(tool.id, idea)}>{idea} <ArrowRight size={15} aria-hidden="true" /></button>}
+                      : <button type="button" className="text-link" onClick={() => start(tool.id, say(idea))}>{idea} <ArrowRight size={15} aria-hidden="true" /></button>}
                   </li>
                 ))}
               </ul>

@@ -1,3 +1,4 @@
+import { CURRENCY } from "../shared/money";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -30,7 +31,7 @@ async function quote(e: Env, address: string) {
   const invoices = (await s.invoices.list({ subscription: sub.id, status: "paid", limit: 24, expand: ["data.payments"] })).data
     .sort((a, b) => b.created - a.created);
   const payments: Payment[] = [];
-  let currency = "usd";
+  let currency: string = CURRENCY.code;
   for (const invoice of invoices)
     for (const p of invoice.payments?.data ?? []) {
       const intent = p.payment.payment_intent;

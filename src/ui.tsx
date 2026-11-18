@@ -1,3 +1,4 @@
+import { SITE } from "../shared/site";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { CheckCircle2, X, AlertCircle } from "lucide-react";
@@ -7,6 +8,12 @@ import { PRODUCT } from "../shared/brand";
 
 /** The mark: a ghost whose face is a play button. Same drawing as public/favicon.svg. */
 export function LogoMark({ size = 22 }: { size?: number }) {
+  // Реч БГ's mark: four bars of a sound wave.
+  if (SITE.id === "rechbg") return (
+    <svg width={size} height={size} viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="7" strokeLinecap="round" aria-hidden="true">
+      <path d="M13 26v12M26 14v36M39 21v22M52 28v8" />
+    </svg>
+  );
   return (
     // Hookstreak's mark: a hook whose point turns into an upward streak. Same drawing as public/favicon.svg.
     <svg width={size} height={size} viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

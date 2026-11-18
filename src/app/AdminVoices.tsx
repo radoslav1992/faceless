@@ -1,3 +1,4 @@
+import { SITE } from "../../shared/site";
 import { useState, type FormEvent } from "react";
 import { ArrowDown, ArrowUp, AudioLines, Mic, Pencil, Plus, Search, Star, Trash2 } from "lucide-react";
 import { Modal, Spinner, Switch, useToast } from "../ui";
@@ -16,7 +17,7 @@ type Account = {
   setting: number; clones: number; removals: number; problem: string | null; others: number | null; slots: number | null; room: number; left: number;
   account: { tier: string; creditsUsed: number | null; creditsLimit: number | null; creditsReset: number | null; voiceSlotsUsed: number | null; voiceSlots: number | null; canClone: boolean | null } | null;
 };
-const count = (n: number) => n.toLocaleString("en-US");
+const count = (n: number) => n.toLocaleString(SITE.locale);
 /**
  * The ElevenLabs account behind every narration: how much of the period's credits is used (narration stops when they
  * run out), its voice slots, and the room customers' cloned voices have.
@@ -27,7 +28,7 @@ function AccountPanel() {
   if (!data) return null;
   const a = data.account;
   const used = a?.creditsUsed != null && a.creditsLimit ? a.creditsUsed / a.creditsLimit : null;
-  const reset = a?.creditsReset ? new Date(a.creditsReset * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
+  const reset = a?.creditsReset ? new Date(a.creditsReset * 1000).toLocaleDateString(SITE.locale, { month: "short", day: "numeric" }) : null;
   const held = data.clones + data.removals;
   return (
     <section aria-labelledby="eleven-title" className="stack" style={{ gap: 12 }}>

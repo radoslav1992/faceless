@@ -1,3 +1,4 @@
+import { SITE } from "../../shared/site";
 import { useState } from "react";
 import { HandCoins, PhoneCall } from "lucide-react";
 import { Modal, Spinner, Switch, useToast } from "../ui";
@@ -14,7 +15,7 @@ type AdminAffiliate = {
 };
 type AdminCommission = { id: string; kind: string; amount: number; commission: number; currency: string; status: string; createdAt: number; availableAt: number; customer: string };
 type Call = { userId: string; email: string; name: string; plan: string; status: "requested" | "done" | "missed"; credits: number; notes: string; requestedAt: number; doneAt: number | null };
-const money = (cents: number, currency = "usd") => (cents / 100).toLocaleString("en-US", { style: "currency", currency: currency.toUpperCase() });
+const money = (cents: number, currency = "usd") => (cents / 100).toLocaleString(SITE.locale, { style: "currency", currency: currency.toUpperCase() });
 
 export function GrowthTab() {
   return (
