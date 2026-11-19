@@ -10,14 +10,14 @@ import {
 import type { CaptionWord } from "../shared/captions";
 
 // Speech in uploaded videos and tracks: an owner's own voiceover is timed by its words for subtitles and scenes.
-// ElevenLabs Scribe v2 (the pipeline rech-bg runs in production) gets the file uploaded from storage (streamed, never
+// ElevenLabs Scribe v3 (the same request and answer as v2, which it succeeds) gets the file uploaded from storage (streamed, never
 // held in memory, so nothing depends on ElevenLabs reaching this site) and returns word timings in the language it
 // detects. The words are kept in the file's meta
 // (bounded); failures only mean "no subtitles", never a failed upload. Files up to 10 minutes are transcribed for
 // free, bounded per person and day (files and minutes); longer videos (for clips) on request, for credits (a run of
 // kind "speech").
 
-export const SCRIBE_MODEL = "scribe_v2";
+export const SCRIBE_MODEL = "scribe_v3";
 export const SCRIBE_URL = "https://api.elevenlabs.io/v1/speech-to-text";
 /** Free transcriptions per person and day (automatic ones after uploads and "Find speech" together): files… */
 export const SPEECH_FILES_PER_DAY = 20;
