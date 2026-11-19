@@ -108,7 +108,13 @@ and its own; nothing is shared with Hookstreak.
 | Renderer (Durable Object migration) | `renderer-v1` | `media-v1`: the class exists in that Worker since the earlier app |
 | App files | `dist` | `dist-rechbg` |
 | Address | hookstreak.app | rechbg.com |
-| Deploy | every push to `main` (Actions → Deploy) | by hand only: Actions → **Deploy Реч БГ**, or `npm run deploy:rechbg` |
+| Deploy | every push to `main` (Actions → Deploy) | every push to the branch `rechbg` (Actions → Deploy Реч БГ), which can also be run by hand; or `npm run deploy:rechbg` |
+
+**The branch `rechbg` is Реч БГ's release.** It does not exist until the site is ready to go live: creating it from
+`main` is the first deploy. After that, Реч БГ is updated by merging `main` into `rechbg` (a pull request from `main`
+to `rechbg`, or `git push origin main:rechbg` when it fast-forwards). A merge to `main` alone never touches Реч БГ,
+which leaves time to translate the texts a change added (`node scripts/extract-texts.mjs --missing`) before it
+reaches the Bulgarian site.
 
 **The first deploy replaces the earlier app at rechbg.com at once.** There is no separate address to try it on
 first. Accounts, projects and files of the earlier app are not carried over: its database (`rech-bg`) and bucket

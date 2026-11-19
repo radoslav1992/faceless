@@ -1,9 +1,12 @@
 name: Deploy Реч БГ
 # Реч БГ, the second site built from this code (docs/SITES.md): its Worker (rech-bg), the renderer container and its
-# database's migrations. By hand only (Actions → Deploy Реч БГ → Run workflow): a push to main deploys Hookstreak alone.
-# Uses the same CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets as Deploy; the token must also cover D1 and the
-# rechbg.com zone.
+# database's migrations. Runs on every push to the branch `rechbg`, and by hand (Actions → Deploy Реч БГ → Run
+# workflow). A push to main deploys Hookstreak alone: Реч БГ gets main's changes when main is merged into `rechbg`,
+# so new English texts can be translated first. Uses the same CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets
+# as Deploy; the token must also cover D1 and the rechbg.com zone.
 on:
+  push:
+    branches: [rechbg]
   workflow_dispatch:
 permissions:
   contents: read
