@@ -9,7 +9,7 @@ import { safeEqual, token } from "./security";
 import { extOf, head, imageInfo, mediaKey, serveObject, storedDuration, storeStream } from "./storage";
 import { keepSeriesCharacter, seriesCharacter } from "./characters";
 import { fetchOutput } from "./providers/http";
-import { canFallBack, clipModelFor, falResult, falStatus, referenceModel, submitFal, submitFalLipSync, submitFalShot, type FalTicket, type Reference } from "./providers/fal";
+import { canFallBack, clipModelFor, falResult, falStatus, referenceModel, submitFal, submitFalLipSync, submitFalAdShot, submitFalShot, type FalTicket, type Reference } from "./providers/fal";
 import { isAdmin } from "./auth";
 import { forcedAlignment, speak, speakDialogue, wav } from "./providers/elevenlabs";
 import { avatarVideoStatus, heygenClipRequest, heygenClipStatus, heygenRetry, submitAvatarVideo, submitHeyGenClip } from "./providers/heygen";
@@ -207,7 +207,7 @@ async function generateMedia(
     const length = m.cutaway ? await clipLength(e, run, m, 2) : 0;
     if (fallback && !canFallBack(e, refs.length > 0)) throw new Error("GENERATION_REJECTED");
     // A model chosen for the scene counts only when its owner is an administrator who may choose it.
-    const clipModel = kind === "clip" && !m.lipSync && !m.acted && !m.cutaway ? instead ?? await sceneClipModel(e, run, m) : undefined;
+    const clipModel = kind === "clip" && !m.lipSync && !m.acted && !m.cutaway && !m.product ? instead ?? await sceneClipModel(e, run, m) : undefined;
     await patchState(e, run.id, (s) => { (s.claims ||= {})[name] = true; });
     await phase(kind === "clip" ? "clip" : "images");
     // A talking scene: its picture, lip-synced to its stretch of the voice (made before this, shared/drama.ts).
@@ -218,6 +218,9 @@ async function generateMedia(
       // A film's cutaway: its picture brought to life without speech, by the same model as the shots around it.
       : m.cutaway
       ? await submitFalShot(e, { image: image ?? await sourcePicture(e, run, m), prompt: m.prompt, seconds: length, sheet })
+      // An ad's shot: its picture filmed with the photos of the product (shared/ad.ts), which `references` gives.
+      : m.product && kind === "clip"
+      ? await submitFalAdShot(e, { image: image ?? await sourcePicture(e, run, m), prompt: m.prompt, seconds: m.seconds ?? CLIP_SECONDS, photos: refs.map((r) => r.url), name: await productName(e, run) })
       : m.lipSync
       ? await submitFalLipSync(e, image ?? await sourcePicture(e, run, m), await lineAudio(e, run, m))
       : clipModel === "heygen-video-1" && image
@@ -309,7 +312,10 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
       // A film's shot comes with its take: where its line is in the clip, and when each word is said.
       const shot = m.acted ? await makeTake(e, step, run, `ai-${i}`, m, phase) : null;
       const assetId = shot ? shot.assetId : m.kind === "image"
-        ? await drawPicture(e, step, run, `ai-${i}`, m, phase, () => referencePictures(e, run, sheets, first.scenes[m.path[1] as number]?.place))
+        // An ad's pictures are drawn from the photos of its product; any other from the video's reference sheets.
+        ? await drawPicture(e, step, run, `ai-${i}`, m, phase, () => (m.product ? productPhotos(e, run, first) : referencePictures(e, run, sheets, first.scenes[m.path[1] as number]?.place)))
+        // An ad's shot is filmed from its picture with the same photos.
+        : m.product ? await generateMedia(e, step, run, `ai-${i}`, m, phase, () => sourcePicture(e, run, m), () => productPhotos(e, run, first))
         : m.lipSync || m.cutaway ? await generateMedia(e, step, run, `ai-${i}`, m, phase, () => sourcePicture(e, run, m))
           : await makeClip(e, step, run, `ai-${i}`, m, phase, models.get(i)!, m.from ? () => sourcePicture(e, run, m) : undefined);
       await step.do(`ai-${i}-apply`, async () => updateSpec(e, videoId, (spec) => {
@@ -324,7 +330,7 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
   // the voice's clock (HeyGen bills by the second). Every other clip is made before it, like the pictures: one refused
   // stops the run before the voice is paid for.
   const models = new Map<number, ClipModel>();
-  for (const [i, m] of pending.entries()) if (m.kind === "clip" && !m.lipSync && !m.acted && !m.cutaway) models.set(i, await step.do(`ai-${i}-model`, () => sceneClipModel(e, run, m)));
+  for (const [i, m] of pending.entries()) if (m.kind === "clip" && !m.lipSync && !m.acted && !m.cutaway && !m.product) models.set(i, await step.do(`ai-${i}-model`, () => sceneClipModel(e, run, m)));
   // A lip-synced clip is made from its scene's stretch of the voice, so after it too (it has no model to choose); so
   // is a film's cutaway, asked for as long as its scene is on the voice's clock.
   const afterVoice = (m: PendingMedia, i: number) => m.kind === "clip" && !!m.from && (!!m.lipSync || !!m.cutaway || models.get(i) === "heygen-video-1");
@@ -617,6 +623,27 @@ async function referencePictures(e: Env, run: RunInfo, sheets: Sheets, place = "
   return refs;
 }
 
+/**
+ * The photos of an ad's product (shared/ad.ts) as capability links, in the owner's order: what its pictures are drawn
+ * from and its shots filmed with. They are the owner's own uploads, checked when the video was saved (server/videos.ts).
+ */
+async function productPhotos(e: Env, run: RunInfo, spec: StorySpec): Promise<Reference[]> {
+  const ids = spec.product?.assets ?? [];
+  if (!ids.length) return [];
+  const rows = (await e.DB.prepare(`SELECT id,object_key FROM media_assets WHERE user_id=? AND status='ready' AND mime LIKE 'image/%' AND id IN (${ids.map(() => "?").join(",")})`)
+    .bind(run.user_id, ...ids).all<{ id: string; object_key: string }>()).results;
+  const keys = new Map(rows.map((r) => [r.id, r.object_key]));
+  // A photo deleted since: the ad can't show the product without it.
+  if (ids.some((id) => !keys.has(id))) throw new Error("MEDIA_INPUT");
+  const refs: Reference[] = [];
+  for (const id of ids) refs.push({ url: await inputUrl(e, run.id, keys.get(id)!), role: "product" });
+  return refs;
+}
+/** What the ad's product is called, for the video model (empty when the owner gave no name). */
+async function productName(e: Env, run: RunInfo) {
+  const spec = await loadSpec(e, run.video_id);
+  return isHighlight(spec) ? "" : spec.product?.name ?? "";
+}
 /** Whether the run's owner is an administrator, who may choose a scene's clip model (FAL_CLIP_MODEL_ADMIN). */
 async function ownerIsAdmin(e: Env, userId: string) {
   const user = await e.DB.prepare("SELECT * FROM users WHERE id=?").bind(userId).first<DbUser>();

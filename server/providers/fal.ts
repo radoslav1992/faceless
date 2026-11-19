@@ -1,4 +1,5 @@
 import type { Env } from "../types";
+import { PRODUCT_PHOTOS_MAX, productNote } from "../../shared/ad";
 import { CLIP_SECONDS, clipModels, isClipModel, type ClipModel, type ClipQuality } from "../../shared/credits";
 import { failureCode, falQueueUrl, providerFetch, ProviderError } from "./http";
 import { heygenEnabled } from "./heygen";
@@ -78,19 +79,24 @@ export type FalOptions = {
 /**
  * A reference sheet of the video a picture is drawn from (shared/formats.ts pictureSheets): what its recurring
  * characters look like ("character"), how the place the scene is set in is built ("place"), or, in a film, the
- * master shot of the scene the shot belongs to ("scene").
+ * master shot of the scene the shot belongs to ("scene"). An ad's pictures (shared/ad.ts) are drawn from the owner's
+ * photos of the product instead ("product").
  */
-export type Reference = { url: string; role: "character" | "place" | "scene" };
+export type Reference = { url: string; role: "character" | "place" | "scene" | "product" };
 const referenceUse: Record<Reference["role"], string> = {
   character: "shows only what the recurring characters look like: draw the ones this scene shows with exactly these faces, hair, bodies, clothing and colours, but in the pose, action and place this scene describes, never standing as in the reference; leave out any it does not mention.",
   place: "shows only how the place is built: keep its layout, walls, floor, furniture, objects, light and colours, but put the camera where this scene says and frame the picture anew; never copy the reference's view.",
   // A film's master shot (shared/story.ts masterShotPrompt): the new picture is another camera's view of the same moment.
   scene: "is the master shot of this very scene, seen from further back: the new picture is the same moment from the camera position this scene describes. Keep the same room with its walls, furniture, objects, light and colours, and the same people in the same clothes, in the same spots, holding the same things; only the camera moves (closer, from another side). Never copy the reference's framing, and leave out anyone this scene does not mention.",
+  // An ad's product (shared/ad.ts): the owner's photo of it. The picture is a new scene with that very product in it.
+  product: "is a photo of the product this ad is for: draw exactly this product, with the same shape, proportions, colours, materials, label and logo, in the scene described, at its natural size and lit by the scene's light; never redesign it, never copy the photo's background or framing.",
 };
 /** How the references are used, after the scene: each only for what it shows, never as the picture to draw. */
 export function referencePrompt(references: Reference[]) {
   const uses = references.length === 1 ? [`The reference picture ${referenceUse[references[0].role]}`]
     : references.map((r, i) => `Reference picture ${i + 1} ${referenceUse[r.role]}`);
+  // A product's photo gives the product, not the look: the scene keeps its own style and light.
+  if (references.every((r) => r.role === "product")) return uses.join(" ");
   return `${uses.join(" ")} Match the art style and colours of the reference${references.length === 1 ? "" : "s"}.`;
 }
 /**
@@ -101,9 +107,12 @@ const nanoBanana = (model: string, prompt: string, imageUrls?: string[]) => ({
   prompt, ...(imageUrls && { image_urls: imageUrls }), num_images: 1, aspect_ratio: "9:16", resolution: "1K", output_format: "jpeg", limit_generations: true,
   ...(model.startsWith(NANO_BANANA_21_MODEL) && { safety_tolerance: "5" }),
 });
+/** What may be written in an ad's picture: the product's own label and logo, as on its photos, and nothing else. */
+export const PRODUCT_TEXT = "The product keeps its own label and logo exactly as in the photos; no other text, captions, logos or watermarks in the picture.";
 /** The model and its input (pure, for tests). Pictures are portrait 9:16 for short-form; no text is drawn in them. */
 export function falRequest(kind: "image" | "clip", prompt: string, options: FalOptions = {}) {
-  const text = `${prompt.trim()} No text, captions, logos or watermarks in the picture.`;
+  // An ad's product keeps its own label and logo (shared/ad.ts); nothing else is ever written in a picture.
+  const text = `${prompt.trim()} ${options.references?.some((r) => r.role === "product") ? PRODUCT_TEXT : "No text, captions, logos or watermarks in the picture."}`;
   if (kind === "image") {
     if (options.references?.length) {
       const model = options.referenceModel || REFERENCE_MODEL;
@@ -182,6 +191,21 @@ export const shotRequest = (shot: { image: string; prompt: string; seconds: numb
     ...(shot.voice && { reference_audio_urls: [shot.voice] }), ...(shot.sheet && { reference_image_urls: [shot.sheet] }),
   },
 });
+/**
+ * An ad's shot (shared/ad.ts): the same model films the shot's picture (its first frame, which gives the clip its
+ * 9:16 shape) with the owner's photos of the product as its reference images, the prompt's "Image 1" onwards, so the
+ * product keeps its shape, colours and label as the camera or a hand moves. Its own sound comes with it; nobody
+ * speaks (the ad's voiceover is recorded apart). Up to four photos fit the request's free allowance of references.
+ */
+export const adShotRequest = (shot: { image: string; prompt: string; seconds: number; photos: string[]; name?: string }) => ({
+  model: SHOT_MODEL,
+  body: {
+    prompt: shot.photos.length ? `${shot.prompt} ${productNote(shot.photos.length, shot.name)}` : shot.prompt, image_url: shot.image, duration: Math.min(15, Math.max(1, shot.seconds)),
+    resolution: "768P", prompt_expansion_mode: "balanced", ...(shot.photos.length && { reference_image_urls: shot.photos.slice(0, PRODUCT_PHOTOS_MAX) }),
+  },
+});
+/** Submits an ad's shot once (a ticket like any clip's). */
+export const submitFalAdShot = (e: Env, shot: Parameters<typeof adShotRequest>[0]) => { const { model, body } = adShotRequest(shot); return submitQueue(e, model, body); };
 /** Submits a shot once (a ticket like any clip's: its status and result are read the same way). */
 export const submitFalShot = (e: Env, shot: Parameters<typeof shotRequest>[0]) => { const { model, body } = shotRequest(shot); return submitQueue(e, model, body); };
 /** Submits once; the caller stores the ticket before anything else so a retry polls instead of paying again. */

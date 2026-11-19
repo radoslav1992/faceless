@@ -5,15 +5,16 @@ import { planRender, type PlanContext } from "../server/render-plan";
 import { acceptScenePlan, acceptStory, conceptToSpec, OWNER_RULE, storyShape } from "../server/story";
 import { acceptNewSounds, acceptSounds, rankSounds } from "../server/sounds";
 import { alignedWords, ALIGNMENT_URL, forcedAlignment, languageCode, speak, SPEECH_MODEL } from "../server/providers/elevenlabs";
-import { adminClipModels, clipModelFor, falRequest, referenceModel, referencePrompt, submitFal } from "../server/providers/fal";
+import { adminClipModels, clipModelFor, falRequest, PRODUCT_TEXT, referenceModel, referencePrompt, submitFal } from "../server/providers/fal";
 import { heygenClipRequest, heygenRetry } from "../server/providers/heygen";
 import { attention } from "../server/operations";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 import { languages, seriesSettingsSchema } from "../shared/series";
 import { FILM_AMBIENCE, filmSpec } from "../shared/film";
+import { AD_CLIP_QUALITY, adCredits, adSpec } from "../shared/ad";
 import { lipSyncSpec, shotSeconds, shotsSpec, takeKey, takeOf, voiceSampleText } from "../shared/drama";
 import { SCRIBE_URL } from "../server/speech";
-import { filmClock, estimatedSeconds, narrationCurrent, pendingMedia, pictureSheets, specCredits, specSchema, storySpec, type StorySpec } from "../shared/formats";
+import { filmClock, estimatedSeconds, narrationCurrent, pendingMedia, pictureSheets, referencedAssets, specCredits, specSchema, storySpec, type StorySpec } from "../shared/formats";
 import {
   AUTO_TRANSITIONS, characterSheetKey, clipFor, estimatedTimings, mergeScenes, moveEdge, narrationKey, placeOf, splitScene, toggleKey, resolveTransition, scenePrompt, scenesFromCounts, splitScenes, storyScript, storySegments,
   storyStyleIds, storyStyles, storyTiming, textWords, timedScript, transitionInfo, transitionKinds, voicedScript, FPS, STORY_MAX_SCENES,
@@ -991,6 +992,93 @@ describe("narrated videos in the content run", () => {
     const plain = planRender({ ...video.spec, film: undefined }, { media, narration, watermark: "" } as PlanContext).compose;
     expect(plain.look).toBeUndefined();
     expect(plain.segments.every((s) => !s.audio)).toBe(true);
+  });
+
+  it("makes a product ad for an administrator: shots drawn and filmed with the product's photos, their sound under the voice, no film look", async () => {
+    const { env, sqlite, user, own, run } = await setup();
+    const product = { assets: [own], name: "Aqua Steel" };
+    const brief = { template: "ad", prompt: "A steel water bottle that keeps drinks cold for 24 hours", seconds: 15, product };
+    const lines = ["Hot day, warm water again?", "Aqua Steel keeps your drink cold for 24 hours.", "Try it today."];
+    env.AI.run = async () => ({ status: "completed", output_text: JSON.stringify({
+      title: "Aqua Steel", topic: "steel bottle", caption: "Cold for a whole day.", hashtags: ["bottle"], headline: "Aqua Steel", subject: "", look: "A bright kitchen in the morning.", places: [], music: "",
+      scenes: lines.map((text, n) => ({ text, picture: `A hand lifts the product from a table, shot ${n + 1}`, keys: [], tone: "", place: "" })),
+    }) });
+    // A test: nobody but an administrator drafts one, or makes one drafted elsewhere.
+    expect((await call(worker, env, "POST", "/api/story/draft", brief, user.cookie)).status).toBe(403);
+    const plain = specSchema.parse({ format: "story", narration: { kind: "voice", voiceId: "george" }, scenes: lines.map((text, n) => ({ text, description: `A hand lifts the product, shot ${n + 1}`, keys: [] })) }) as StorySpec;
+    const ad = adSpec(plain, product);
+    const refused = await call(worker, env, "POST", "/api/videos", { spec: ad, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(refused.status).toBe(403);
+    expect(refused.data.error).toBe("Product ads are still being tested and aren't available yet.");
+    sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
+    // It needs a photo of the product and what the product is.
+    expect((await call(worker, env, "POST", "/api/story/draft", { ...brief, product: undefined }, user.cookie)).data.error).toBe("Add a photo of the product first.");
+    expect((await call(worker, env, "POST", "/api/story/draft", { ...brief, prompt: "" }, user.cookie)).data.error).toBe("Say what the product is first.");
+    // The draft: an ad with its product, every scene a filmed shot on a cut, no character of the writer's, no library sounds.
+    const draft = await call(worker, env, "POST", "/api/story/draft", brief, user.cookie);
+    expect(draft.status).toBe(200);
+    expect(draft.data.spec).toMatchObject({ kind: "ad", film: true, product, subject: "", backdrop: null, presenter: null, headline: { text: "Aqua Steel" } });
+    expect(draft.data.spec.sounds).toBeUndefined();
+    expect(draft.data.spec.scenes.map((s: any) => [s.text, s.source, s.transition, s.clipQuality, s.clipSeconds])).toEqual(lines.map((text) => [text, "clip", "cut", AD_CLIP_QUALITY, 5]));
+    // An ad is its kind and its photos together, made of filmed shots.
+    expect(specSchema.safeParse({ ...ad, product: undefined }).success).toBe(false);
+    expect(specSchema.safeParse({ ...ad, kind: "story" }).success).toBe(false);
+    expect(specSchema.safeParse({ ...ad, film: undefined }).success).toBe(false);
+    expect(specSchema.safeParse({ ...ad, product: { assets: [own, own] } }).success).toBe(false);
+    // Drawn from the photos alone (no sheets), which are kept with the video; priced as the video plus its shots.
+    expect(pictureSheets(ad)).toEqual([]);
+    expect(referencedAssets(ad)).toContain(own);
+    expect(specCredits(ad, true)).toBe(videoCredits(estimatedSeconds(ad)) + 3 * CLIP_CREDITS[AD_CLIP_QUALITY]);
+    expect(adCredits(15)).toBe(1 + 3 * CLIP_CREDITS[AD_CLIP_QUALITY]);
+    // The photos must be the owner's pictures.
+    const stranger = await call(worker, env, "POST", "/api/videos", { spec: { ...ad, product: { assets: [crypto.randomUUID()], name: "" } }, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(stranger.status).toBe(400);
+    const calls = providers();
+    const created = await call(worker, env, "POST", "/api/videos", { spec: ad, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(created.status).toBe(201);
+    await run();
+    const video = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
+    expect(video.renderStatus).toBe("ready");
+    expect(video.spec).toMatchObject({ kind: "ad", product });
+    const fal = calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/"));
+    // Each shot's picture: drawn with the photo as its reference, the product kept as it is, its label allowed.
+    const stills = fal.filter((c) => /^Draw a new picture of this scene/.test(c.body.prompt));
+    expect(stills).toHaveLength(3);
+    for (const c of stills) {
+      expect(c.url).toBe(`https://queue.fal.run/${referenceModel(env)}`);
+      expect(c.body.image_urls).toHaveLength(1);
+      expect(c.body.image_urls[0]).toMatch(/^https:\/\/app\.test\/api\/render-inputs\//);
+      expect(c.body.prompt).toContain("The product (Aqua Steel) is the one in the reference photos");
+      expect(c.body.prompt).toContain(PRODUCT_TEXT);
+      expect(c.body.prompt).toContain("The reference picture is a photo of the product this ad is for");
+      expect(c.body.prompt).not.toContain("No text, captions, logos or watermarks in the picture.");
+      expect(c.body.prompt).not.toContain("Match the art style");
+    }
+    expect(stills[0].body.prompt).toContain("Composed as a close-up product shot from an advertisement");
+    // Each shot: its picture filmed by the films' model with the photo, asked for its own sound and nothing spoken.
+    const shots = fal.filter((c) => c.url === "https://queue.fal.run/minimax/h3-max/reference-to-video");
+    expect(shots).toHaveLength(3);
+    for (const c of shots) {
+      expect(c.body).toMatchObject({ duration: 5, resolution: "768P", prompt_expansion_mode: "balanced" });
+      expect(c.body.image_url).toMatch(/^https:\/\/app\.test\/api\/render-inputs\//);
+      expect(c.body.reference_image_urls).toEqual(stills[0].body.image_urls);
+      expect(c.body.prompt).toContain("Image 1 is a photo of the product (Aqua Steel): keep it looking exactly as in it");
+      expect(c.body.prompt).toContain("no speech, no voices and no music.");
+    }
+    expect(shots[0].body.prompt).toMatch(/^A hand lifts the product, shot 1\. A slow push-in on the product\./);
+    expect(fal).toHaveLength(6);
+    // The voiceover is recorded as for any video.
+    expect(calls.filter((c) => c.url.includes("/v1/text-to-speech/"))).toHaveLength(1);
+    // The render: the shots' own sound quietly under the voice on hard cuts, and the product's colours left alone.
+    const narration = { key: "media/u/voice.wav", duration: 12, words: video.spec.generated.words };
+    const media = Object.fromEntries(video.spec.scenes.flatMap((s: any) => [s.clipId, s.imageId]).filter(Boolean)
+      .map((id: string, n: number) => [id, { key: `media/u/${n}`, kind: video.spec.scenes.some((s: any) => s.clipId === id) ? "video" : "image", duration: 5, width: 1080, height: 1920, ai: true }]));
+    media[own] = { key: `media/${user.id}/${own}.jpg`, kind: "image", duration: 0, width: 1080, height: 1920, ai: false };
+    const { compose } = planRender(video.spec, { media, narration, watermark: "" } as PlanContext);
+    expect(compose.look).toBeUndefined();
+    expect(compose.segments.map((s) => [s.kind, s.audio ?? null, s.transition ?? null])).toEqual([["video", FILM_AMBIENCE, null], ["video", FILM_AMBIENCE, null], ["video", FILM_AMBIENCE, null]]);
+    // The photo is not shown itself: only the shots are.
+    expect(compose.keys).not.toContain(`media/${user.id}/${own}.jpg`);
   });
 
   it("narrates a dialogue in its scenes' voices: one call per stretch, joined into one recording the video keeps", async () => {

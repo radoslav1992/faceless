@@ -82,6 +82,12 @@ under `/api/admin` answers 404 to anyone else.
   says so; raise the number of episodes and resume to go on. Rejecting or deleting an episode takes it out of the
   story the next one is written from. Episodes cost what any episode of that length does; a dialogue is a few short
   ElevenLabs calls, one per speaker's stretch, where a narrated episode is one.
+- **Product ads** (a test): only administrators see the **Product ad** style in Create (chip "Admin test"). Add one
+  to four photos of a product, say what it is, choose 15, 20 or 30 seconds: every shot is drawn and filmed with the
+  photos (MiniMax H3 Max, about $0.08 a second), under a recorded voiceover, subtitles and music. A 15-second ad is
+  7 credits and costs about $1.20 in clips plus three pictures and the voice. To open it to everyone: remove
+  `test: true` from the `ad` template in `shared/templates.ts` and the two administrator checks (`draftVideo` in
+  `server/story.ts`, `checkFilm` in `server/videos.ts`), and give it a tool page if it should have one.
 - **Cinematic videos**: in Create, everyone has a **Cinematic** switch (not on Storytime): every scene becomes an AI
   clip with a camera move, scenes cut hard and the video gets a film look. People choose the clips' quality; the
   clips are made with everyone's model (`FAL_CLIP_MODEL`, Kling unless set: its clips are silent, so the video has

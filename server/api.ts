@@ -14,7 +14,7 @@ import { draftVideo, type DraftRequest } from "./story";
 import { planFromNow, resumePosts, seriesSettings } from "./series";
 import { cancelScheduled, PAUSED } from "./publishing";
 import { serveObject } from "./storage";
-import { templateIds, templates, type TemplateId } from "../shared/templates";
+import { apiTemplateIds, templates, type TemplateId } from "../shared/templates";
 import { STORY_MAX_CHARS, storyStyleIds, storyStyles } from "../shared/story";
 import { SECONDS_PER_CREDIT } from "../shared/credits";
 import { voiceIdSchema } from "../shared/voices";
@@ -92,7 +92,7 @@ async function videoOut(env: Env, v: any) {
 }
 
 const createSchema = z.object({
-  type: z.enum(templateIds as [TemplateId, ...TemplateId[]]).default("story"),
+  type: z.enum(apiTemplateIds as [TemplateId, ...TemplateId[]]).default("story"),
   prompt: z.string().trim().max(STORY_MAX_CHARS).default(""),
   script: z.string().trim().max(STORY_MAX_CHARS).default(""),
   title: z.string().trim().max(140).default(""),
@@ -212,7 +212,7 @@ async function makeClip(env: Env, user: DbUser, input: unknown) {
   return { ...(await videoOut(env, v)), credits: made.credits };
 }
 
-const videoTypes = () => templateIds.map((id) => ({ id, name: templates[id].name, kind: templates[id].kind, about: templates[id].short, example: templates[id].examples[0] }));
+const videoTypes = () => apiTemplateIds.map((id) => ({ id, name: templates[id].name, kind: templates[id].kind, about: templates[id].short, example: templates[id].examples[0] }));
 
 /** REST: /api/v1 (bearer key; no session, no Origin check). */
 export const restApi = new Hono<App>();
@@ -262,7 +262,7 @@ const tools = [
     inputSchema: {
       type: "object", additionalProperties: false,
       properties: {
-        type: { type: "string", enum: templateIds, description: "Video type (see list_video_types). Default: story." },
+        type: { type: "string", enum: apiTemplateIds, description: "Video type (see list_video_types). Default: story." },
         prompt: { type: "string", description: "Topic, idea or scenario, or a whole story to retell in the type's style (up to 2,400 characters)." },
         script: { type: "string", description: "For type 'script': the exact words to narrate." },
         title: { type: "string", description: "For type 'storytime': the title question." },

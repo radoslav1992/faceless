@@ -194,8 +194,9 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
         )}
       </EditorSection>
       {/* A film's shots speak for themselves: no presenter, and no clip behind them. */}
-      {!film && <PresenterSection spec={spec} onChange={onChange} />}
-      {!film && <EditorSection title="Background clip" hint="One clip loops behind the whole video instead of a picture per scene (storytime). No AI pictures are made."
+      {/* Nor does a product ad (shared/ad.ts), which is made of filmed shots. */}
+      {!film && !spec.product && <PresenterSection spec={spec} onChange={onChange} />}
+      {!film && !spec.product && <EditorSection title="Background clip" hint="One clip loops behind the whole video instead of a picture per scene (storytime). No AI pictures are made."
         action={spec.backdrop
           ? <button type="button" className="btn sm ghost" onClick={() => onChange({ ...spec, backdrop: null })}>Use pictures</button>
           : <button type="button" className="btn sm" onClick={onBackdrop}><Film size={14} aria-hidden="true" /> Choose clip</button>}>

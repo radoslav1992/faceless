@@ -9,7 +9,8 @@ import {
 import { useAuth } from "../lib";
 import { SamplePhone, reel } from "./Phone";
 import { PlanCards } from "./Pricing";
-import { categories, templateIds, templates, type CategoryId } from "../../shared/templates";
+// Styles still being tested (administrators only) are not shown here.
+import { openCategories as categories, openTemplateIds as templateIds, templates, type CategoryId } from "../../shared/templates";
 import { PRODUCT } from "../../shared/brand";
 import { SECONDS_PER_CREDIT } from "../../shared/credits";
 import { storyStyles, type StoryStyle } from "../../shared/styles";

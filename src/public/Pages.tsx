@@ -12,7 +12,7 @@ import { useExamples } from "../examples";
 import { Faq, StyleGallery } from "./Landing";
 import { faqPage } from "../../shared/faq-page";
 import { NotFound } from "./NotFound";
-import { categories, templates, tools, toolBySlug, type TemplateId } from "../../shared/templates";
+import { openCategories as categories, openTemplateIds, templates, tools, toolBySlug, type TemplateId } from "../../shared/templates";
 import { toolPageCopy } from "../../shared/tool-pages";
 import { storyStyleIds, storyStyles } from "../../shared/story";
 import { languages } from "../../shared/series";
@@ -226,7 +226,7 @@ export function Styles() {
           {storyStyleIds.map((s) => <div key={s} className="art-card"><StyleArt style={s} /><strong>{storyStyles[s].name}</strong><small>{storyStyles[s].short}</small></div>)}
         </div>
       </section>
-      <p className="muted small center">{categories.length} categories · {Object.keys(templates).length} styles · {languages.length} narration languages</p>
+      <p className="muted small center">{categories.length} categories · {openTemplateIds.length} styles · {languages.length} narration languages</p>
     </div>
   );
 }

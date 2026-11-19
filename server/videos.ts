@@ -53,6 +53,13 @@ export async function checkReferences(env: Env, userId: string, spec: Spec, kept
       throw new HTTPException(400, { message: "Choose a library sound effect for the scene changes and for each scene's sound." });
   }
   if (isHighlight(spec)) return checkSource(env, userId, spec);
+  // An ad's product is shown from the owner's photos of it (shared/ad.ts): pictures, each one of their files (above).
+  if (spec.product) {
+    const ids = spec.product.assets;
+    const photos = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM media_assets WHERE user_id=? AND status='ready' AND mime LIKE 'image/%' AND id IN (${ids.map(() => "?").join(",")})`)
+      .bind(userId, ...ids).first<{ n: number }>())?.n ?? 0;
+    if (photos !== ids.length) throw new HTTPException(400, { message: "Choose pictures of the product: JPG, PNG or WebP files." });
+  }
   // An AI voice reads at most STORY_MAX_CHARS; an own voiceover is a recording with sound, up to the render's three minutes.
   if (spec.narration.kind === "voice") {
     if (!(await voiceUsable(env, spec.narration.voiceId, keptVoice, userId))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
@@ -143,6 +150,7 @@ function checkFilm(env: Env, user: DbUser, spec: Spec) {
   if (isHighlight(spec)) return;
   const shots = spec.scenes.some((s) => s.acted);
   if (!isAdmin(env, user)) {
+    if (spec.product) throw new HTTPException(403, { message: "Product ads are still being tested and aren't available yet." });
     if (shots || spec.scenes.some((s) => s.cutaway)) throw new HTTPException(403, { message: "Films of acted shots are still being tested and aren't available yet." });
     if (spec.scenes.some((s) => s.lipSync)) throw new HTTPException(403, { message: "Lip-synced scenes are still being tested and aren't available yet." });
   }

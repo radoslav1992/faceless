@@ -10,6 +10,7 @@ import { LONG_VIDEO_SECONDS } from "./speech";
 import { trackSchema } from "./track";
 import { SOUND_VOLUME } from "./sounds";
 import { filmClipPrompt, filmStill } from "./film";
+import { adClipPrompt, adStill, productSchema } from "./ad";
 import { acted, cutawayPrompt, filmTiming, lipSyncPrompt, shotPrompt, shotSeconds, shotStill, takeKey } from "./drama";
 import { languageName } from "./series";
 import {
@@ -114,12 +115,17 @@ export const storySpec = z.object({
   topic: z.string().trim().max(60).default(""),
   /** A cinematic video (shared/film.ts; administrators only, server/videos.ts): film framing and sound, a film look. */
   film: z.literal(true).optional(),
+  /** A product ad (shared/ad.ts; administrators only, server/videos.ts): the owner's photos of the product its shots are filmed from. */
+  product: productSchema.optional(),
   /**
    * An episode of a drama (shared/drama.ts): its number in the season, the season's length, and what happens in it,
    * which the writer of the next episode reads. Set when the episode is written.
    */
   episode: z.object({ n: z.number().int().min(1).max(999), of: z.number().int().min(1).max(999), summary: z.string().trim().max(600).default("") }).optional(),
-});
+})
+  // An ad is its kind and its product's photos together: put together like a cinematic video, without a background clip or a presenter.
+  .refine((s) => (s.kind === "ad") === !!s.product, "A product ad needs photos of the product.")
+  .refine((s) => !s.product || (!!s.film && !s.backdrop && !s.presenter), "A product ad is made of filmed shots.");
 export type StorySpec = z.infer<typeof storySpec>;
 
 /** A clip: seconds `start` to `end` of one of the owner's (long) videos. */
@@ -232,6 +238,8 @@ export type PendingMedia = {
   acted?: { voiceId: string; seconds: number };
   /** A film's cutaway: a clip without speech from the picture, made after the voice, as long as its scene (shared/drama.ts). */
   cutaway?: boolean;
+  /** An ad's picture or shot: drawn, or filmed from its picture, with the product's photos (shared/ad.ts). */
+  product?: true;
 };
 /**
  * A reference sheet a story's pictures are drawn from (shared/story.ts); `key` names what it is drawn from. A film
@@ -244,6 +252,8 @@ export type PictureSheet = { kind: "character" | "place" | "scene"; prompt: stri
  * least two of its AI pictures are set in; none with fewer than two AI pictures or a background clip.
  */
 export function pictureSheets(spec: StorySpec): PictureSheet[] {
+  // An ad's pictures are drawn from the photos of its product, never from a drawn sheet.
+  if (spec.product) return [];
   const drawn = spec.backdrop ? [] : spec.scenes.filter((s, i) => (s.source === "image" || s.source === "clip") && !showsPresenter(spec, i));
   if (drawn.length < 2) return [];
   const sheet = (kind: PictureSheet["kind"], prompt: string, place?: string): PictureSheet => ({ kind, prompt, key: `sheet:${fingerprint(prompt)}`, ...(place && { place }) });
@@ -271,7 +281,9 @@ export function pendingMedia(spec: Spec): PendingMedia[] {
     if ((s.source === "image" || s.source === "clip") && !s.imageId && !showsPresenter(spec, i))
       out.push({
         kind: "image", path: ["scenes", i], key: "imageId",
-        prompt: scenePrompt(s.description, spec.subject, spec.style, spec.look, placeOf(spec.places, s.place)) + (s.acted || s.cutaway || (spec.film && s.lipSync) ? shotStill(s) : spec.film ? filmStill(i) : ""),
+        prompt: scenePrompt(s.description, spec.subject, spec.style, spec.look, placeOf(spec.places, s.place))
+          + (spec.product ? adStill(i, spec.product.name) : s.acted || s.cutaway || (spec.film && s.lipSync) ? shotStill(s) : spec.film ? filmStill(i) : ""),
+        ...(spec.product && { product: true as const }),
       });
   });
   // A lip-synced clip follows the voice it was made to: a voice still to be recorded (new words, another voice) needs it again.
@@ -289,6 +301,9 @@ export function pendingMedia(spec: Spec): PendingMedia[] {
       out.push({ kind: "clip", prompt: lipSyncPrompt(s.speaker, s.text), path: ["scenes", i], key: "clipId", from: "imageId", seconds: s.clipSeconds, quality: s.clipQuality, lipSync: true });
     else if (s.source === "clip" && s.cutaway && !s.clipId && !showsPresenter(spec, i))
       out.push({ kind: "clip", prompt: cutawayPrompt(s, i), path: ["scenes", i], key: "clipId", from: "imageId", seconds: s.clipSeconds, quality: s.clipQuality, cutaway: true });
+    else if (s.source === "clip" && spec.product && !s.clipId)
+      // An ad's shot: filmed from its picture with the product's photos, with its own sound.
+      out.push({ kind: "clip", prompt: adClipPrompt(s.description, i), path: ["scenes", i], key: "clipId", from: "imageId", seconds: s.clipSeconds, quality: s.clipQuality, product: true, audio: true });
     else if (s.source === "clip" && !s.cutaway && !s.clipId && !showsPresenter(spec, i))
       out.push({
         kind: "clip", prompt: spec.film ? filmClipPrompt(s.description, i) : clipPrompt(s.description), path: ["scenes", i], key: "clipId", from: "imageId",
@@ -349,6 +364,7 @@ export function referencedAssets(spec: Spec): string[] {
   if (spec.narration.kind === "upload") ids.push(spec.narration.assetId);
   ids.push(spec.presented?.assetId);
   for (const s of spec.scenes) ids.push(s.imageId, s.clipId, s.assetId);
+  if (spec.product) ids.push(...spec.product.assets);
   if (spec.music?.assetId) ids.push(spec.music.assetId);
   if (spec.backdrop?.assetId) ids.push(spec.backdrop.assetId);
   return [...new Set(ids.filter((x): x is string => !!x))];

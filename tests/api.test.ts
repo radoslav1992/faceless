@@ -85,6 +85,9 @@ describe("the REST API", () => {
     expect(me.data).toMatchObject({ plan: "daily", credits: { left: 60, used: 0, total: 60 } });
     const types = (await bearer(env, "GET", "/api/v1/types", key)).data;
     expect(types.types.map((t: any) => t.id)).toEqual(expect.arrayContaining(["facts", "script", "povscenario", "mashup", "storytime"]));
+    // A product ad needs photos, which the API does not take: it is not a type here, and asking for it is refused.
+    expect(types.types.map((t: any) => t.id)).not.toContain("ad");
+    expect((await bearer(env, "POST", "/api/v1/videos", key, { type: "ad", prompt: "A steel bottle" })).status).toBe(400);
   });
 
   it("writes and makes a video with the owner's credits, and hands out a short-lived download link once it is made", async () => {

@@ -191,7 +191,8 @@ function planStory(spec: StorySpec, ctx: PlanContext): Plan {
     compose: {
       operation: "compose", width: W, height: H, segments, voice, music, ...(sounds.length && { sounds }), overlay: null,
       ass: ctx.watermark ? withWatermark(ass, ctx.watermark, W, H) : ass, coverAt: Math.min(coverAt, Math.max(0, length - 0.1)), synthetic, keys: inputs.keys,
-      ...(spec.film && !spec.backdrop && { look: "film" as const }),
+      // An ad (shared/ad.ts) is cut like a film but keeps its product's colours: no grade, vignette or grain.
+      ...(spec.film && !spec.backdrop && !spec.product && { look: "film" as const }),
     },
   };
 }
