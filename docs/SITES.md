@@ -5,7 +5,8 @@ with its own name, logo, currency, database, storage and Stripe account. Hookstr
 change: a build without `SITE=rechbg` renders the pages it always did.
 
 Status: Реч БГ builds (`npm run build:rechbg`) with the public pages, the app, the legal pages and the e-mails in
-Bulgarian, its name and logo, and prices in euro. Its database and bucket exist; it is not deployed yet. What is left
+Bulgarian, its name and logo, and prices in euro. Its database and bucket exist; it is not deployed yet: the
+first deploy replaces the earlier Реч БГ app. What is left
 is under "Deployment" and "Still to do".
 
 ## How a build knows its site
@@ -93,51 +94,71 @@ call. E-mails to administrators (operations, quota, contact-form messages) are n
 
 ## Deployment
 
-Реч БГ is its own Worker with its own data: `wrangler.rechbg.jsonc`. Nothing is shared with Hookstreak.
+Реч БГ deploys into the Worker the earlier Реч БГ app ran in, `rech-bg` (`wrangler.rechbg.jsonc`), because that
+Worker holds the site's variables and secrets and Cloudflare cannot copy a secret to another Worker. Its data is new
+and its own; nothing is shared with Hookstreak.
 
 | | Hookstreak (`wrangler.jsonc`) | Реч БГ (`wrangler.rechbg.jsonc`) |
 | --- | --- | --- |
-| Worker | `faceless` | `rechbg` |
+| Worker | `faceless` | `rech-bg` (the earlier app's Worker, with its variables and secrets) |
 | Site switch (`define`) | `__SITE__` = `hookstreak` | `__SITE__` = `rechbg` |
 | Database (D1) | `faceless` | `rechbg`, `1124cf5a-4c90-4a18-9c31-552a2fe8a689`, Western Europe, created empty 2026-11-18 |
-| Bucket (R2) | `faceless-media` | `rechbg-media`, created empty 2026-11-18 |
+| Bucket (R2) | `faceless-media` | `rechbg-media`, created empty 2026-11-18 (Eastern North America, as Hookstreak's) |
 | Workflows | `faceless-content`, `faceless-publish` | `rechbg-content`, `rechbg-publish` |
+| Renderer (Durable Object migration) | `renderer-v1` | `media-v1`: the class exists in that Worker since the earlier app |
 | App files | `dist` | `dist-rechbg` |
-| Address | hookstreak.app | its workers.dev address until the switch, then rechbg.com |
+| Address | hookstreak.app | rechbg.com |
+| Deploy | every push to `main` (Actions → Deploy) | by hand only: Actions → **Deploy Реч БГ**, or `npm run deploy:rechbg` |
 
-`npm run deploy:rechbg` builds Реч БГ, applies the migrations to its database and deploys the Worker (the renderer's
-container needs Docker, as for Hookstreak). The earlier Реч БГ (the Worker `rech-bg`, the database `rech-bg`, the
-bucket `rech-bg-audio`) is a different app and is not touched by any of this.
+**The first deploy replaces the earlier app at rechbg.com at once.** There is no separate address to try it on
+first. Accounts, projects and files of the earlier app are not carried over: its database (`rech-bg`) and bucket
+(`rech-bg-audio`) are no longer bound and stay where they are until they are deleted by hand.
 
-The bucket was created through Cloudflare's API without a location, and Cloudflare placed it in Eastern North
-America. It is empty: to keep files in Europe, delete it and create it again before the first deploy with
-`npx wrangler r2 bucket create rechbg-media --location weur`.
+### What the Worker already has (checked in the dashboard on 2026-11-18)
 
-### Before the first deploy: variables and secrets of the Worker `rechbg`
+Read by the new code under the same names, so nothing to do:
 
-Set them in the dashboard (Workers → rechbg → Settings → Variables and Secrets) or with
-`npx wrangler secret put NAME -c wrangler.rechbg.jsonc`. `docs/DEPLOYMENT.md` section 2 says what each is for.
+- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (the webhook's address stays `https://rechbg.com/api/billing/webhook`),
+  `FAL_KEY`, `ELEVENLABS_API_KEY`, `HEYGEN_API_KEY`, `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`.
+- `ADMIN_EMAILS`, `COMPANY_ADDRESS`, `COMPANY_ID` (shown as ЕИК), `EMAIL_FROM`.
+- `REGISTRATION_ENABLED`, `BILLING_ENABLED`, `MEDIA_ENABLED`, all `true`.
 
-- **The site**: `SITE_URL` (the Worker's workers.dev address while it is tried out; `https://rechbg.com` at the
-  switch), `COMPANY_NAME`, `COMPANY_ADDRESS`, `COMPANY_ID` (ЕИК), `ADMIN_EMAILS`. `CONTACT_EMAIL` is in the config.
-- **Its own secrets, new values** (never Hookstreak's): `TRIAL_HASH_SECRET`, `TOKEN_ENCRYPTION_KEY`
-  (`openssl rand -base64 32`), `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` (a Turnstile widget for the site's
-  address).
-- **Stripe, Реч БГ's account**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (an endpoint at
-  `${SITE_URL}/api/billing/webhook` with the events in `docs/DEPLOYMENT.md` section 3) and the eight price IDs below.
-  Tax and the billing address are always collected on Реч БГ; `STRIPE_AUTOMATIC_TAX` is not needed.
-- **AI services** (the same accounts as Hookstreak, or separate ones to tell the costs apart): `FAL_KEY`,
-  `ELEVENLABS_API_KEY`, and `HEYGEN_API_KEY` for presenters.
-- **Posting**: `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (YouTube), `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`,
-  `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET`: each app must list Реч БГ's address as a redirect address, and Google
-  must verify the app for the new domain before everyone can connect YouTube. Until then leave `SOCIAL_OPEN` unset.
-- **Switches**, when everything above is in place: `REGISTRATION_ENABLED`, `BILLING_ENABLED`, `MEDIA_ENABLED`.
+`SITE_URL`, `CONTACT_EMAIL` and `COMPANY_NAME` were defaults in the earlier app's code; they are in
+`wrangler.rechbg.jsonc` now, with the same values.
+
+### Before the first deploy
+
+1. **Stop the earlier app's own deploys.** The Worker is connected to the earlier repository (Workers → rech-bg →
+   Settings → Build). Disconnect it, or the next push there puts the earlier app back.
+2. **Set `BILLING_ENABLED` to `false`** until the euro prices below are in place: the three price IDs the Worker has
+   are the earlier plans', which the new checkout refuses.
+3. **The eight euro prices** (next section): `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_DAILY`, `STRIPE_PRICE_DOUBLE`,
+   `STRIPE_PRICE_STUDIO` and the four `…_YEARLY`. `STRIPE_PRICE_STARTER` and `STRIPE_PRICE_STUDIO` exist with the
+   earlier prices and get new values.
+4. **`TOKEN_ENCRYPTION_KEY`** (`openssl rand -base64 32`, as a secret): needed before a channel can be connected
+   and for the API's download links. Never change it afterwards.
+5. **`TRIAL_HASH_SECRET`** (a long random string, as a secret): recommended. Without it the "one free trial per
+   mailbox" record is a plain hash of the address.
+6. **`HEYGEN_API_KEY` is stored as a plain variable.** Change its type to Secret (Edit → type Secret, same value), so
+   the key is not readable in the dashboard.
+7. **The deploy token**: the repository's `CLOUDFLARE_API_TOKEN` must also be allowed to edit D1 and the
+   `rechbg.com` zone.
+8. In Stripe, check that the webhook endpoint sends the events in `docs/DEPLOYMENT.md` section 3, and set the
+   customer portal up as described there.
+
+After everything works: the earlier app's variables the new code does not read can be deleted
+(`STRIPE_PRICE_CREATOR`, `VIDEO_MEDIUM`, `VIDEO_PROVIDER`, `WAVESPEED_API_KEY`).
+
+Posting to channels needs each network's app (`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` for YouTube,
+`TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET`), with rechbg.com as a
+redirect address; Google must verify the app for the domain before everyone can connect YouTube. Until then leave
+`SOCIAL_OPEN` unset: the Channels page says "coming soon".
 
 ### Prices in euro
 
 `scripts/stripe-prices-rechbg.mjs` makes the four products (Реч БГ · Начало, Създател, Про, Студио) with a monthly and
 a yearly price each: €19, €35, €59 and €149 a month, ten months' price a year, VAT included
-(`tax_behavior: inclusive`). Run it with the secret key of Реч БГ's Stripe account, a test key first:
+(`tax_behavior: inclusive`). Run it with a secret key of Реч БГ's Stripe account, a test key first:
 
 ```bash
 STRIPE_SECRET_KEY=sk_test_… node scripts/stripe-prices-rechbg.mjs
@@ -147,16 +168,10 @@ STRIPE_SECRET_KEY=sk_test_… node scripts/stripe-prices-rechbg.mjs
 STRIPE_SECRET_KEY=sk_test_… node scripts/stripe-prices-rechbg.mjs --create
 ```
 
-Without `--create` it only shows what exists and what is missing. It prints the eight variables
-(`STRIPE_PRICE_STARTER` … `STRIPE_PRICE_STUDIO_YEARLY`) with their price IDs: set them on the Worker `rechbg`. It can
-be run again: a price that exists is left alone. Credit packs need no products (€8, €28 and €90 are charged with
-inline prices). Set the customer portal up as `docs/DEPLOYMENT.md` section 3 describes.
-
-### The switch to rechbg.com
-
-Set `SITE_URL` to `https://rechbg.com`, uncomment the route in `wrangler.rechbg.jsonc`, remove the route from the
-earlier Реч БГ's own config (or its next deploy takes the domain back), move the Stripe webhook to the new address
-and deploy. Accounts and files of the earlier app are not carried over.
+Without `--create` it only shows what exists and what is missing. It prints the eight variables with their price
+IDs: set them on the Worker. It can be run again: a price that exists is left alone. Credit packs need no products
+(€8, €28 and €90 are charged with inline prices). The same prices can be made by hand in Stripe's dashboard instead:
+one product per plan, two recurring prices in EUR with "include tax in price".
 
 ## The library
 

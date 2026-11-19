@@ -6,7 +6,7 @@
 //
 // Run it with the secret key of Реч БГ's Stripe account (a test key first). It can be run again: a price that
 // already exists (found by its lookup key) is left as it is. It prints the price IDs as the variables the Worker
-// reads: set them as variables of the Worker rechbg (dashboard → Workers → rechbg → Settings → Variables and Secrets).
+// reads: set them as variables of the Worker rech-bg (dashboard → Workers → rech-bg → Settings → Variables and Secrets).
 import Stripe from "stripe";
 
 // The paid plans' monthly prices, as in shared/plans.ts (tests/sites.test.ts keeps the two alike). A year costs ten months.
@@ -47,6 +47,6 @@ for (const plan of plans) {
   }
 }
 if (out.length) {
-  console.log("\nVariables for the Worker rechbg:");
+  console.log("\nVariables for the Worker rech-bg:");
   for (const [name, id] of out) console.log(`${name}=${id}`);
 } else console.log("\nNothing exists yet. Run again with --create to make the products and prices.");

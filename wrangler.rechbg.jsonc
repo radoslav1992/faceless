@@ -1,9 +1,11 @@
 {
-  // Реч БГ: the second site built from this code (docs/SITES.md). Its own Worker, database, bucket, workflows and
-  // renderers; nothing here is shared with Hookstreak (wrangler.jsonc).
-  //   npm run deploy:rechbg
+  // Реч БГ: the second site built from this code (docs/SITES.md). It deploys into the Worker the earlier Реч БГ app
+  // ran in (rech-bg), so that Worker's variables and secrets (Stripe, fal, ElevenLabs, HeyGen, Turnstile, the company's
+  // details, the switches) are the new site's too: Cloudflare cannot copy a secret to another Worker. Its database,
+  // bucket and workflows are new and its own; nothing is shared with Hookstreak (wrangler.jsonc).
+  //   npm run deploy:rechbg   (or GitHub → Actions → Deploy Реч БГ)
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "rechbg",
+  "name": "rech-bg",
   "main": "server/index.ts",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
@@ -12,16 +14,15 @@
   "define": { "__SITE__": "\"rechbg\"" },
   // Dashboard variables and secrets survive deploys.
   "keep_vars": true,
+  // What the earlier app had as defaults in its code and this one reads from its settings. Sign-ups and payments
+  // need all three. rechbg.com has Email Sending set up in Cloudflare.
   "vars": {
-    // rechbg.com has Email Sending set up in Cloudflare (the earlier Реч БГ sends from the same address).
+    "SITE_URL": "https://rechbg.com",
     "CONTACT_EMAIL": "info@rechbg.com",
+    "COMPANY_NAME": "Радослав Додников (Кова студио)",
   },
-  // SITE_URL is set in the dashboard, not here: every other host is redirected to it, so while the Worker is tried
-  // out on its workers.dev address that address is its SITE_URL. At the switch, set SITE_URL to https://rechbg.com,
-  // uncomment the route below and deploy: a domain belongs to one Worker, so this moves rechbg.com away from the
-  // earlier Реч БГ Worker (rech-bg), whose own config must then stop listing it.
-  "workers_dev": true,
-  // "routes": [{ "pattern": "rechbg.com", "custom_domain": true }],
+  // The Worker already serves rechbg.com: the first deploy of this config replaces the earlier app there at once.
+  "routes": [{ "pattern": "rechbg.com", "custom_domain": true }],
   "assets": {
     "directory": "./dist-rechbg",
     "binding": "ASSETS",
@@ -51,7 +52,8 @@
     { "class_name": "MediaRenderer", "image": "./renderer/Dockerfile", "max_instances": 3, "instance_type": "standard-2" },
   ],
   "durable_objects": { "bindings": [{ "name": "MEDIA_RENDERER", "class_name": "MediaRenderer" }] },
-  "migrations": [{ "tag": "renderer-v1", "new_sqlite_classes": ["MediaRenderer"] }],
+  // The renderer class of this Worker exists since the earlier app, under this tag: the same entry, so no new migration runs.
+  "migrations": [{ "tag": "media-v1", "new_sqlite_classes": ["MediaRenderer"] }],
   "workflows": [
     { "name": "rechbg-content", "binding": "CONTENT", "class_name": "ContentGeneration" },
     { "name": "rechbg-publish", "binding": "PUBLISH", "class_name": "Publication" },

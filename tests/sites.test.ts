@@ -36,9 +36,17 @@ it("gives each site its own Worker, database, bucket and workflows", () => {
   expect(rechbg).toContain('{ "binding": "HOOKSTREAK_DB", "database_name": "faceless"');
   expect(rechbg).toContain('{ "binding": "HOOKSTREAK_MEDIA", "bucket_name": "faceless-media" }');
   expect(hookstreak).not.toContain("HOOKSTREAK_");
+  // Реч БГ deploys into the earlier Реч БГ app's Worker, to keep its secrets; never into Hookstreak's.
+  expect(value(rechbg, "name")[0]).toBe("rech-bg");
+  expect(value(hookstreak, "name")[0]).toBe("faceless");
   expect(value(rechbg, "name").filter((name) => value(hookstreak, "name").includes(name))).toEqual(["EMAIL", "MEDIA_RENDERER"]);
+  // That Worker's renderer class was created under this tag; a different one would be refused as a second creation.
+  expect(rechbg).toContain('"migrations": [{ "tag": "media-v1", "new_sqlite_classes": ["MediaRenderer"] }]');
   expect(hookstreak).toContain(String.raw`"define": { "__SITE__": "\"hookstreak\"" }`);
   expect(rechbg).toContain(String.raw`"define": { "__SITE__": "\"rechbg\"" }`);
-  // The domain moves only when the switch is made by hand.
-  expect(rechbg).not.toMatch(/^\s*"routes"/m);
+  expect(rechbg).toContain('"routes": [{ "pattern": "rechbg.com", "custom_domain": true }]');
+  // Nothing deploys Реч БГ by itself: its workflow runs only by hand.
+  const deploy = readFileSync(".github/workflows/deploy-rechbg.yml", "utf8");
+  expect(deploy).toContain("\non:\n  workflow_dispatch:\n");
+  expect(deploy).not.toContain("\n  push:");
 });
