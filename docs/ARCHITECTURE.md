@@ -425,7 +425,7 @@ Uploads go to R2 as multipart uploads of 8 MiB parts (images up to 20 MB, tracks
 `videoMb`: 500 MB on the free trial, 2,000 MB on paid plans). Images are checked from their header; videos and tracks
 by the renderer (`inspect`: kind, picture size, length up to the plan's `videoMinutes` at upload time — 10 minutes,
 or 2 hours for videos on paid plans — and sound) and, when they may hold speech and last up to 10 minutes, transcribed
-once by ElevenLabs Scribe v2 for free within the same daily allowance. A failed transcription only means no subtitles.
+once by ElevenLabs Scribe v3 for free within the same daily allowance. A failed transcription only means no subtitles.
 
 **Imports from links** (`server/imports.ts`, `POST /api/media/imports`, the Clips page's *Import*, `POST
 /api/v1/sources` and the MCP tool `import_video`): a direct link to an MP4, MOV or WebM file, or a Dropbox (`dl=1`) or

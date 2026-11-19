@@ -6,7 +6,7 @@ import { ProviderError } from "../server/providers/http";
 import { SPEECH_MAX_SECONDS, speechSpans, speechTurns } from "../shared/speech";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 
-// Speech to text with ElevenLabs Scribe v2 (as rech-bg): the request and its answer, and the free transcription of
+// Speech to text with ElevenLabs Scribe v3: the request and its answer, and the free transcription of
 // uploads up to 10 minutes after their check (bounded per person and day).
 
 const step = { do: async (_name: string, a: any, b?: any) => (b ?? a)(), sleep: async () => {} };
@@ -108,7 +108,7 @@ describe("Scribe answers", () => {
       fields: { model_id: SCRIBE_MODEL, timestamps_granularity: "word", diarize: "true", tag_audio_events: "true" },
       file: { name: "upload.mp4", type: "video/mp4", bytes },
     }]);
-    expect(SCRIBE_MODEL).toBe("scribe_v2");
+    expect(SCRIBE_MODEL).toBe("scribe_v3");
   });
 
   it("turns failures into codes and never calls without a key", async () => {
