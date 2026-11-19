@@ -10,7 +10,7 @@ import { LONG_VIDEO_SECONDS } from "./speech";
 import { trackSchema } from "./track";
 import { SOUND_VOLUME } from "./sounds";
 import { filmClipPrompt, filmStill } from "./film";
-import { adClipPrompt, adStill, productSchema } from "./ad";
+import { adClipPrompt, adStill, AD_CLIP_QUALITY, oneShotCredits, oneShotPrompt, oneShotSeconds, productSchema } from "./ad";
 import { acted, cutawayPrompt, filmTiming, lipSyncPrompt, shotPrompt, shotSeconds, shotStill, takeKey } from "./drama";
 import { languageName } from "./series";
 import {
@@ -125,7 +125,8 @@ export const storySpec = z.object({
 })
   // An ad is its kind and its product's photos together: put together like a cinematic video, without a background clip or a presenter.
   .refine((s) => (s.kind === "ad") === !!s.product, "A product ad needs photos of the product.")
-  .refine((s) => !s.product || (!!s.film && !s.backdrop && !s.presenter), "A product ad is made of filmed shots.");
+  // Filmed shot by shot, or in one shot: then the one clip is its background clip, a file of the owner's made with the video.
+  .refine((s) => !s.product || (!s.presenter && (s.product.model === "seedance" ? !s.backdrop?.libraryId : !!s.film && !s.backdrop)), "A product ad is made of filmed shots.");
 export type StorySpec = z.infer<typeof storySpec>;
 
 /** A clip: seconds `start` to `end` of one of the owner's (long) videos. */
@@ -240,7 +241,16 @@ export type PendingMedia = {
   cutaway?: boolean;
   /** An ad's picture or shot: drawn, or filmed from its picture, with the product's photos (shared/ad.ts). */
   product?: true;
+  /**
+   * An ad filmed in one shot (shared/ad.ts): one clip for the whole video, made after the voice and as long as it
+   * (asked for about this many seconds until then); it becomes the video's background clip.
+   */
+  oneShot?: number;
+  /** What it costs, when not a clip's usual price by its length and quality. */
+  credits?: number;
 };
+/** The credits of a picture or clip still to make that is priced as a clip. */
+export const pendingClipCredits = (m: PendingMedia) => m.credits ?? clipCredits([{ seconds: m.seconds ?? 5, quality: m.quality }]);
 /**
  * A reference sheet a story's pictures are drawn from (shared/story.ts); `key` names what it is drawn from. A film
  * (shared/drama.ts) also has a master shot of each place ("scene"): the place with the people of its scenes in it,
@@ -274,8 +284,20 @@ export function pictureSheets(spec: StorySpec): PictureSheet[] {
 /** Every AI picture or clip the video still asks for, pictures first and then the clips made from them. */
 export function pendingMedia(spec: Spec): PendingMedia[] {
   const out: PendingMedia[] = [];
-  // A clip of a long video asks for no AI media; a background clip replaces the pictures of every scene.
-  if (isHighlight(spec) || spec.backdrop) return out;
+  // A clip of a long video asks for no AI media.
+  if (isHighlight(spec)) return out;
+  // An ad in one shot (shared/ad.ts): no pictures, one clip for the whole video, which becomes its background clip.
+  if (spec.product?.model === "seedance") {
+    const seconds = oneShotSeconds(speechSeconds(storyScript(spec.scenes)));
+    if (!spec.backdrop)
+      out.push({
+        kind: "clip", prompt: oneShotPrompt(spec.scenes.map((s) => s.description), spec.product.assets.length, spec.product.name), path: [], key: "backdrop",
+        quality: AD_CLIP_QUALITY, product: true, audio: true, oneShot: seconds, credits: oneShotCredits(seconds),
+      });
+    return out;
+  }
+  // A background clip replaces the pictures of every scene.
+  if (spec.backdrop) return out;
   // A scene the presenter speaks on shows no picture.
   spec.scenes.forEach((s, i) => {
     if ((s.source === "image" || s.source === "clip") && !s.imageId && !showsPresenter(spec, i))
@@ -332,7 +354,7 @@ export function specCredits(spec: Spec, initial: boolean, seconds?: number, befo
     return kept ? 0 : highlightCredits(length);
   }
   const pending = pendingMedia(spec);
-  const clips = clipCredits(pending.filter((m) => m.kind === "clip").map((m) => ({ seconds: m.seconds ?? 5, quality: m.quality })));
+  const clips = pending.filter((m) => m.kind === "clip").reduce((n, m) => n + pendingClipCredits(m), 0);
   const presenter = spec.presenter && presenterNeeded(spec) ? presenterCredits(spokenSeconds(spec), spec.presenter.quality) : 0;
   if (initial) return videoCredits(seconds ?? spokenSeconds(spec)) + clips + presenter;
   // A film records no narration: its lines are said in its clips.

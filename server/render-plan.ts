@@ -1,4 +1,5 @@
 import { captionAss, emptyAss, withItems, withWatermark } from "./caption-ass";
+import { ONE_SHOT_SOUND } from "../shared/ad";
 import { styledCaptions, type CaptionWord } from "../shared/captions";
 import { overlayItems, revealSeconds, type TextLook } from "../shared/overlay";
 import { motionFor } from "../shared/layers";
@@ -55,8 +56,8 @@ function need(ctx: PlanContext, id: string | undefined): Media {
  * A clip under the whole `duration`: one segment that starts the clip again from its beginning while it is shorter
  * (the renderer's `loop`), so it covers every second of the voice with no tiny last piece and no cap on repeats.
  */
-function fillWithClip(input: number, clip: number, duration: number): ComposeSegment[] {
-  return [{ kind: "video", input, trim: 0, duration, audio: 0, ...(clip < duration && { loop: true }) }];
+function fillWithClip(input: number, clip: number, duration: number, audio = 0): ComposeSegment[] {
+  return [{ kind: "video", input, trim: 0, duration, audio, ...(clip < duration && { loop: true }) }];
 }
 /** On-screen text shown from `from` to `to`; its entrance animation starts at `from`. */
 function text(ass: string, value: string, look: TextLook, from: number, to: number) {
@@ -148,7 +149,8 @@ function planStory(spec: StorySpec, ctx: PlanContext): Plan {
     onScreen = timing.scenes.map((s) => ({ scene: s.index, start: s.startFrame / FPS, end: s.endFrame / FPS }));
     const clip = need(ctx, spec.backdrop.assetId || spec.backdrop.libraryId);
     if (clip.kind === "image") segments = [{ kind: "image", input: inputs.add(clip.key), duration: round(d), motion: motionFor(0) }];
-    else if (clip.kind === "video") segments = fillWithClip(inputs.add(clip.key), clip.duration, round(d));
+    // An ad filmed in one shot (shared/ad.ts) plays its clip's own sound under the voice; any other background clip is silent.
+    else if (clip.kind === "video") segments = fillWithClip(inputs.add(clip.key), clip.duration, round(d), spec.product?.model === "seedance" && spec.backdrop.assetId ? ONE_SHOT_SOUND : 0);
     else throw new Error("MEDIA_INPUT");
   } else {
     const parts = storySegments(timing, spec.scenes.map((s) => s.transition));

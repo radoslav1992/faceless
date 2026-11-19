@@ -1,5 +1,5 @@
 import type { Env } from "../types";
-import { PRODUCT_PHOTOS_MAX, productNote } from "../../shared/ad";
+import { ONE_SHOT_SECONDS, PRODUCT_PHOTOS_MAX, productNote } from "../../shared/ad";
 import { CLIP_SECONDS, clipModels, isClipModel, type ClipModel, type ClipQuality } from "../../shared/credits";
 import { failureCode, falQueueUrl, providerFetch, ProviderError } from "./http";
 import { heygenEnabled } from "./heygen";
@@ -204,6 +204,28 @@ export const adShotRequest = (shot: { image: string; prompt: string; seconds: nu
     resolution: "768P", prompt_expansion_mode: "balanced", ...(shot.photos.length && { reference_image_urls: shot.photos.slice(0, PRODUCT_PHOTOS_MAX) }),
   },
 });
+/**
+ * An ad in one shot (shared/ad.ts): Seedance's reference-to-video on fal takes the owner's photos of the product (its
+ * "@Image1" onwards, up to nine) and one prompt with every shot, and returns one vertical clip that it cuts from shot
+ * to shot itself, with its own sound. The request, as fal's documentation for the endpoint has it: `image_urls`,
+ * `resolution` ("480p" or "720p"), `duration` in whole seconds as text ("4" to "15"), `aspect_ratio` and
+ * `generate_audio`. About $0.24 a second at 720p. The operator can name another Seedance endpoint with the same
+ * request (FAL_AD_ONE_SHOT_MODEL, e.g. "bytedance/seedance-2.5/flash/reference-to-video").
+ */
+export const ONE_SHOT_MODEL = "bytedance/seedance-2.0/fast/reference-to-video";
+export const oneShotModel = (e: Env) => {
+  const name = e.FAL_AD_ONE_SHOT_MODEL?.trim();
+  return name && /^[a-z0-9][a-z0-9./-]{2,120}$/i.test(name) ? name : ONE_SHOT_MODEL;
+};
+export const oneShotRequest = (shot: { prompt: string; seconds: number; photos: string[] }, model = ONE_SHOT_MODEL) => ({
+  model,
+  body: {
+    prompt: shot.prompt, image_urls: shot.photos.slice(0, PRODUCT_PHOTOS_MAX), resolution: "720p",
+    duration: String(Math.min(ONE_SHOT_SECONDS.max, Math.max(ONE_SHOT_SECONDS.min, Math.round(shot.seconds)))), aspect_ratio: "9:16", generate_audio: true,
+  },
+});
+/** Submits an ad's one shot once (a ticket like any clip's). */
+export const submitFalOneShot = (e: Env, shot: Parameters<typeof oneShotRequest>[0]) => { const { model, body } = oneShotRequest(shot, oneShotModel(e)); return submitQueue(e, model, body); };
 /** Submits an ad's shot once (a ticket like any clip's). */
 export const submitFalAdShot = (e: Env, shot: Parameters<typeof adShotRequest>[0]) => { const { model, body } = adShotRequest(shot); return submitQueue(e, model, body); };
 /** Submits a shot once (a ticket like any clip's: its status and result are read the same way). */

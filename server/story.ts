@@ -15,7 +15,7 @@ import { voiceIdSchema } from "../shared/voices";
 import { offeredVoice, voiceUsable } from "./voices";
 import { SPEECH_CHARS_PER_SECOND, clipModels, clipQualities } from "../shared/credits";
 import { filmSpec } from "../shared/film";
-import { adSpec, productSchema } from "../shared/ad";
+import { adSpec, ONE_SHOT_SECONDS, productSchema } from "../shared/ad";
 import { type FilmVoices, castMember, episodeTitle, filmPlaces, filmShots, lipSyncSpec, NARRATOR, SHOT_MAX_WORDS, shotsSpec } from "../shared/drama";
 import { isAdmin } from "./auth";
 import { languageCodes, languageName, type LanguageCode } from "../shared/series";
@@ -523,6 +523,8 @@ export async function draftVideo(env: Env, userId: string, input: DraftRequest, 
     if (!admin) throw new HTTPException(403, { message: "Product ads are still being tested and aren't available yet." });
     if (!d.product) throw new HTTPException(400, { message: "Add a photo of the product first." });
     if (d.prompt.length < 2) throw new HTTPException(400, { message: "Say what the product is first." });
+    // In one shot, the ad is one clip of up to 15 seconds.
+    if (d.product.model === "seedance") d.seconds = Math.min(d.seconds, ONE_SHOT_SECONDS.max);
   }
   // A voice asked for must be offered; the template's own is replaced by the default voice when it was hidden.
   if (d.voiceId && !(await voiceUsable(env, d.voiceId, null, userId))) throw new HTTPException(400, { message: "Choose one of the voices offered." });

@@ -11,7 +11,7 @@ import { StoryStylePicker } from "./StoryStyles";
 import { VideoEditor } from "./EditVideo";
 import { creditBlock, CreditBlockNotice, MediaPicker, MusicChoice, UploadButton, useOfferedVoice, VoiceSelect } from "./pickers";
 import { categories, isTemplate, isTest, templateIds, templates, type CategoryId, type TemplateId } from "../../shared/templates";
-import { adCredits, adLengths, PRODUCT_PHOTOS_MAX } from "../../shared/ad";
+import { adCredits, adLengths, adModelNames, adModels, ONE_SHOT_SECONDS, PRODUCT_PHOTOS_MAX, type AdModel } from "../../shared/ad";
 import { languages, type MusicMood } from "../../shared/series";
 import { specCredits, type StorySpec } from "../../shared/formats";
 import { STORY_MAX_CHARS, storyStyles, type StoryStyle } from "../../shared/story";
@@ -68,7 +68,7 @@ type Form = {
   /** Cinematic (shared/film.ts): every scene an AI clip of this quality and, for an administrator, model. */
   film: boolean; filmQuality: ClipQuality; filmModel: ClipModel | "";
   /** A product ad (shared/ad.ts): the photos of the product (the owner's uploads) and what it is called. */
-  photos: string[]; productName: string;
+  photos: string[]; productName: string; adModel: AdModel;
 };
 /** Text that reads like a whole story rather than a topic: long, or several lines. */
 const storyLike = (text: string) => text.trim().length >= 280 || text.trim().split(/\n\s*\n|\n/).filter(Boolean).length >= 4;
@@ -80,7 +80,7 @@ export function mashupParts(prompt: string): { animal: string; object: string } 
 const formFor = (id: TemplateId, prompt = ""): Form => {
   const t = templates[id];
   const mashup = t.kind === "mashup" ? mashupParts(prompt) : { animal: "", object: "" };
-  return { prompt, script: "", title: "", ...mashup, seconds: t.seconds, language: SITE.narration, voiceId: t.voice, style: t.style, music: t.music, musicTrackId: null, subject: "", sounds: true, film: false, filmQuality: "regular", filmModel: "", photos: [], productName: "" };
+  return { prompt, script: "", title: "", ...mashup, seconds: t.seconds, language: SITE.narration, voiceId: t.voice, style: t.style, music: t.music, musicTrackId: null, subject: "", sounds: true, film: false, filmQuality: "regular", filmModel: "", photos: [], productName: "", adModel: "minimax" };
 };
 
 export function Create() {
@@ -135,7 +135,7 @@ export function Create() {
         seconds: form.seconds, language: form.language, voiceId: form.voiceId, style: form.style, music: form.music, subject: form.subject, sounds: form.sounds,
         ...(form.musicTrackId && { musicTrackId: form.musicTrackId }),
         ...(cinematic && { film: { quality: form.filmQuality, ...(form.filmModel && { model: form.filmModel }) } }),
-        ...(ad && { product: { assets: form.photos, name: form.productName } }),
+        ...(ad && { product: { assets: form.photos, name: form.productName, model: form.adModel } }),
       });
       setSpec(draft);
       window.scrollTo({ top: 0 });
@@ -145,7 +145,7 @@ export function Create() {
       setWriting(false);
     }
   };
-  const cost = useMemo(() => (spec ? specCredits(spec, true) : ad ? adCredits(form.seconds) : videoCredits(form.seconds)), [spec, form.seconds, ad]);
+  const cost = useMemo(() => (spec ? specCredits(spec, true) : ad ? adCredits(form.seconds, form.adModel) : videoCredits(form.seconds)), [spec, form.seconds, form.adModel, ad]);
   const block = user ? creditBlock(user, cost) : null;
   const make = async () => {
     if (!spec) return;
@@ -175,8 +175,8 @@ export function Create() {
         <div className="page-head">
           <div>
             <button type="button" className="link" onClick={() => setSpec(null)}><ArrowLeft size={15} aria-hidden="true" /> Back to the brief</button>
-            <h1 style={{ marginTop: 8 }}>{spec.title || t.name}{spec.film && <span className="chip" style={{ marginLeft: 10, verticalAlign: 6 }}>{spec.product ? "Product ad" : "Cinematic"}</span>}</h1>
-            <p>Edit anything below. Nothing is made or charged until you press Make video.{spec.product ? " Every scene is a shot filmed from your photos: the price counts each one." : spec.film ? " Every scene is an AI clip: the price counts each one." : ""}</p>
+            <h1 style={{ marginTop: 8 }}>{spec.title || t.name}{spec.film && <span className="chip" style={{ marginLeft: 10, verticalAlign: 6 }}>{spec.product ? "Product ad" : "Cinematic"}</span>}{spec.product?.model === "seedance" && <span className="chip" style={{ marginLeft: 10, verticalAlign: 6 }}>Product ad</span>}</h1>
+            <p>Edit anything below. Nothing is made or charged until you press Make video.{spec.product?.model === "seedance" ? " The whole ad is filmed in one shot from your photos, after its voice is recorded." : spec.product ? " Every scene is a shot filmed from your photos: the price counts each one." : spec.film ? " Every scene is an AI clip: the price counts each one." : ""}</p>
           </div>
           <div className="toolbar">
             <button type="button" className="btn" disabled={writing} onClick={write}>{writing ? <span className="spinner" aria-hidden="true" /> : <Wand2 size={16} aria-hidden="true" />} Write again</button>
@@ -231,6 +231,14 @@ export function Create() {
               <label className="field"><span>Product name <span className="muted small">(optional)</span></span>
                 <input className="input" maxLength={80} value={form.productName} placeholder="Aqua Steel bottle" onChange={(e) => set({ productName: e.target.value })} />
               </label>
+              <label className="field"><span>Video model <span className="chip" style={{ marginLeft: 6 }}>Admin test</span></span>
+                <select className="select" value={form.adModel} onChange={(e) => set({ adModel: e.target.value as AdModel, ...(e.target.value === "seedance" && { seconds: ONE_SHOT_SECONDS.max }) })}>
+                  {adModels.map((m) => <option key={m} value={m}>{adModelNames[m]}</option>)}
+                </select>
+                <span className="hint">{form.adModel === "seedance"
+                  ? "One request films the whole ad, up to 15 seconds, and cuts between its shots itself. About three times the price of the other model."
+                  : "Every shot is drawn with your photos and filmed on its own, about 5 seconds each. A single shot can be made again later."}</span>
+              </label>
               <label className="field"><span>What is it, and what should the ad say?</span>
                 <textarea className="textarea" rows={4} maxLength={STORY_MAX_CHARS} value={form.prompt} placeholder={t.examples[0]} onChange={(e) => set({ prompt: e.target.value })} />
                 <span className="hint">What it is, who it is for and what makes it good. The ad says only what you write here: no invented prices or claims.</span>
@@ -273,9 +281,10 @@ export function Create() {
           {t.kind !== "script" && t.kind !== "backdrop" && (
             <label className="field"><span>Length</span>
               <div className="seg" role="group" aria-label="Length">
-                {(ad ? adLengths : lengths).map((n) => <button key={n} type="button" aria-pressed={form.seconds === n} onClick={() => set({ seconds: n })}>{n < 60 ? `${n} s` : n === 60 ? "1 min" : "1½ min"}</button>)}
+                {(ad ? adLengths.filter((n) => form.adModel !== "seedance" || n <= ONE_SHOT_SECONDS.max) : lengths).map((n) => <button key={n} type="button" aria-pressed={form.seconds === n} onClick={() => set({ seconds: n })}>{n < 60 ? `${n} s` : n === 60 ? "1 min" : "1½ min"}</button>)}
               </div>
-              {ad ? <span className="hint">{`About ${creditsLabel(adCredits(form.seconds))}: the video, and a filmed shot for every ${CLIP_SECONDS} seconds of it. The draft shows the exact price before anything is charged.`}</span>
+              {ad && form.adModel === "seedance" ? <span className="hint">{`About ${creditsLabel(adCredits(form.seconds, "seedance"))}: the video, and its one shot. The draft shows the exact price before anything is charged.`}</span>
+                : ad ? <span className="hint">{`About ${creditsLabel(adCredits(form.seconds))}: the video, and a filmed shot for every ${CLIP_SECONDS} seconds of it. The draft shows the exact price before anything is charged.`}</span>
                 : <span className="hint">{creditsLabel(videoCredits(form.seconds))} to make (1 per {SECONDS_PER_CREDIT} seconds).</span>}
             </label>
           )}
@@ -336,7 +345,9 @@ export function Create() {
         </div>
         <div className="card stack">
           {ad ? (
-            <p className="muted small">Each shot is drawn with your photos, so it shows your product in the shot's setting, then filmed for a few seconds with its own sound. A voiceover in the voice you chose, subtitles and music go over the shots. You can change every line and shot in the draft.</p>
+            <p className="muted small">{form.adModel === "seedance"
+              ? "The whole ad is filmed in one shot from your photos, with its own sound, as long as its voiceover. A voiceover in the voice you chose, subtitles and music go over it. You can change every line and shot in the draft."
+              : "Each shot is drawn with your photos, so it shows your product in the shot's setting, then filmed for a few seconds with its own sound. A voiceover in the voice you chose, subtitles and music go over the shots. You can change every line and shot in the draft."}</p>
           ) : t.kind === "backdrop" ? (
             <p className="muted small">Storytime videos play your story over a looping background clip from the library, with bold subtitles. You can swap the clip in the editor.</p>
           ) : (

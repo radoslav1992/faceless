@@ -9,7 +9,7 @@ import { safeEqual, token } from "./security";
 import { extOf, head, imageInfo, mediaKey, serveObject, storedDuration, storeStream } from "./storage";
 import { keepSeriesCharacter, seriesCharacter } from "./characters";
 import { fetchOutput } from "./providers/http";
-import { canFallBack, clipModelFor, falResult, falStatus, referenceModel, submitFal, submitFalLipSync, submitFalAdShot, submitFalShot, type FalTicket, type Reference } from "./providers/fal";
+import { canFallBack, clipModelFor, falResult, falStatus, referenceModel, submitFal, submitFalLipSync, submitFalAdShot, submitFalOneShot, submitFalShot, type FalTicket, type Reference } from "./providers/fal";
 import { isAdmin } from "./auth";
 import { forcedAlignment, speak, speakDialogue, wav } from "./providers/elevenlabs";
 import { avatarVideoStatus, heygenClipRequest, heygenClipStatus, heygenRetry, submitAvatarVideo, submitHeyGenClip } from "./providers/heygen";
@@ -29,6 +29,7 @@ import {
 } from "../shared/formats";
 import { PRESENTER_ENGINES } from "../shared/presenter";
 import { CLIP_SECONDS, type ClipModel } from "../shared/credits";
+import { oneShotSeconds } from "../shared/ad";
 import { trackSchema, type Track } from "../shared/track";
 import { FPS, narrationKey, narrationVoice, placeKey, storyScript, storySegments, storyTiming, textWords, voiceRuns, voicedScript } from "../shared/story";
 import { LIP_SYNC_MIN_SECONDS, TAKE_HEARD, takeKey, takeOf, voiceSampleText, VOICE_SAMPLE_SECONDS } from "../shared/drama";
@@ -218,6 +219,9 @@ async function generateMedia(
       // A film's cutaway: its picture brought to life without speech, by the same model as the shots around it.
       : m.cutaway
       ? await submitFalShot(e, { image: image ?? await sourcePicture(e, run, m), prompt: m.prompt, seconds: length, sheet })
+      // An ad in one shot: the whole ad from the photos of the product, as long as the voice recorded before it.
+      : m.oneShot
+      ? await submitFalOneShot(e, { prompt: m.prompt, seconds: await oneShotLength(e, run, m.oneShot), photos: refs.map((r) => r.url) })
       // An ad's shot: its picture filmed with the photos of the product (shared/ad.ts), which `references` gives.
       : m.product && kind === "clip"
       ? await submitFalAdShot(e, { image: image ?? await sourcePicture(e, run, m), prompt: m.prompt, seconds: m.seconds ?? CLIP_SECONDS, photos: refs.map((r) => r.url), name: await productName(e, run) })
@@ -314,11 +318,15 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
       const assetId = shot ? shot.assetId : m.kind === "image"
         // An ad's pictures are drawn from the photos of its product; any other from the video's reference sheets.
         ? await drawPicture(e, step, run, `ai-${i}`, m, phase, () => (m.product ? productPhotos(e, run, first) : referencePictures(e, run, sheets, first.scenes[m.path[1] as number]?.place)))
+        // An ad in one shot is filmed from the photos alone.
+        : m.oneShot ? await generateMedia(e, step, run, `ai-${i}`, m, phase, undefined, () => productPhotos(e, run, first))
         // An ad's shot is filmed from its picture with the same photos.
         : m.product ? await generateMedia(e, step, run, `ai-${i}`, m, phase, () => sourcePicture(e, run, m), () => productPhotos(e, run, first))
         : m.lipSync || m.cutaway ? await generateMedia(e, step, run, `ai-${i}`, m, phase, () => sourcePicture(e, run, m))
           : await makeClip(e, step, run, `ai-${i}`, m, phase, models.get(i)!, m.from ? () => sourcePicture(e, run, m) : undefined);
       await step.do(`ai-${i}-apply`, async () => updateSpec(e, videoId, (spec) => {
+        // An ad's one shot is the video's background clip.
+        if (m.oneShot) { spec.backdrop = { assetId }; return; }
         let target = spec;
         for (const part of m.path) target = target[part];
         target[m.key] = assetId;
@@ -333,7 +341,8 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
   for (const [i, m] of pending.entries()) if (m.kind === "clip" && !m.lipSync && !m.acted && !m.cutaway && !m.product) models.set(i, await step.do(`ai-${i}-model`, () => sceneClipModel(e, run, m)));
   // A lip-synced clip is made from its scene's stretch of the voice, so after it too (it has no model to choose); so
   // is a film's cutaway, asked for as long as its scene is on the voice's clock.
-  const afterVoice = (m: PendingMedia, i: number) => m.kind === "clip" && !!m.from && (!!m.lipSync || !!m.cutaway || models.get(i) === "heygen-video-1");
+  // So is an ad's one shot, asked for as long as the voice.
+  const afterVoice = (m: PendingMedia, i: number) => m.kind === "clip" && (!!m.oneShot || (!!m.from && (!!m.lipSync || !!m.cutaway || models.get(i) === "heygen-video-1")));
   await make((m, i) => !afterVoice(m, i));
   // A film records no narration: its shots say their own lines.
   if (first.narration.kind === "voice" && !narrationCurrent(first) && !isFilm(first)) await makeNarration(e, step, run, first, phase);
@@ -638,6 +647,20 @@ async function productPhotos(e: Env, run: RunInfo, spec: StorySpec): Promise<Ref
   const refs: Reference[] = [];
   for (const id of ids) refs.push({ url: await inputUrl(e, run.id, keys.get(id)!), role: "product" });
   return refs;
+}
+/**
+ * How long an ad's one shot is asked for: as long as the voice recorded for it (shared/ad.ts oneShotSeconds), else the
+ * `estimate` made from its script.
+ */
+async function oneShotLength(e: Env, run: RunInfo, estimate: number) {
+  try {
+    const spec = await loadSpec(e, run.video_id);
+    if (isHighlight(spec)) return estimate;
+    const voice = await narrationContext(e, run.user_id, spec);
+    return voice.duration > 0 ? oneShotSeconds(voice.duration) : estimate;
+  } catch {
+    return estimate;
+  }
 }
 /** What the ad's product is called, for the video model (empty when the owner gave no name). */
 async function productName(e: Env, run: RunInfo) {
