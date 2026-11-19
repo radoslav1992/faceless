@@ -4,6 +4,7 @@ import { plans } from "../shared/plans";
 import { CURRENCY, price } from "../shared/money";
 import { PRODUCT } from "../shared/brand";
 import { IMMEDIATE_START_TEXT, IMMEDIATE_START_VERSION } from "../shared/withdrawal";
+import { rendererName } from "../server/renderer";
 
 // Two sites from one codebase (docs/SITES.md): what Hookstreak is must not move, and Реч БГ's setup must follow the code.
 it("is Hookstreak in name, currency and consent wording", () => {
@@ -49,4 +50,11 @@ it("gives each site its own Worker, database, bucket and workflows", () => {
   const deploy = readFileSync(".github/workflows/deploy-rechbg.yml", "utf8");
   expect(deploy).toContain("\non:\n  push:\n    branches: [rechbg]\n  workflow_dispatch:\n");
   expect(readFileSync(".github/workflows/deploy.yml", "utf8")).toContain("\n  push:\n    branches: [main]\n");
+});
+
+// Реч БГ's Worker was the earlier app's, whose renderer objects (render-0…2) hold settings this code cannot apply:
+// Реч БГ's renderers have other names, and Hookstreak's keep theirs.
+it("names Hookstreak's renderers as before, and Реч БГ's apart from the earlier app's", () => {
+  expect([0, 1, 2].map(rendererName)).toEqual(["render-0", "render-1", "render-2"]);
+  expect(readFileSync("server/renderer.ts", "utf8")).toContain('SITE_ID === "rechbg" ? "rechbg-render" : "render"');
 });

@@ -3,6 +3,7 @@ import { catalogOf, localized, t, translator, type Catalog } from "../shared/i18
 import { SITE, SITE_ID } from "../shared/site";
 import { bg } from "../shared/locales/bg";
 import { translateProps } from "../src/i18n/translate";
+import { FAILED, failureMessages } from "../server/content-workflow";
 
 // Two sites from one codebase (docs/SITES.md): Hookstreak is the default and must stay exactly as it is.
 it("is Hookstreak, in English, unless the build says otherwise", () => {
@@ -50,4 +51,14 @@ it("keeps the catalog's keys as the code writes them", () => {
     expect(english, english).toBe(english.trim());
     expect(bulgarian.trim().length, english).toBeGreaterThan(0);
   }
+});
+
+// A failed video keeps its reason as English text (videos.render_error); the page translates it when it is shown.
+it("has Bulgarian for every reason a video can fail, with and without the refund", () => {
+  const missed: string[] = [], say = translator(catalogOf(bg), (text) => missed.push(text));
+  for (const message of [...Object.values(failureMessages), FAILED]) {
+    expect(say(message), message).not.toBe(message);
+    expect(say(`${message} Your credits were refunded.`)).toBe(`${say(message)} Кредитите ви бяха възстановени.`);
+  }
+  expect(missed).toEqual([]);
 });

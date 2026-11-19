@@ -2,6 +2,7 @@ import { Container } from "@cloudflare/containers";
 import type { Env } from "./types";
 import type { RenderPayload, RenderStatus } from "../shared/render";
 import { PRODUCT } from "../shared/brand";
+import { SITE_ID } from "../shared/site";
 
 /** The private FFmpeg container (renderer/server.py). It only downloads capability links from this site. */
 export class MediaRenderer extends Container<Env> {
@@ -34,7 +35,16 @@ export class MediaRenderer extends Container<Env> {
 // the download and a stop reach the same container.
 export const RENDERERS = 3;
 export const hashSlot = (id: string) => (parseInt(id.replace(/[^0-9a-f]/gi, "").slice(0, 8), 16) || 0) % RENDERERS;
-const container = (e: Env, slot: number) => e.MEDIA_RENDERER!.get(e.MEDIA_RENDERER!.idFromName(`render-${slot}`));
+// Реч БГ's Worker is the earlier Реч БГ app's (docs/SITES.md), whose renderers were named render-0…2 as well. Those
+// objects still hold the earlier app's settings for handing the container's downloads to the Worker, which this code
+// cannot apply (it has no ContainerProxy), so their containers never start. Реч БГ's renderers have names of their own.
+export const rendererName = (slot: number) => `${SITE_ID === "rechbg" ? "rechbg-render" : "render"}-${slot}`;
+const container = (e: Env, slot: number) => e.MEDIA_RENDERER!.get(e.MEDIA_RENDERER!.idFromName(rendererName(slot)));
+/** A renderer that did not take or answer a request: what it said goes to Workers Logs (people read "didn't answer"). */
+async function unavailable(r: Response, slot: number, what: string): Promise<never> {
+  console.error("Renderer unavailable", { slot, what, status: r.status, body: (await r.text().catch(() => "")).slice(0, 300) });
+  throw new Error("RENDERER_UNAVAILABLE");
+}
 
 /**
  * Hands a job to a container: the recorded one, else the hash slot, else the next free one. A container answers 200
@@ -49,7 +59,7 @@ export async function submitRender(e: Env, payload: RenderPayload, recorded: num
     await record(slot);
     const r = await container(e, slot).fetch("http://renderer/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     if (r.status === 429) continue;
-    if (!r.ok) throw new Error("RENDERER_UNAVAILABLE");
+    if (!r.ok) await unavailable(r, slot, "submit");
     return slot;
   }
   await record(first);
@@ -58,12 +68,12 @@ export async function submitRender(e: Env, payload: RenderPayload, recorded: num
 export async function renderStatus(e: Env, slot: number, id: string): Promise<RenderStatus> {
   const r = await container(e, slot).fetch(`http://renderer/jobs/${id}`);
   if (r.status === 404) return { status: "failed", error: "MEDIA_LOST" };
-  if (!r.ok) throw new Error("RENDERER_UNAVAILABLE");
+  if (!r.ok) await unavailable(r, slot, "status");
   return r.json() as Promise<RenderStatus>;
 }
 export async function renderFile(e: Env, slot: number, id: string, n: number) {
   const r = await container(e, slot).fetch(`http://renderer/jobs/${id}/file/${n}`);
-  if (!r.ok) throw new Error("RENDERER_UNAVAILABLE");
+  if (!r.ok) await unavailable(r, slot, "file");
   return r;
 }
 /** Best effort: forgets a finished job or stops one still running (frees the slot at once). */

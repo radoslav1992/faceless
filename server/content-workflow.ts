@@ -68,7 +68,8 @@ async function inputUrl(e: Env, runId: string, key: string) {
   return `${siteUrl(e)}/api/render-inputs/${runId}/${s.inputs!.indexOf(key)}?token=${s.token}`;
 }
 
-const messages: Record<string, string> = {
+/** What people read when a video fails, by the reason's code. */
+export const failureMessages: Record<string, string> = {
   ...renderFailures,
   GENERATION_REJECTED: "An AI picture or clip was refused by the content filter. Describe it differently.",
   GENERATION_UNAVAILABLE: "AI pictures are temporarily unavailable. Try again later.",
@@ -86,11 +87,12 @@ const messages: Record<string, string> = {
   VIDEO_INVALID: "This video's settings aren't valid any more. Open it and save it again.",
   STORAGE_FULL: "Your storage is full, so this video couldn't be kept. Delete some files or videos, or upgrade your plan, then try again.",
 };
+export const FAILED = "This video couldn't be made. Please try again.";
 /** Fails a run exactly once (the trigger refunds its credits) and tells its video why. */
 export async function failRun(e: Env, id: string, code = "INTERNAL") {
   const run = await e.DB.prepare("SELECT video_id,credits,status FROM runs WHERE id=?").bind(id).first<any>();
   if (!run || !["queued", "running"].includes(run.status)) return;
-  const message = `${messages[code] || "This video couldn't be made. Please try again."}${run.credits > 0 ? " Your credits were refunded." : ""}`;
+  const message = `${failureMessages[code] || FAILED}${run.credits > 0 ? " Your credits were refunded." : ""}`;
   await e.DB.batch([
     e.DB.prepare("UPDATE runs SET status='failed',phase='failed',error=?,updated_at=? WHERE id=? AND status IN ('queued','running')").bind(/^[A-Z_]{2,40}$/.test(code) ? code : "INTERNAL", now(), id),
     ...(run.video_id ? [e.DB.prepare("UPDATE videos SET render_status='failed',render_error=?,updated_at=? WHERE id=? AND render_status IN ('queued','running')").bind(message, now(), run.video_id)] : []),
