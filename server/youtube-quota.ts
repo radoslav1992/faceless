@@ -1,3 +1,4 @@
+import { SITE } from "../shared/site";
 import type { Env } from "./types";
 import { now } from "./types";
 import { readState, writeState } from "./ops-state";
@@ -15,7 +16,7 @@ export const UPLOAD_WARNING = 0.8;
 export const DEFAULT_UPLOADS_DAILY = 100;
 export const QUOTA_FORM = "https://support.google.com/youtube/contact/yt_api_form";
 
-const pacific = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" });
+const pacific = new Intl.DateTimeFormat(SITE.locale, { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" });
 /** The day YouTube's quota counts, in Pacific time: "2026-11-02". */
 export function quotaDay(at = Date.now()) {
   const part = (type: string) => pacific.formatToParts(at).find((p) => p.type === type)!.value;

@@ -1,3 +1,4 @@
+import { SITE } from "./site";
 import { z } from "zod";
 
 // A series' posting rhythm: daily times in its own time zone on chosen weekdays. The series makes an episode for every
@@ -15,11 +16,11 @@ export const videosPerMonth = (s: Pick<Schedule, "times" | "days">) => Math.roun
 
 /** Whether `tz` is a time zone this runtime knows. */
 export function validZone(tz: string) {
-  try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); return true; } catch { return false; }
+  try { new Intl.DateTimeFormat(SITE.locale, { timeZone: tz }); return true; } catch { return false; }
 }
 /** The wall-clock parts of a moment in a time zone. */
 function parts(at: number, tz: string) {
-  const f = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", weekday: "short" });
+  const f = new Intl.DateTimeFormat(SITE.locale, { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", weekday: "short" });
   const p = Object.fromEntries(f.formatToParts(new Date(at * 1000)).map((x) => [x.type, x.value]));
   return { y: +p.year, m: +p.month, d: +p.day, h: +p.hour, min: +p.minute, s: +p.second, weekday: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p.weekday) };
 }

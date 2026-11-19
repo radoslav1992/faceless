@@ -1,3 +1,4 @@
+import { SITE } from "../shared/site";
 import { HTTPException } from "hono/http-exception";
 import type { DbUser, Env } from "./types";
 import { HOUR, MB, now, uid } from "./types";
@@ -193,7 +194,7 @@ export async function importLink(env: Env, user: DbUser, raw: string) {
   }
   const plan = planById((await allowance(env, user)).plan), max = plan.videoMb * MB;
   if (found.bytes && found.bytes > max)
-    throw new HTTPException(413, { message: `Videos can be up to ${(max / MB).toLocaleString("en-US")} MB${plan.id === "free" ? " on the free trial; paid plans take videos up to 2 hours" : ""}.` });
+    throw new HTTPException(413, { message: `Videos can be up to ${(max / MB).toLocaleString(SITE.locale)} MB${plan.id === "free" ? " on the free trial; paid plans take videos up to 2 hours" : ""}.` });
   // The size is reserved now (the plan's largest video when the link doesn't tell), so imports can't overfill storage.
   return startImport(env, user, plan, { name: found.name, mime: found.mime, bytes: found.bytes || max, source: { url: found.link, limit: found.bytes || max } });
 }

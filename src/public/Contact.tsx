@@ -1,3 +1,4 @@
+import { SITE } from "../../shared/site";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Building2, CircleCheck, Mail, MapPin } from "lucide-react";
@@ -116,7 +117,7 @@ export function Contact() {
                   onChange={(e) => setMessage(e.target.value)}
                   aria-describedby="message-count"
                 />
-                <small className="count" id="message-count">{message.length.toLocaleString("en-US")} / {MESSAGE_MAX.toLocaleString("en-US")} characters</small>
+                <small className="count" id="message-count">{message.length.toLocaleString(SITE.locale)} / {MESSAGE_MAX.toLocaleString(SITE.locale)} characters</small>
               </label>
               {topic === "abuse" && (
                 <p className="notice full">Please include links to the videos or accounts involved, and what is wrong with them.</p>

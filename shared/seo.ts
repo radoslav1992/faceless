@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { PRODUCT } from "./brand";
 import { tools } from "./templates";
 
@@ -31,6 +32,10 @@ const privatePages: Record<string, string> = {
 export type PageMeta = { title: string; description: string; route: string | null; indexable: boolean };
 /** The page's metadata; `route` is null for paths the app does not know (a real 404). */
 export function pageMeta(path: string): PageMeta {
+  const meta = englishMeta(path);
+  return { ...meta, title: t(meta.title), description: t(meta.description) };
+}
+function englishMeta(path: string): PageMeta {
   const clean = path.replace(/\/+$/, "") || "/";
   const page = publicPages[clean];
   if (page) return { title: page.title, description: page.description, route: clean, indexable: true };

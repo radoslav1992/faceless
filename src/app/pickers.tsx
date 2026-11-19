@@ -44,6 +44,7 @@
  * - useStableCallback(fn) — a stable function that always calls the latest `fn` (use it for Modal's onClose).
  * - useSignedInUser(), creditBlock(user, cost), assetKindLabel(kind), formatDate(unix), ago(unix), Empty, GridSkeleton.
  */
+import { SITE } from "../../shared/site";
 import {
   useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState,
   type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode,
@@ -116,7 +117,7 @@ const kindLabels: Record<string, string> = { upload: "Upload", ai_image: "AI pic
 export const assetKindLabel = (kind: string) => kindLabels[kind] || "File";
 
 export const formatDate = (unix: number, withTime = false) =>
-  new Date(unix * 1000).toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", ...(withTime ? { hour: "2-digit", minute: "2-digit" } : {}) });
+  new Date(unix * 1000).toLocaleString(SITE.id === "rechbg" ? SITE.locale : undefined, { day: "numeric", month: "short", year: "numeric", ...(withTime ? { hour: "2-digit", minute: "2-digit" } : {}) });
 /** "just now", "5 min ago", "3 h ago", "2 days ago", or the date. */
 export function ago(unix: number) {
   const s = Math.max(0, Date.now() / 1000 - unix);
@@ -507,7 +508,7 @@ export function useUploads(options: { only?: MediaType; onDone?: (asset: Asset) 
         ? only ? `Choose ${typeWords[only].one} file.` : "This file type isn't supported. Upload JPG, PNG or WebP images, MP4, MOV or WebM videos, or MP3, WAV, M4A or OGG tracks."
         : only && type !== only ? `Choose ${typeWords[only].one} file.`
         : file.size > limitFor(type, settings.current.plan)
-          ? `${typeWords[type].many} can be up to ${(limitFor(type, settings.current.plan) / MB).toLocaleString("en-US")} MB${type === "video" && planById(settings.current.plan).id === "free" ? " on the free trial (paid plans take videos up to 2 hours)" : ""}.`
+          ? `${typeWords[type].many} can be up to ${(limitFor(type, settings.current.plan) / MB).toLocaleString(SITE.locale)} MB${type === "video" && planById(settings.current.plan).id === "free" ? " on the free trial (paid plans take videos up to 2 hours)" : ""}.`
         : file.size < 24 ? "This file is empty." : null;
       const key = newKey();
       fresh.push({ key, name: file.name, bytes: file.size, type, progress: 0, status: problem ? "failed" : "queued", error: problem, asset: null });

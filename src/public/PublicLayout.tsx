@@ -15,7 +15,7 @@ export type PublicConfig = {
   registrationEnabled: boolean;
   billingEnabled: boolean;
   mediaEnabled: boolean;
-  company: { name: string | null; address: string | null; email: string | null };
+  company: { name: string | null; address: string | null; email: string | null; id?: string | null };
 };
 let cachedConfig: PublicConfig | null = null;
 let pendingConfig: Promise<PublicConfig> | null = null;

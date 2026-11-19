@@ -1,3 +1,4 @@
+import { SITE } from "./site";
 import { z } from "zod";
 import { captionStyles, type CaptionStyle } from "./captions";
 import { scheduleSchema } from "./schedule";
@@ -35,7 +36,7 @@ export const lengthName = (s: number) => (s < 60 ? `${s} seconds` : s === 60 ? "
 export const seriesSettingsSchema = z.object({
   /** The owner's topic and direction (required for "Your own topic", optional extra guidance for the others). */
   prompt: z.string().trim().max(600).default(""),
-  language: z.enum(languageCodes as [LanguageCode, ...LanguageCode[]]).default("en"),
+  language: z.enum(languageCodes as [LanguageCode, ...LanguageCode[]]).default(SITE.narration as LanguageCode),
   /** One of the voices offered (server/voices.ts checks it is, or that the series already had it). */
   voiceId: voiceIdSchema.default(FALLBACK_VOICE),
   style: z.enum(storyStyleIds as [StoryStyle, ...StoryStyle[]]).default("doodle"),

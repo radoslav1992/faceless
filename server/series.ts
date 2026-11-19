@@ -1,3 +1,4 @@
+import { SITE } from "../shared/site";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -406,7 +407,7 @@ export async function dispatchSeries(env: Env) {
 }
 
 const mail = (env: Env, to: string, subject: string, lines: string[]) => sendMail(env, to, subject, [...lines, "", `— ${PRODUCT.name}`].join("\n"));
-const when = (at: number, tz: string) => new Intl.DateTimeFormat("en-US", { timeZone: validZone(tz) ? tz : "UTC", dateStyle: "medium", timeStyle: "short" }).format(new Date(at * 1000));
+const when = (at: number, tz: string) => new Intl.DateTimeFormat(SITE.locale, { timeZone: validZone(tz) ? tz : "UTC", dateStyle: "medium", timeStyle: "short" }).format(new Date(at * 1000));
 
 /**
  * A video is ready: an approved episode is scheduled on its series' channels, and the owner hears about it once

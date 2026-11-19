@@ -1,3 +1,4 @@
+import { SITE } from "../shared/site";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -88,7 +89,7 @@ media.post("/uploads", async (c) => {
   const plan = type.kind === "video" ? planById((await allowance(c.env, user)).plan) : null;
   const max = plan ? plan.videoMb * MB : type.max;
   if (d.bytes > max)
-    throw new HTTPException(413, { message: `${type.kind === "image" ? "Images" : type.kind === "video" ? "Videos" : "Tracks"} can be up to ${(max / MB).toLocaleString("en-US")} MB${plan?.id === "free" ? " on the free trial; paid plans take videos up to 2 hours" : ""}.` });
+    throw new HTTPException(413, { message: `${type.kind === "image" ? "Images" : type.kind === "video" ? "Videos" : "Tracks"} can be up to ${(max / MB).toLocaleString(SITE.locale)} MB${plan?.id === "free" ? " on the free trial; paid plans take videos up to 2 hours" : ""}.` });
   const id = uid(), key = mediaKey(user.id, id, extOf(d.mime.toLowerCase()));
   // The full size is reserved now, so many parallel uploads cannot overfill the storage. The check allows the length
   // of the plan the file was uploaded on.

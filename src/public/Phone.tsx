@@ -1,3 +1,4 @@
+import { t } from "../../shared/i18n";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { StyleArt } from "../art";
 import { ExampleVideo, type Example } from "../examples";
@@ -16,7 +17,8 @@ function groups(text: string) {
   return out.length ? out : [[""]];
 }
 export function Captions({ text, color = "#fff", accent = "var(--brand)" }: { text: string; color?: string; accent?: string }) {
-  const parts = useMemo(() => groups(text), [text]);
+  // The sample's words in the site's language (shared/i18n.ts): the line is split into words here, so no element shows it whole.
+  const parts = useMemo(() => groups(t(text)), [text]);
   const [n, setN] = useState(0);
   useEffect(() => {
     setN(0);

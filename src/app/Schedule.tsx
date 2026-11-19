@@ -1,3 +1,4 @@
+import { SITE } from "../../shared/site";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { CalendarClock, ChevronLeft, ChevronRight, Film, Repeat } from "lucide-react";
@@ -18,10 +19,10 @@ const startOfDay = (at: number) => { const d = new Date(at * 1000); d.setHours(0
 const dayKey = (at: number) => new Date(at * 1000).toDateString();
 const dayName = (at: number) => {
   const today = startOfDay(Date.now() / 1000), day = startOfDay(at);
-  const label = new Date(at * 1000).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+  const label = new Date(at * 1000).toLocaleDateString(SITE.locale, { weekday: "long", month: "short", day: "numeric" });
   return day === today ? `Today · ${label}` : day === today + DAY ? `Tomorrow · ${label}` : label;
 };
-const time = (at: number) => new Date(at * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+const time = (at: number) => new Date(at * 1000).toLocaleTimeString(SITE.locale, { hour: "numeric", minute: "2-digit" });
 const statusText: Record<Publication["status"], string> = { scheduled: "Scheduled", publishing: "Posting", published: "Posted", failed: "Failed", canceled: "Canceled" };
 const statusChip: Record<Publication["status"], string> = { scheduled: "violet", publishing: "orange", published: "green", failed: "red", canceled: "" };
 
@@ -47,7 +48,7 @@ export function SchedulePage() {
     for (const item of items) grouped.set(dayKey(item.at), [...(grouped.get(dayKey(item.at)) || []), item]);
     return [...grouped.values()];
   }, [data, series.data, from, to]);
-  const range = `${new Date(from * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${new Date((to - 1) * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+  const range = `${new Date(from * 1000).toLocaleDateString(SITE.locale, { month: "short", day: "numeric" })} – ${new Date((to - 1) * 1000).toLocaleDateString(SITE.locale, { month: "short", day: "numeric" })}`;
   return (
     <main className="page">
       <div className="page-head">

@@ -1,3 +1,4 @@
+import { importLibrary } from "./library-import";
 import type { Env } from "./types";
 import { now, DAY, HOUR, MINUTE } from "./types";
 import { dispatchDue, refreshAccounts } from "./publishing";
@@ -39,6 +40,8 @@ export async function maintenance(e: Env, at = Date.now()) {
   if (e.MEDIA_ENABLED === "true") await stage("series", () => dispatchSeries(e));
   if (minute % 5 === 0) await stage("runs", () => reconcileRuns(e));
   // Offset from the runs stage; each pass reads at most 40 posts (metrics.ts).
+  // Реч БГ: Hookstreak's library, a few items a pass until it is all here, then whatever Hookstreak adds (library-import.ts).
+  if (minute % 5 === 1 && e.HOOKSTREAK_DB) await stage("library", () => importLibrary(e));
   if (minute % 5 === 2) await stage("stats", () => refreshMetrics(e));
   // Warns administrators when YouTube uploads near the project's daily limit (youtube-quota.ts).
   if (minute % 5 === 4) await stage("youtube-quota", () => reportUploads(e));

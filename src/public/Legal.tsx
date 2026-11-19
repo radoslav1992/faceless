@@ -1,3 +1,4 @@
+import { SITE } from "../../shared/site";
 import { useEffect, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { PRODUCT } from "../../shared/brand";
@@ -18,7 +19,7 @@ type Operator = { name: ReactNode; address: string | null; contact: ReactNode; p
 type Section = { id: string; title: string; body: ReactNode };
 
 const formatDate = (iso: string) =>
-  new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString(SITE.locale, { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
 
 function terms(op: Operator): Section[] {
   const name = PRODUCT.name;

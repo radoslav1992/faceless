@@ -1,3 +1,4 @@
+import { SITE } from "./site";
 // What videos cost in credits. The server charges by these rules and the pricing page shows them, so the two cannot
 // drift. Rendering (subtitles, music, sound effects, transitions, timing) never costs credits.
 
@@ -67,4 +68,4 @@ export const highlightCredits = (seconds: number) => Math.max(1, Math.ceil(secon
 export const speechCredits = (seconds: number) => Math.max(1, Math.ceil(seconds / SPEECH_CREDIT_SECONDS - 1e-9));
 
 /** "1 credit", "12 credits" */
-export const creditsLabel = (n: number) => `${n.toLocaleString("en-US")} credit${n === 1 ? "" : "s"}`;
+export const creditsLabel = (n: number) => `${n.toLocaleString(SITE.locale)} credit${n === 1 ? "" : "s"}`;

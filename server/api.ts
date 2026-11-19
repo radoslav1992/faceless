@@ -1,3 +1,4 @@
+import { SITE } from "../shared/site";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -98,7 +99,7 @@ const createSchema = z.object({
   animal: z.string().trim().max(60).default(""),
   object: z.string().trim().max(60).default(""),
   seconds: z.number().int().min(15).max(160).default(45),
-  language: z.enum(languageCodes as [string, ...string[]]).default("en"),
+  language: z.enum(languageCodes as [string, ...string[]]).default(SITE.narration),
   voice: voiceIdSchema.optional(),
   style: z.enum(storyStyleIds as [string, ...string[]]).optional(),
 });

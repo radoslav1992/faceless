@@ -8,6 +8,9 @@ export interface Env {
   CONTENT?: Workflow<{ runId?: string; inspectId?: string; importId?: string; episode?: { seriesId: string; slot: number; first?: boolean } }>;
   PUBLISH?: Workflow<{ publicationId: string }>;
   MEDIA_RENDERER?: DurableObjectNamespace;
+  /** Реч БГ only (wrangler.rechbg.jsonc): Hookstreak's database and bucket, read to copy its library (server/library-import.ts). Never written. */
+  HOOKSTREAK_DB?: D1Database;
+  HOOKSTREAK_MEDIA?: R2Bucket;
   EMAIL?: SendEmail;
   SITE_URL?: string;
   APP_ENV?: string;
@@ -20,6 +23,8 @@ export interface Env {
   ADMIN_EMAILS?: string;
   COMPANY_NAME?: string;
   COMPANY_ADDRESS?: string;
+  /** The company's registration number, shown with its name where the law asks for it (Реч БГ: ЕИК). */
+  COMPANY_ID?: string;
   TURNSTILE_SITE_KEY?: string;
   TURNSTILE_SECRET_KEY?: string;
   /** Key of the trial identifier (HMAC of the mailbox), see billing.ts trialKey. */

@@ -29,7 +29,7 @@ publicRoutes.get("/api/public/config", (c) =>
     registrationEnabled: c.env.REGISTRATION_ENABLED === "true" && ready(c.env),
     billingEnabled: c.env.BILLING_ENABLED === "true",
     mediaEnabled: mediaEnabled(c.env),
-    company: { name: c.env.COMPANY_NAME || null, address: c.env.COMPANY_ADDRESS || null, email: c.env.CONTACT_EMAIL || null },
+    company: { name: c.env.COMPANY_NAME || null, address: c.env.COMPANY_ADDRESS || null, email: c.env.CONTACT_EMAIL || null, ...(c.env.COMPANY_ID && { id: c.env.COMPANY_ID }) },
   }),
 );
 publicRoutes.post("/api/contact", async (c) => {

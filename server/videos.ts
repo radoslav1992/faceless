@@ -1,3 +1,4 @@
+import { SITE } from "../shared/site";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -59,7 +60,7 @@ export async function checkReferences(env: Env, userId: string, spec: Spec, kept
     const narrator = spec.narration.voiceId;
     for (const id of new Set(spec.scenes.flatMap((s) => (s.voiceId && s.voiceId !== narrator ? [s.voiceId] : []))))
       if (!(await voiceUsable(env, id, id, userId))) throw new HTTPException(400, { message: "A scene is said in a voice that is no longer available. Choose another voice for it." });
-    if (storyScript(spec.scenes).length > STORY_MAX_CHARS) throw new HTTPException(400, { message: `The script can be up to ${STORY_MAX_CHARS.toLocaleString("en-US")} characters (about ${Math.round(STORY_MAX_CHARS / 15)} seconds).` });
+    if (storyScript(spec.scenes).length > STORY_MAX_CHARS) throw new HTTPException(400, { message: `The script can be up to ${STORY_MAX_CHARS.toLocaleString(SITE.locale)} characters (about ${Math.round(STORY_MAX_CHARS / 15)} seconds).` });
   } else {
     const a = await env.DB.prepare("SELECT mime,duration,meta FROM media_assets WHERE id=? AND user_id=?").bind(spec.narration.assetId, userId).first<{ mime: string; duration: number; meta: string }>();
     if (!a || !/^(audio|video)\//.test(a.mime) || a.meta.includes('"hasAudio":false')) throw new HTTPException(400, { message: "Choose your voiceover: one of your audio or video files with sound." });

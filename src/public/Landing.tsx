@@ -1,3 +1,4 @@
+import { t as say } from "../../shared/i18n";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { homeFaq } from "../../shared/faq";
@@ -41,8 +42,8 @@ function Demo() {
   const navigate = useNavigate();
   const [backdrop, setBackdrop] = useState(backdrops[0].id);
   const [color, setColor] = useState(colors[0].id);
-  const [title, setTitle] = useState("What decision quietly changed your life?");
-  const [story, setStory] = useState("I almost said no to a free trip with strangers. I went anyway. On the second night, a stranger at the campfire asked what I'd do if money didn't matter. I answered without thinking. A year later, that answer was my job.");
+  const [title, setTitle] = useState(() => say("What decision quietly changed your life?"));
+  const [story, setStory] = useState(() => say("I almost said no to a free trip with strangers. I went anyway. On the second night, a stranger at the campfire asked what I'd do if money didn't matter. I answered without thinking. A year later, that answer was my job."));
   const caption = useMemo(() => story.split(/\s+/).slice(0, 60).join(" "), [story]);
   const start = () => {
     try { localStorage.setItem(DEMO_DRAFT, JSON.stringify({ template: "storytime", title, script: story, color, at: Date.now() })); } catch { /* storage unavailable */ }

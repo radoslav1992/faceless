@@ -1,3 +1,4 @@
+import { SITE } from "../../shared/site";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Clapperboard, Film, Image as ImageIcon, Library, Merge, RefreshCw, Scissors, Sparkles, Star, Trash2, Type, Wand2 } from "lucide-react";
 import { api, fileUrl, useAuth, useAvatars, useVoices, type Asset, type LibraryItem } from "../lib";
@@ -457,7 +458,7 @@ function StoryPlan({ spec, creditsLeft, music, initial, recordingSeconds }: { sp
       ["Subtitles, transitions" + (music ? ", music" : "") + (spec.sounds?.enabled ? ", sound effects" : ""), "rendering", 0],
     ]
     : [
-      ...(film ? [] : [[`New narration${voiceName ? ` · ${voiceName}` : ""}`, p.voice ? `${p.script.length.toLocaleString("en-US")} characters` : "unchanged", p.voice] as [string, string, number | null]]),
+      ...(film ? [] : [[`New narration${voiceName ? ` · ${voiceName}` : ""}`, p.voice ? `${p.script.length.toLocaleString(SITE.locale)} characters` : "unchanged", p.voice] as [string, string, number | null]]),
       [`New pictures · ${storyStyles[spec.style].name}`, p.pictures ? `${p.pictures} to make` : "none", p.redo],
       [clipsRow, p.clips.length ? p.clips.map((c) => `${c.seconds} s${c.quality === "high" ? " HQ" : ""}`).join(", ") : "none", p.clipCredits],
       ...presenter,
@@ -473,7 +474,7 @@ function StoryPlan({ spec, creditsLeft, music, initial, recordingSeconds }: { sp
         </tbody>
         <tfoot><tr><th scope="row">Total{creditsLeft !== null && <span>{creditsLabel(creditsLeft)} left</span>}</th><td>{creditsLabel(p.total)}</td></tr></tfoot>
       </table>
-      {spec.narration.kind === "voice" && p.script.length > STORY_MAX_CHARS && <p className="notice bad">The script is {p.script.length.toLocaleString("en-US")} characters: up to {STORY_MAX_CHARS.toLocaleString("en-US")} fit in one video.</p>}
+      {spec.narration.kind === "voice" && p.script.length > STORY_MAX_CHARS && <p className="notice bad">The script is {p.script.length.toLocaleString(SITE.locale)} characters: up to {STORY_MAX_CHARS.toLocaleString(SITE.locale)} fit in one video.</p>}
       {missing >= 0 && <p className="notice warn">Describe the picture of scene {missing + 1}.</p>}
       {unchosen >= 0 && <p className="notice warn">Choose the media of scene {unchosen + 1}.</p>}
       {creditsLeft !== null && p.total > creditsLeft && <p className="notice warn">This needs {creditsLabel(p.total)} and {creditsLabel(creditsLeft)} are left. Upgrade or add a credit pack.</p>}

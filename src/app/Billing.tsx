@@ -1,3 +1,4 @@
+import { price } from "../../shared/money";
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AlertTriangle, ArrowRight, Check, Clock, CreditCard, Gift, Undo2 } from "lucide-react";
@@ -131,7 +132,7 @@ export function BillingPage() {
             <span className="small muted">Current plan</span>
             <h2 id="current-plan" style={{ fontSize: 26, marginTop: 2 }}>
               {plan.name}
-              {!free && <span className="muted" style={{ fontSize: 16, fontWeight: 500, fontFamily: "var(--font)" }}> · {granted ? "free" : user.interval === "year" ? `$${plan.yearly}/year` : `$${plan.monthly}/month`}</span>}
+              {!free && <span className="muted" style={{ fontSize: 16, fontWeight: 500, fontFamily: "var(--font)" }}> · {granted ? "free" : user.interval === "year" ? `${price(plan.yearly)}/year` : `${price(plan.monthly)}/month`}</span>}
             </h2>
             <p>
               {free
@@ -226,7 +227,7 @@ function CheckoutConfirm({ choice, busy, onClose, onConfirm }: { choice: { plan:
   const [agreed, setAgreed] = useState(false);
   const p = planById(choice.plan), yearly = choice.interval === "year";
   return (
-    <Modal title={`${p.name} · ${yearly ? `$${p.yearly} a year` : `$${p.monthly} a month`}`} onClose={onClose} footer={
+    <Modal title={`${p.name} · ${yearly ? `${price(p.yearly)} a year` : `${price(p.monthly)} a month`}`} onClose={onClose} footer={
       <>
         <button type="button" className="btn" onClick={onClose} disabled={busy}>Back</button>
         <button type="button" className="btn primary" onClick={onConfirm} disabled={!agreed || busy}>{busy && <Spinner label="Opening checkout" />}Continue to payment<ArrowRight size={16} aria-hidden="true" /></button>

@@ -1,3 +1,5 @@
+import { t as say } from "../../shared/i18n";
+import { SITE } from "../../shared/site";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Repeat, Search, Wand2 } from "lucide-react";
@@ -72,7 +74,7 @@ export function mashupParts(prompt: string): { animal: string; object: string } 
 const formFor = (id: TemplateId, prompt = ""): Form => {
   const t = templates[id];
   const mashup = t.kind === "mashup" ? mashupParts(prompt) : { animal: "", object: "" };
-  return { prompt, script: "", title: "", ...mashup, seconds: t.seconds, language: "en", voiceId: t.voice, style: t.style, music: t.music, musicTrackId: null, subject: "", sounds: true, film: false, filmQuality: "regular", filmModel: "" };
+  return { prompt, script: "", title: "", ...mashup, seconds: t.seconds, language: SITE.narration, voiceId: t.voice, style: t.style, music: t.music, musicTrackId: null, subject: "", sounds: true, film: false, filmQuality: "regular", filmModel: "" };
 };
 
 export function Create() {
@@ -193,7 +195,7 @@ export function Create() {
           {t.kind === "script" && (
             <label className="field"><span>Your script</span>
               <textarea className="textarea" rows={9} maxLength={2400} value={form.script} placeholder={t.examples[0]} onChange={(e) => set({ script: e.target.value })} />
-              <span className="hint">{form.script.length.toLocaleString("en-US")} / 2,400 characters · every sentence or two becomes a scene.</span>
+              <span className="hint">{form.script.length.toLocaleString(SITE.locale)} / 2,400 characters · every sentence or two becomes a scene.</span>
             </label>
           )}
           {t.kind === "mashup" && (
@@ -225,7 +227,7 @@ export function Create() {
                   }}>Use Text to video</button>
                 </span>
               ) : (
-                <span className="row wrap" style={{ gap: 6 }}>{t.examples.map((x) => <button key={x} type="button" className="chip button" onClick={() => set({ prompt: x })}>{x}</button>)}</span>
+                <span className="row wrap" style={{ gap: 6 }}>{t.examples.map((x) => <button key={x} type="button" className="chip button" onClick={() => set({ prompt: say(x) })}>{x}</button>)}</span>
               )}
             </label>
           )}
