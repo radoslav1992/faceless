@@ -239,6 +239,7 @@ export function Create() {
                 </select>
                 <span className="hint">{oneShot
                   ? `One request films the whole ad, up to ${oneShot.max} seconds, and cuts between its shots itself. About ${oneShot.times} times the price of MiniMax.`
+                  : form.adModel === "heygen" ? "Every shot is drawn with your photos and filmed on its own from that picture, without the photos. The cheapest of the four."
                   : "Every shot is drawn with your photos and filmed on its own, about 5 seconds each. A single shot can be made again later."}</span>
               </label>
               <label className="field"><span>What is it, and what should the ad say?</span>
@@ -286,7 +287,7 @@ export function Create() {
                 {(ad ? adLengths.filter((n) => !oneShot || n <= oneShot.max) : lengths).map((n) => <button key={n} type="button" aria-pressed={form.seconds === n} onClick={() => set({ seconds: n })}>{n < 60 ? `${n} s` : n === 60 ? "1 min" : "1½ min"}</button>)}
               </div>
               {ad && oneShot ? <span className="hint">{`About ${creditsLabel(adCredits(form.seconds, form.adModel))}: the video, and its one shot. The draft shows the exact price before anything is charged.`}</span>
-                : ad ? <span className="hint">{`About ${creditsLabel(adCredits(form.seconds))}: the video, and a filmed shot for every ${CLIP_SECONDS} seconds of it. The draft shows the exact price before anything is charged.`}</span>
+                : ad ? <span className="hint">{`About ${creditsLabel(adCredits(form.seconds, form.adModel))}: the video, and a filmed shot for every ${CLIP_SECONDS} seconds of it. The draft shows the exact price before anything is charged.`}</span>
                 : <span className="hint">{creditsLabel(videoCredits(form.seconds))} to make (1 per {SECONDS_PER_CREDIT} seconds).</span>}
             </label>
           )}

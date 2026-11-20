@@ -15,6 +15,7 @@ import { voiceIdSchema } from "../shared/voices";
 import { offeredVoice, voiceUsable } from "./voices";
 import { SPEECH_CHARS_PER_SECOND, clipModels, clipQualities } from "../shared/credits";
 import { filmSpec } from "../shared/film";
+import { heygenEnabled } from "./providers/heygen";
 import { adSpec, oneShotOf, productSchema } from "../shared/ad";
 import { type FilmVoices, castMember, episodeTitle, filmPlaces, filmShots, lipSyncSpec, NARRATOR, SHOT_MAX_WORDS, shotsSpec } from "../shared/drama";
 import { isAdmin } from "./auth";
@@ -523,6 +524,7 @@ export async function draftVideo(env: Env, userId: string, input: DraftRequest, 
     if (!admin) throw new HTTPException(403, { message: "Product ads are still being tested and aren't available yet." });
     if (!d.product) throw new HTTPException(400, { message: "Add a photo of the product first." });
     if (d.prompt.length < 2) throw new HTTPException(400, { message: "Say what the product is first." });
+    if (d.product.model === "heygen" && !heygenEnabled(env)) throw new HTTPException(400, { message: "HeyGen isn't set up on this site, so this model can't be used." });
     // In one shot, the ad is one clip: no longer than its model makes in one request.
     const oneShot = oneShotOf(d.product.model);
     if (oneShot) d.seconds = Math.min(d.seconds, oneShot.max);

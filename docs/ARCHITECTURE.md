@@ -244,7 +244,12 @@ for a 15-second ad of three shots. The photos stay the owner's uploads: they are
 the video is saved (`server/videos.ts`), handed to fal as capability links while the run works, and never shown in
 the video themselves. Only administrators draft, make or remake one (`draftVideo`, `checkFilm`).
 
-Three video models are being compared, chosen in the ad's form (the product's `model`). The above is `minimax`. With
+Four video models are being compared, chosen in the ad's form (the product's `model`). The above is `minimax`. With
+`heygen`, HeyGen Video 1 films every shot instead (`server/providers/heygen.ts`, the clip model `heygen-video-1`
+whatever the owner may otherwise choose: the shot's `fixedModel`): from the shot's picture alone, since it takes only
+a first frame and no reference photos, as long as the shot's line is on screen, at 768p, as a regular clip (one
+credit per five seconds: 4 credits for a 15-second ad). It needs HeyGen's key (refused when it is drafted or made
+without it); a shot HeyGen can't make is made with Kling, as any HeyGen clip is. With
 `seedance` (Seedance 2.0 Fast) or `seedance-25` (Seedance 2.5) the ad is filmed **in one shot**: no pictures are
 drawn, and one request to Seedance's reference-to-video on fal (`oneShotRequest`; for `seedance`, another endpoint
 when `FAL_AD_ONE_SHOT_MODEL` names one) takes the photos and every shot's description (`oneShotPrompt`) and returns

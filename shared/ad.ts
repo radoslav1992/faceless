@@ -16,8 +16,12 @@ import { filmSpec } from "./film";
 // It is the `product` of a video of kind "ad" (shared/templates.ts). Its price is the usual one: the video by its
 // length, plus every shot as a high-quality clip by its length (shared/credits.ts).
 //
-// Two video models are being compared (the product's `model`):
+// Four video models are being compared (the product's `model`):
 //   - "minimax", as above: MiniMax H3 Max films every shot on its own, from a picture drawn for it.
+//   - "heygen": HeyGen Video 1 films every shot on its own too, from the same pictures, but without the photos: it
+//     takes only a first frame (server/providers/heygen.ts), so the product is as the picture shows it. Each shot is
+//     as long as its line is on screen (HeyGen bills by the second), at 768p, as a regular clip (one credit per five
+//     seconds). When HeyGen can't make a shot, Kling makes it instead, as for any HeyGen clip.
 //   - "seedance" (Seedance 2.0 Fast) and "seedance-25" (Seedance 2.5): Seedance films the whole ad in one shot. No pictures are drawn: one request takes the photos and
 //     all the shots' descriptions and returns one clip, cut from shot to shot by the model itself, up to 15 seconds
 //     long (30 with Seedance 2.5) (server/providers/fal.ts oneShotRequest). It is made after the voice, as long as the voice, and plays
@@ -29,12 +33,14 @@ import { filmSpec } from "./film";
 export const PRODUCT_PHOTOS_MAX = 4;
 /** A shot costs what the film's shots cost: about $0.08 a second of clip (two credits per five seconds). */
 export const AD_CLIP_QUALITY: ClipQuality = "high";
+/** The quality an ad's shots are made at, by its model: HeyGen Video 1's are regular clips (768p, a few cents a second). */
+export const adClipQuality = (model: AdModel): ClipQuality => (model === "heygen" ? "regular" : AD_CLIP_QUALITY);
 /** The lengths an ad is offered in (seconds of voiceover). */
 export const adLengths = [15, 20, 30] as const;
 /** The video models an ad is filmed with: MiniMax H3 Max shot by shot, or a Seedance model in one shot. */
-export const adModels = ["minimax", "seedance", "seedance-25"] as const;
+export const adModels = ["minimax", "heygen", "seedance", "seedance-25"] as const;
 export type AdModel = (typeof adModels)[number];
-export const adModelNames: Record<AdModel, string> = { minimax: "MiniMax H3 Max · shot by shot", seedance: "Seedance 2.0 Fast · one shot", "seedance-25": "Seedance 2.5 · one shot" };
+export const adModelNames: Record<AdModel, string> = { minimax: "MiniMax H3 Max · shot by shot", heygen: "HeyGen Video 1 · shot by shot", seedance: "Seedance 2.0 Fast · one shot", "seedance-25": "Seedance 2.5 · one shot" };
 /**
  * The models that film an ad in one shot: the longest clip one request makes (seconds), the credits per five seconds
  * of it (about $0.20 of running cost a credit, as a shot's: Seedance 2.0 Fast runs at about $0.24 a second at 720p,
@@ -87,7 +93,7 @@ export function adSpec(spec: StorySpec, product: Product): StorySpec {
     const { sounds: _sounds, film: _film, ...rest } = spec;
     return { ...rest, kind: "ad", subject: "", product, backdrop: null, presenter: null, scenes: spec.scenes.map(({ soundId: _soundId, ...s }) => ({ ...s, source: "image" as const, transition: "cut" as const })) };
   }
-  const { sounds: _sounds, ...filmed } = filmSpec({ ...spec, backdrop: null, presenter: null }, { quality: AD_CLIP_QUALITY });
+  const { sounds: _sounds, ...filmed } = filmSpec({ ...spec, backdrop: null, presenter: null }, { quality: adClipQuality(product.model) });
   return { ...filmed, kind: "ad", subject: "", product, scenes: filmed.scenes.map(({ soundId: _soundId, ...s }) => s) };
 }
 /** How long a one-shot ad's clip is asked for, for a voice of `seconds`: whole seconds, within what one request makes. */
@@ -106,4 +112,4 @@ export function oneShotPrompt(shots: string[], photos: number, name = "") {
 }
 /** Roughly what an ad of `seconds` costs before it is written: the video, and its shots (or its one shot). */
 export const adCredits = (seconds: number, model: AdModel = "minimax") =>
-  videoCredits(seconds) + (oneShotOf(model) ? oneShotCredits(seconds, model) : CLIP_CREDITS[AD_CLIP_QUALITY] * Math.ceil(seconds / CLIP_SECONDS));
+  videoCredits(seconds) + (oneShotOf(model) ? oneShotCredits(seconds, model) : CLIP_CREDITS[adClipQuality(model)] * Math.ceil(seconds / CLIP_SECONDS));

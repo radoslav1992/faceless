@@ -154,6 +154,8 @@ function checkFilm(env: Env, user: DbUser, spec: Spec) {
     if (shots || spec.scenes.some((s) => s.cutaway)) throw new HTTPException(403, { message: "Films of acted shots are still being tested and aren't available yet." });
     if (spec.scenes.some((s) => s.lipSync)) throw new HTTPException(403, { message: "Lip-synced scenes are still being tested and aren't available yet." });
   }
+  // An ad filmed by HeyGen Video 1 (shared/ad.ts) needs HeyGen's key.
+  if (spec.product?.model === "heygen" && !heygenEnabled(env)) throw new HTTPException(400, { message: "HeyGen isn't set up on this site, so this model can't be used." });
   if (shots && !isFilm(spec)) throw new HTTPException(400, { message: "A film's shots speak for themselves: remove the background clip, the presenter or your recording." });
 }
 export async function createVideo(

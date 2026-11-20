@@ -1081,6 +1081,52 @@ describe("narrated videos in the content run", () => {
     expect(compose.keys).not.toContain(`media/${user.id}/${own}.jpg`);
   });
 
+  it("films a product ad's shots with HeyGen Video 1: from their pictures alone, as regular clips, only where HeyGen is set up", async () => {
+    const { env, sqlite, user, own, run } = await setup();
+    sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
+    const product = { assets: [own], name: "Aqua Steel", model: "heygen" as const };
+    const lines = ["Hot day, warm water again?", "Aqua Steel keeps your drink cold for 24 hours.", "Try it today."];
+    const plain = specSchema.parse({ format: "story", narration: { kind: "voice", voiceId: "george" }, scenes: lines.map((text, n) => ({ text, description: `A hand lifts the product, shot ${n + 1}`, keys: [] })) }) as StorySpec;
+    const ad = adSpec(plain, product);
+    // Regular clips (768p), one credit per five seconds: the cheapest of the models.
+    expect(ad.scenes.every((s) => s.source === "clip" && s.clipQuality === "regular" && s.transition === "cut")).toBe(true);
+    expect(specCredits(ad, true)).toBe(videoCredits(estimatedSeconds(ad)) + 3 * CLIP_CREDITS.regular);
+    expect(adCredits(15, "heygen")).toBe(1 + 3);
+    const drawn = { ...ad, scenes: ad.scenes.map((s, n) => ({ ...s, imageId: id(n + 1) })) };
+    expect(pendingMedia(drawn).map((m) => [m.kind, m.fixedModel, m.product])).toEqual([["clip", "heygen-video-1", true], ["clip", "heygen-video-1", true], ["clip", "heygen-video-1", true]]);
+    // MiniMax's shots name no model: they are made by the ad's own request.
+    expect(pendingMedia({ ...drawn, product: { ...product, model: "minimax" } }).every((m) => m.fixedModel === undefined)).toBe(true);
+    // Without HeyGen's key the model can't be used: said when it is drafted or made, never swapped silently.
+    const brief = { template: "ad", prompt: "A steel water bottle", seconds: 15, product };
+    expect((await call(worker, env, "POST", "/api/story/draft", brief, user.cookie)).data.error).toBe("HeyGen isn't set up on this site, so this model can't be used.");
+    const refused = await call(worker, env, "POST", "/api/videos", { spec: ad, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect([refused.status, refused.data.error]).toEqual([400, "HeyGen isn't set up on this site, so this model can't be used."]);
+    env.HEYGEN_API_KEY = "hg";
+    const calls = providers();
+    const created = await call(worker, env, "POST", "/api/videos", { spec: ad, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(created.status).toBe(201);
+    await run();
+    const video = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
+    expect(video.renderStatus).toBe("ready");
+    // The pictures are drawn with the photo, as for any ad; nothing is filmed on fal.
+    const fal = calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/"));
+    expect(fal).toHaveLength(3);
+    expect(fal.every((c) => /^Draw a new picture of this scene/.test(c.body.prompt) && c.body.image_urls.length === 1)).toBe(true);
+    // Each shot: HeyGen Video 1 from the shot's picture, at 768p, the product's label kept, though the owner listed no model to choose from.
+    const asked = calls.filter((c) => c.method === "POST" && c.url === "https://api.heygen.com/v3/models/videos");
+    expect(asked).toHaveLength(3);
+    for (const c of asked) {
+      expect(c.body).toMatchObject({ model: "heygen-video-1", mode: "image_to_video", resolution: "768p", image: { type: "url" } });
+      expect(c.body.image.url).toMatch(/^https:\/\/app\.test\/api\/render-inputs\//);
+      expect(c.body.reference_image_urls).toBeUndefined();
+      expect(c.body.prompt).toContain("The product keeps its own label and logo exactly as in the first frame");
+      expect(c.body.prompt).not.toContain("No text, captions, logos or watermarks in the picture.");
+      expect(c.body.duration).toBeGreaterThanOrEqual(5);
+    }
+    expect(asked[0].body.prompt).toMatch(/^A hand lifts the product, shot 1\. A slow push-in on the product\./);
+    expect(video.spec.scenes.every((s: any) => s.clipId)).toBe(true);
+  });
+
   it("films a product ad in one shot with Seedance: one clip from the photos after the voice, played behind the whole ad with its sound", async () => {
     const { env, sqlite, user, own, run } = await setup();
     sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
