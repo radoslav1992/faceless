@@ -14,6 +14,7 @@ import {
   clockText, mergeScenes, moveEdge, sceneIndex, segmentsOf, splitScene, toggleKey, useStoryClock, useStoryPlayer, type UploadTiming,
 } from "./story-model";
 import { pendingClipCredits, filmClock, isFilm, narrationCurrent, pendingMedia, presenterCurrent, presenterNeeded, showsPresenter, specCredits, spokenSeconds, type StorySpec } from "../../shared/formats";
+import { oneShotOf } from "../../shared/ad";
 import { shotSeconds, takeKey } from "../../shared/drama";
 import { presenterLayoutInfo, presenterQualityInfo } from "../../shared/presenter";
 import {
@@ -197,7 +198,7 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
       {/* Nor does a product ad (shared/ad.ts), which is made of filmed shots. */}
       {!film && !spec.product && <PresenterSection spec={spec} onChange={onChange} />}
       {/* An ad filmed in one shot (shared/ad.ts): its one clip plays behind the whole video; filming it again is new AI work. */}
-      {spec.product?.model === "seedance" && <EditorSection title="The ad's film" hint="One clip, filmed from your photos and the shots' descriptions, plays behind the whole ad with its own sound."
+      {oneShotOf(spec.product?.model) && <EditorSection title="The ad's film" hint="One clip, filmed from your photos and the shots' descriptions, plays behind the whole ad with its own sound."
         action={spec.backdrop ? <button type="button" className="btn sm" onClick={() => onChange({ ...spec, backdrop: null })}><Film size={14} aria-hidden="true" /> Film it again</button> : undefined}>
         <p className="muted small">{spec.backdrop ? "Changing a shot's description changes the film only when it is filmed again." : "It is filmed when the video is made, after the voice, and as long as the voice."}</p>
       </EditorSection>}

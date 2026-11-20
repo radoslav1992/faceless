@@ -244,16 +244,18 @@ for a 15-second ad of three shots. The photos stay the owner's uploads: they are
 the video is saved (`server/videos.ts`), handed to fal as capability links while the run works, and never shown in
 the video themselves. Only administrators draft, make or remake one (`draftVideo`, `checkFilm`).
 
-Two video models are being compared, chosen in the ad's form (the product's `model`). The above is `minimax`. With
-`seedance` the ad is filmed **in one shot**: no pictures are drawn, and one request to Seedance's reference-to-video
-on fal (`oneShotRequest`: Seedance 2.0 Fast unless `FAL_AD_ONE_SHOT_MODEL` names another Seedance endpoint) takes the
-photos and every shot's description (`oneShotPrompt`) and returns one vertical clip of up to 15 seconds that the model
-cuts from shot to shot itself, with its own sound. It is made after the voice and asked for as long as the voice
+Three video models are being compared, chosen in the ad's form (the product's `model`). The above is `minimax`. With
+`seedance` (Seedance 2.0 Fast) or `seedance-25` (Seedance 2.5) the ad is filmed **in one shot**: no pictures are
+drawn, and one request to Seedance's reference-to-video on fal (`oneShotRequest`; for `seedance`, another endpoint
+when `FAL_AD_ONE_SHOT_MODEL` names one) takes the photos and every shot's description (`oneShotPrompt`) and returns
+one vertical clip of up to 15 seconds (30 with Seedance 2.5) that the model cuts from shot to shot itself, with its
+own sound. It is made after the voice and asked for as long as the voice
 (`oneShotLength`), saved as an AI clip and set as the video's background clip (`backdrop.assetId`), which the render
 plays behind the whole ad with its sound under the voice and the music (`ONE_SHOT_SOUND`). Its scenes are only the
 voiceover's lines and the shots' descriptions. The editor's "Film it again" clears the background clip, so the next
-save films it anew. Priced at 6 credits per five seconds of clip (about $0.24 a second to run): 19 credits for a
-15-second ad, the longest it can be.
+save films it anew. Priced per five seconds of clip (`oneShotModels`): 6 credits with Seedance 2.0 Fast (about $0.24 a second to run:
+19 credits for a 15-second ad, the longest it makes), 12 with Seedance 2.5 (about $0.47 a second: 37 credits for 15
+seconds, 74 for 30).
 
 **Cinematic videos** (`shared/film.ts`; for everyone). A narrated video made the way AI short
 films are, as a flag on the video (`film` in its spec), not a video type, so any story style can be made this way.

@@ -29,7 +29,7 @@ import {
 } from "../shared/formats";
 import { PRESENTER_ENGINES } from "../shared/presenter";
 import { CLIP_SECONDS, type ClipModel } from "../shared/credits";
-import { oneShotSeconds } from "../shared/ad";
+import { oneShotSeconds, type AdModel } from "../shared/ad";
 import { trackSchema, type Track } from "../shared/track";
 import { FPS, narrationKey, narrationVoice, placeKey, storyScript, storySegments, storyTiming, textWords, voiceRuns, voicedScript } from "../shared/story";
 import { LIP_SYNC_MIN_SECONDS, TAKE_HEARD, takeKey, takeOf, voiceSampleText, VOICE_SAMPLE_SECONDS } from "../shared/drama";
@@ -221,7 +221,7 @@ async function generateMedia(
       ? await submitFalShot(e, { image: image ?? await sourcePicture(e, run, m), prompt: m.prompt, seconds: length, sheet })
       // An ad in one shot: the whole ad from the photos of the product, as long as the voice recorded before it.
       : m.oneShot
-      ? await submitFalOneShot(e, { prompt: m.prompt, seconds: await oneShotLength(e, run, m.oneShot), photos: refs.map((r) => r.url) })
+      ? await submitFalOneShot(e, { prompt: m.prompt, ...(await oneShotPlan(e, run, m.oneShot)), photos: refs.map((r) => r.url) })
       // An ad's shot: its picture filmed with the photos of the product (shared/ad.ts), which `references` gives.
       : m.product && kind === "clip"
       ? await submitFalAdShot(e, { image: image ?? await sourcePicture(e, run, m), prompt: m.prompt, seconds: m.seconds ?? CLIP_SECONDS, photos: refs.map((r) => r.url), name: await productName(e, run) })
@@ -649,17 +649,18 @@ async function productPhotos(e: Env, run: RunInfo, spec: StorySpec): Promise<Ref
   return refs;
 }
 /**
- * How long an ad's one shot is asked for: as long as the voice recorded for it (shared/ad.ts oneShotSeconds), else the
- * `estimate` made from its script.
+ * An ad's one shot: the model it is filmed with, and how long it is asked for: as long as the voice recorded for it
+ * (shared/ad.ts oneShotSeconds), else the `estimate` made from its script.
  */
-async function oneShotLength(e: Env, run: RunInfo, estimate: number) {
+async function oneShotPlan(e: Env, run: RunInfo, estimate: number): Promise<{ seconds: number; model: AdModel }> {
+  const spec = await loadSpec(e, run.video_id);
+  const model = (isHighlight(spec) ? undefined : spec.product?.model) ?? "seedance";
+  if (isHighlight(spec)) return { seconds: estimate, model };
   try {
-    const spec = await loadSpec(e, run.video_id);
-    if (isHighlight(spec)) return estimate;
     const voice = await narrationContext(e, run.user_id, spec);
-    return voice.duration > 0 ? oneShotSeconds(voice.duration) : estimate;
+    return { seconds: voice.duration > 0 ? oneShotSeconds(voice.duration, model) : estimate, model };
   } catch {
-    return estimate;
+    return { seconds: estimate, model };
   }
 }
 /** What the ad's product is called, for the video model (empty when the owner gave no name). */

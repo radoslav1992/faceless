@@ -11,7 +11,7 @@ import { StoryStylePicker } from "./StoryStyles";
 import { VideoEditor } from "./EditVideo";
 import { creditBlock, CreditBlockNotice, MediaPicker, MusicChoice, UploadButton, useOfferedVoice, VoiceSelect } from "./pickers";
 import { categories, isTemplate, isTest, templateIds, templates, type CategoryId, type TemplateId } from "../../shared/templates";
-import { adCredits, adLengths, adModelNames, adModels, ONE_SHOT_SECONDS, PRODUCT_PHOTOS_MAX, type AdModel } from "../../shared/ad";
+import { adCredits, adLengths, adModelNames, adModels, oneShotOf, PRODUCT_PHOTOS_MAX, type AdModel } from "../../shared/ad";
 import { languages, type MusicMood } from "../../shared/series";
 import { specCredits, type StorySpec } from "../../shared/formats";
 import { STORY_MAX_CHARS, storyStyles, type StoryStyle } from "../../shared/story";
@@ -122,6 +122,8 @@ export function Create() {
   const t = template ? templates[template] : null;
   // Any video can be cinematic, except a story over one background clip (it has no scenes to film).
   const ad = t?.kind === "ad";
+  // A model that films the whole ad in one shot (shared/ad.ts), and what that allows.
+  const oneShot = ad ? oneShotOf(form.adModel) : undefined;
   const canFilm = !!t && t.kind !== "backdrop" && !ad;
   const addPhoto = (id: string) => setForm((f) => (f.photos.includes(id) || f.photos.length >= PRODUCT_PHOTOS_MAX ? f : { ...f, photos: [...f.photos, id] }));
   const cinematic = canFilm && form.film;
@@ -175,8 +177,8 @@ export function Create() {
         <div className="page-head">
           <div>
             <button type="button" className="link" onClick={() => setSpec(null)}><ArrowLeft size={15} aria-hidden="true" /> Back to the brief</button>
-            <h1 style={{ marginTop: 8 }}>{spec.title || t.name}{spec.film && <span className="chip" style={{ marginLeft: 10, verticalAlign: 6 }}>{spec.product ? "Product ad" : "Cinematic"}</span>}{spec.product?.model === "seedance" && <span className="chip" style={{ marginLeft: 10, verticalAlign: 6 }}>Product ad</span>}</h1>
-            <p>Edit anything below. Nothing is made or charged until you press Make video.{spec.product?.model === "seedance" ? " The whole ad is filmed in one shot from your photos, after its voice is recorded." : spec.product ? " Every scene is a shot filmed from your photos: the price counts each one." : spec.film ? " Every scene is an AI clip: the price counts each one." : ""}</p>
+            <h1 style={{ marginTop: 8 }}>{spec.title || t.name}{spec.film && <span className="chip" style={{ marginLeft: 10, verticalAlign: 6 }}>{spec.product ? "Product ad" : "Cinematic"}</span>}{oneShotOf(spec.product?.model) && <span className="chip" style={{ marginLeft: 10, verticalAlign: 6 }}>Product ad</span>}</h1>
+            <p>Edit anything below. Nothing is made or charged until you press Make video.{oneShotOf(spec.product?.model) ? " The whole ad is filmed in one shot from your photos, after its voice is recorded." : spec.product ? " Every scene is a shot filmed from your photos: the price counts each one." : spec.film ? " Every scene is an AI clip: the price counts each one." : ""}</p>
           </div>
           <div className="toolbar">
             <button type="button" className="btn" disabled={writing} onClick={write}>{writing ? <span className="spinner" aria-hidden="true" /> : <Wand2 size={16} aria-hidden="true" />} Write again</button>
@@ -232,11 +234,11 @@ export function Create() {
                 <input className="input" maxLength={80} value={form.productName} placeholder="Aqua Steel bottle" onChange={(e) => set({ productName: e.target.value })} />
               </label>
               <label className="field"><span>Video model <span className="chip" style={{ marginLeft: 6 }}>Admin test</span></span>
-                <select className="select" value={form.adModel} onChange={(e) => set({ adModel: e.target.value as AdModel, ...(e.target.value === "seedance" && { seconds: ONE_SHOT_SECONDS.max }) })}>
+                <select className="select" value={form.adModel} onChange={(e) => { const adModel = e.target.value as AdModel; set({ adModel, seconds: Math.min(form.seconds, oneShotOf(adModel)?.max ?? form.seconds) }); }}>
                   {adModels.map((m) => <option key={m} value={m}>{adModelNames[m]}</option>)}
                 </select>
-                <span className="hint">{form.adModel === "seedance"
-                  ? "One request films the whole ad, up to 15 seconds, and cuts between its shots itself. About three times the price of the other model."
+                <span className="hint">{oneShot
+                  ? `One request films the whole ad, up to ${oneShot.max} seconds, and cuts between its shots itself. About ${oneShot.times} times the price of MiniMax.`
                   : "Every shot is drawn with your photos and filmed on its own, about 5 seconds each. A single shot can be made again later."}</span>
               </label>
               <label className="field"><span>What is it, and what should the ad say?</span>
@@ -281,9 +283,9 @@ export function Create() {
           {t.kind !== "script" && t.kind !== "backdrop" && (
             <label className="field"><span>Length</span>
               <div className="seg" role="group" aria-label="Length">
-                {(ad ? adLengths.filter((n) => form.adModel !== "seedance" || n <= ONE_SHOT_SECONDS.max) : lengths).map((n) => <button key={n} type="button" aria-pressed={form.seconds === n} onClick={() => set({ seconds: n })}>{n < 60 ? `${n} s` : n === 60 ? "1 min" : "1½ min"}</button>)}
+                {(ad ? adLengths.filter((n) => !oneShot || n <= oneShot.max) : lengths).map((n) => <button key={n} type="button" aria-pressed={form.seconds === n} onClick={() => set({ seconds: n })}>{n < 60 ? `${n} s` : n === 60 ? "1 min" : "1½ min"}</button>)}
               </div>
-              {ad && form.adModel === "seedance" ? <span className="hint">{`About ${creditsLabel(adCredits(form.seconds, "seedance"))}: the video, and its one shot. The draft shows the exact price before anything is charged.`}</span>
+              {ad && oneShot ? <span className="hint">{`About ${creditsLabel(adCredits(form.seconds, form.adModel))}: the video, and its one shot. The draft shows the exact price before anything is charged.`}</span>
                 : ad ? <span className="hint">{`About ${creditsLabel(adCredits(form.seconds))}: the video, and a filmed shot for every ${CLIP_SECONDS} seconds of it. The draft shows the exact price before anything is charged.`}</span>
                 : <span className="hint">{creditsLabel(videoCredits(form.seconds))} to make (1 per {SECONDS_PER_CREDIT} seconds).</span>}
             </label>
@@ -345,7 +347,7 @@ export function Create() {
         </div>
         <div className="card stack">
           {ad ? (
-            <p className="muted small">{form.adModel === "seedance"
+            <p className="muted small">{oneShot
               ? "The whole ad is filmed in one shot from your photos, with its own sound, as long as its voiceover. A voiceover in the voice you chose, subtitles and music go over it. You can change every line and shot in the draft."
               : "Each shot is drawn with your photos, so it shows your product in the shot's setting, then filmed for a few seconds with its own sound. A voiceover in the voice you chose, subtitles and music go over the shots. You can change every line and shot in the draft."}</p>
           ) : t.kind === "backdrop" ? (

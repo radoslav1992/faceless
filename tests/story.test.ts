@@ -5,13 +5,13 @@ import { planRender, type PlanContext } from "../server/render-plan";
 import { acceptScenePlan, acceptStory, conceptToSpec, OWNER_RULE, storyShape } from "../server/story";
 import { acceptNewSounds, acceptSounds, rankSounds } from "../server/sounds";
 import { alignedWords, ALIGNMENT_URL, forcedAlignment, languageCode, speak, SPEECH_MODEL } from "../server/providers/elevenlabs";
-import { adminClipModels, clipModelFor, falRequest, ONE_SHOT_MODEL, oneShotModel, oneShotRequest, PRODUCT_TEXT, referenceModel, referencePrompt, submitFal } from "../server/providers/fal";
+import { adminClipModels, clipModelFor, falRequest, ONE_SHOT_25_MODEL, ONE_SHOT_MODEL, oneShotModel, oneShotRequest, PRODUCT_TEXT, referenceModel, referencePrompt, submitFal } from "../server/providers/fal";
 import { heygenClipRequest, heygenRetry } from "../server/providers/heygen";
 import { attention } from "../server/operations";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 import { languages, seriesSettingsSchema } from "../shared/series";
 import { FILM_AMBIENCE, filmSpec } from "../shared/film";
-import { AD_CLIP_QUALITY, adCredits, adSpec, ONE_SHOT_CREDITS, ONE_SHOT_SOUND, oneShotSeconds } from "../shared/ad";
+import { AD_CLIP_QUALITY, adCredits, adSpec, ONE_SHOT_SOUND, oneShotModels, oneShotSeconds } from "../shared/ad";
 import { lipSyncSpec, shotSeconds, shotsSpec, takeKey, takeOf, voiceSampleText } from "../shared/drama";
 import { SCRIBE_URL } from "../server/speech";
 import { filmClock, estimatedSeconds, narrationCurrent, pendingMedia, pictureSheets, referencedAssets, specCredits, specSchema, storySpec, type StorySpec } from "../shared/formats";
@@ -1100,13 +1100,13 @@ describe("narrated videos in the content run", () => {
     // One clip to make, priced by its length at the one-shot rate; nothing else.
     const pending = pendingMedia(ad);
     expect(pending).toHaveLength(1);
-    expect(pending[0]).toMatchObject({ kind: "clip", key: "backdrop", product: true, oneShot: oneShotSeconds(estimatedSeconds(ad) - 0.5) });
-    expect(pending[0].credits).toBe(ONE_SHOT_CREDITS * Math.ceil(pending[0].oneShot! / 5));
+    expect(pending[0]).toMatchObject({ kind: "clip", key: "backdrop", product: true, oneShot: oneShotSeconds(estimatedSeconds(ad) - 0.5, "seedance") });
+    expect(pending[0].credits).toBe(oneShotModels.seedance!.credits * Math.ceil(pending[0].oneShot! / 5));
     expect(pending[0].prompt).toMatch(/^A vertical advertisement for a product \(Aqua Steel\), 3 shots of about the same length joined by hard cuts\. @Image1 is a photo of the product/);
     expect(pending[0].prompt).toContain("Shot 1: A hand lifts the product from a table, shot 1. Shot 2: A hand lifts the product from a table, shot 2.");
     expect(pending[0].prompt).toContain("no speech, no voice-over and no music.");
     expect(specCredits(ad, true)).toBe(videoCredits(estimatedSeconds(ad)) + pending[0].credits!);
-    expect(adCredits(15, "seedance")).toBe(1 + 3 * ONE_SHOT_CREDITS);
+    expect(adCredits(15, "seedance")).toBe(1 + 3 * 6);
     // A library clip is never an ad's film.
     expect(specSchema.safeParse({ ...ad, backdrop: { libraryId: crypto.randomUUID() } }).success).toBe(false);
     // The request, and the operator's other Seedance endpoint.
@@ -1149,6 +1149,29 @@ describe("narrated videos in the content run", () => {
     // Any other background clip stays silent.
     const plain = planRender({ ...video.spec, kind: "story", product: undefined }, { media, narration, watermark: "" } as unknown as PlanContext).compose;
     expect(plain.segments[0].audio).toBe(0);
+    // Seedance 2.5, the third model: its own endpoint, up to 30 seconds in one shot, at twice the credits.
+    const newer = { ...ad, product: { ...product, model: "seedance-25" as const } };
+    expect(specSchema.safeParse(newer).success).toBe(true);
+    expect(pendingMedia(newer)[0].credits).toBe(2 * pending[0].credits!);
+    expect(adCredits(30, "seedance-25")).toBe(2 + 6 * 12);
+    expect(oneShotSeconds(40, "seedance-25")).toBe(30);
+    expect(oneShotSeconds(40, "seedance")).toBe(15);
+    expect(oneShotModel(env, "seedance-25")).toBe("bytedance/seedance-2.5/reference-to-video");
+    // The operator's other endpoint replaces Seedance 2.0 Fast only.
+    expect(oneShotModel({ ...env, FAL_AD_ONE_SHOT_MODEL: "bytedance/seedance-2.5/flash/reference-to-video" }, "seedance-25")).toBe(ONE_SHOT_25_MODEL);
+    expect(oneShotRequest({ prompt: "p", seconds: 40, photos: ["a"], model: "seedance-25" }, ONE_SHOT_25_MODEL).body.duration).toBe("30");
+    const draft25 = await call(worker, env, "POST", "/api/story/draft", { template: "ad", prompt: "A steel water bottle", seconds: 30, product: newer.product }, user.cookie);
+    expect(draft25.data.spec.product.model).toBe("seedance-25");
+    // (More credits than the test's plan has: this ad is the dearer one.)
+    sqlite.prepare("UPDATE usage_windows SET quota=500 WHERE user_id=?").run(user.id);
+    const calls25 = providers();
+    const made = await call(worker, env, "POST", "/api/videos", { spec: newer, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(made.status).toBe(201);
+    await run();
+    const fal25 = calls25.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/"));
+    expect(fal25.map((c) => c.url)).toEqual([`https://queue.fal.run/${ONE_SHOT_25_MODEL}`]);
+    // As long as the voice (17 seconds here), which Seedance 2.0 Fast would have cut to 15.
+    expect(fal25[0].body).toMatchObject({ duration: "18", aspect_ratio: "9:16", resolution: "720p", generate_audio: true });
   });
 
   it("narrates a dialogue in its scenes' voices: one call per stretch, joined into one recording the video keeps", async () => {

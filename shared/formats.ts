@@ -10,7 +10,7 @@ import { LONG_VIDEO_SECONDS } from "./speech";
 import { trackSchema } from "./track";
 import { SOUND_VOLUME } from "./sounds";
 import { filmClipPrompt, filmStill } from "./film";
-import { adClipPrompt, adStill, AD_CLIP_QUALITY, oneShotCredits, oneShotPrompt, oneShotSeconds, productSchema } from "./ad";
+import { adClipPrompt, adStill, AD_CLIP_QUALITY, oneShotCredits, oneShotOf, oneShotPrompt, oneShotSeconds, productSchema } from "./ad";
 import { acted, cutawayPrompt, filmTiming, lipSyncPrompt, shotPrompt, shotSeconds, shotStill, takeKey } from "./drama";
 import { languageName } from "./series";
 import {
@@ -126,7 +126,7 @@ export const storySpec = z.object({
   // An ad is its kind and its product's photos together: put together like a cinematic video, without a background clip or a presenter.
   .refine((s) => (s.kind === "ad") === !!s.product, "A product ad needs photos of the product.")
   // Filmed shot by shot, or in one shot: then the one clip is its background clip, a file of the owner's made with the video.
-  .refine((s) => !s.product || (!s.presenter && (s.product.model === "seedance" ? !s.backdrop?.libraryId : !!s.film && !s.backdrop)), "A product ad is made of filmed shots.");
+  .refine((s) => !s.product || (!s.presenter && (oneShotOf(s.product.model) ? !s.backdrop?.libraryId : !!s.film && !s.backdrop)), "A product ad is made of filmed shots.");
 export type StorySpec = z.infer<typeof storySpec>;
 
 /** A clip: seconds `start` to `end` of one of the owner's (long) videos. */
@@ -287,12 +287,12 @@ export function pendingMedia(spec: Spec): PendingMedia[] {
   // A clip of a long video asks for no AI media.
   if (isHighlight(spec)) return out;
   // An ad in one shot (shared/ad.ts): no pictures, one clip for the whole video, which becomes its background clip.
-  if (spec.product?.model === "seedance") {
-    const seconds = oneShotSeconds(speechSeconds(storyScript(spec.scenes)));
+  if (spec.product && oneShotOf(spec.product.model)) {
+    const seconds = oneShotSeconds(speechSeconds(storyScript(spec.scenes)), spec.product.model);
     if (!spec.backdrop)
       out.push({
         kind: "clip", prompt: oneShotPrompt(spec.scenes.map((s) => s.description), spec.product.assets.length, spec.product.name), path: [], key: "backdrop",
-        quality: AD_CLIP_QUALITY, product: true, audio: true, oneShot: seconds, credits: oneShotCredits(seconds),
+        quality: AD_CLIP_QUALITY, product: true, audio: true, oneShot: seconds, credits: oneShotCredits(seconds, spec.product.model),
       });
     return out;
   }

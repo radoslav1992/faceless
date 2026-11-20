@@ -88,8 +88,9 @@ under `/api/admin` answers 404 to anyone else.
   7 credits and costs about $1.20 in clips plus three pictures and the voice. To open it to everyone: remove
   `test: true` from the `ad` template in `shared/templates.ts` and the two administrator checks (`draftVideo` in
   `server/story.ts`, `checkFilm` in `server/videos.ts`), and give it a tool page if it should have one.
-  The form's **Video model** compares two: MiniMax H3 Max shot by shot (above), and Seedance 2.0 Fast in one shot
-  (one request films the whole ad, at most 15 seconds, after the voice; 19 credits, about $3.60 to run). When a
+  The form's **Video model** compares three: MiniMax H3 Max shot by shot (above), and Seedance in one shot (one
+  request films the whole ad, after the voice): Seedance 2.0 Fast, at most 15 seconds (19 credits, about $3.60 to
+  run), and Seedance 2.5, up to 30 seconds (37 credits for 15 seconds, about $7 to run). When a
   provider refuses a request, Workers Logs show `Provider refused` with the fields it named: a wrong parameter of a
   model shows there.
 - **Cinematic videos**: in Create, everyone has a **Cinematic** switch (not on Storytime): every scene becomes an AI

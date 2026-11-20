@@ -1,5 +1,5 @@
 import { captionAss, emptyAss, withItems, withWatermark } from "./caption-ass";
-import { ONE_SHOT_SOUND } from "../shared/ad";
+import { ONE_SHOT_SOUND, oneShotOf } from "../shared/ad";
 import { styledCaptions, type CaptionWord } from "../shared/captions";
 import { overlayItems, revealSeconds, type TextLook } from "../shared/overlay";
 import { motionFor } from "../shared/layers";
@@ -150,7 +150,7 @@ function planStory(spec: StorySpec, ctx: PlanContext): Plan {
     const clip = need(ctx, spec.backdrop.assetId || spec.backdrop.libraryId);
     if (clip.kind === "image") segments = [{ kind: "image", input: inputs.add(clip.key), duration: round(d), motion: motionFor(0) }];
     // An ad filmed in one shot (shared/ad.ts) plays its clip's own sound under the voice; any other background clip is silent.
-    else if (clip.kind === "video") segments = fillWithClip(inputs.add(clip.key), clip.duration, round(d), spec.product?.model === "seedance" && spec.backdrop.assetId ? ONE_SHOT_SOUND : 0);
+    else if (clip.kind === "video") segments = fillWithClip(inputs.add(clip.key), clip.duration, round(d), oneShotOf(spec.product?.model) && spec.backdrop.assetId ? ONE_SHOT_SOUND : 0);
     else throw new Error("MEDIA_INPUT");
   } else {
     const parts = storySegments(timing, spec.scenes.map((s) => s.transition));

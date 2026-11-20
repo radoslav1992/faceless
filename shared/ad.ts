@@ -18,11 +18,12 @@ import { filmSpec } from "./film";
 //
 // Two video models are being compared (the product's `model`):
 //   - "minimax", as above: MiniMax H3 Max films every shot on its own, from a picture drawn for it.
-//   - "seedance": Seedance films the whole ad in one shot. No pictures are drawn: one request takes the photos and
+//   - "seedance" (Seedance 2.0 Fast) and "seedance-25" (Seedance 2.5): Seedance films the whole ad in one shot. No pictures are drawn: one request takes the photos and
 //     all the shots' descriptions and returns one clip, cut from shot to shot by the model itself, up to 15 seconds
-//     long (server/providers/fal.ts oneShotRequest). It is made after the voice, as long as the voice, and plays
+//     long (30 with Seedance 2.5) (server/providers/fal.ts oneShotRequest). It is made after the voice, as long as the voice, and plays
 //     behind the whole video with its own sound, as the video's background clip (`backdrop`), under the voice, the
-//     subtitles and the music. It costs about three times as much to run, and as many credits more.
+//     subtitles and the music. It costs about three times as much to run (six times with Seedance 2.5), and as many
+//     credits more.
 
 /** How many photos of the product an ad takes: the video model's free allowance of reference pictures covers four. */
 export const PRODUCT_PHOTOS_MAX = 4;
@@ -30,14 +31,23 @@ export const PRODUCT_PHOTOS_MAX = 4;
 export const AD_CLIP_QUALITY: ClipQuality = "high";
 /** The lengths an ad is offered in (seconds of voiceover). */
 export const adLengths = [15, 20, 30] as const;
-/** The video models an ad is filmed with: MiniMax H3 Max shot by shot, or Seedance in one shot. */
-export const adModels = ["minimax", "seedance"] as const;
+/** The video models an ad is filmed with: MiniMax H3 Max shot by shot, or a Seedance model in one shot. */
+export const adModels = ["minimax", "seedance", "seedance-25"] as const;
 export type AdModel = (typeof adModels)[number];
-export const adModelNames: Record<AdModel, string> = { minimax: "MiniMax H3 Max · shot by shot", seedance: "Seedance 2.0 Fast · one shot" };
-/** A one-shot ad is one clip of 4 to 15 seconds (what Seedance makes in one request). */
-export const ONE_SHOT_SECONDS = { min: 4, max: 15 } as const;
-/** Credits per five seconds of a one-shot ad: about $0.24 a second to run, three times a shot's $0.08. */
-export const ONE_SHOT_CREDITS = 6;
+export const adModelNames: Record<AdModel, string> = { minimax: "MiniMax H3 Max · shot by shot", seedance: "Seedance 2.0 Fast · one shot", "seedance-25": "Seedance 2.5 · one shot" };
+/**
+ * The models that film an ad in one shot: the longest clip one request makes (seconds), the credits per five seconds
+ * of it (about $0.20 of running cost a credit, as a shot's: Seedance 2.0 Fast runs at about $0.24 a second at 720p,
+ * Seedance 2.5 at about $0.47), and how many times a MiniMax shot's price that is.
+ */
+export const oneShotModels: Partial<Record<AdModel, { max: number; credits: number; times: number }>> = {
+  seedance: { max: 15, credits: 6, times: 3 },
+  "seedance-25": { max: 30, credits: 12, times: 6 },
+};
+/** How an ad of this model is filmed in one shot, or undefined when it is filmed shot by shot. */
+export const oneShotOf = (model: AdModel | undefined) => (model ? oneShotModels[model] : undefined);
+/** The shortest clip a one-shot model makes (seconds). */
+export const ONE_SHOT_MIN = 4;
 /** How loud a one-shot ad's own sound plays under the voice and the music (0–1). */
 export const ONE_SHOT_SOUND = 0.3;
 
@@ -73,7 +83,7 @@ export const productNote = (photos: number, name = "") =>
  */
 export function adSpec(spec: StorySpec, product: Product): StorySpec {
   // In one shot: the scenes are the voiceover's lines and the shots' descriptions; the one clip is made with the video.
-  if (product.model === "seedance") {
+  if (oneShotOf(product.model)) {
     const { sounds: _sounds, film: _film, ...rest } = spec;
     return { ...rest, kind: "ad", subject: "", product, backdrop: null, presenter: null, scenes: spec.scenes.map(({ soundId: _soundId, ...s }) => ({ ...s, source: "image" as const, transition: "cut" as const })) };
   }
@@ -81,9 +91,9 @@ export function adSpec(spec: StorySpec, product: Product): StorySpec {
   return { ...filmed, kind: "ad", subject: "", product, scenes: filmed.scenes.map(({ soundId: _soundId, ...s }) => s) };
 }
 /** How long a one-shot ad's clip is asked for, for a voice of `seconds`: whole seconds, within what one request makes. */
-export const oneShotSeconds = (seconds: number) => Math.min(ONE_SHOT_SECONDS.max, Math.max(ONE_SHOT_SECONDS.min, Math.ceil(seconds + 0.3)));
+export const oneShotSeconds = (seconds: number, model: AdModel) => Math.min(oneShotOf(model)?.max ?? 15, Math.max(ONE_SHOT_MIN, Math.ceil(seconds + 0.3)));
 /** What a one-shot clip of `seconds` costs. */
-export const oneShotCredits = (seconds: number) => ONE_SHOT_CREDITS * Math.ceil(oneShotSeconds(seconds) / CLIP_SECONDS);
+export const oneShotCredits = (seconds: number, model: AdModel) => (oneShotOf(model)?.credits ?? 0) * Math.ceil(oneShotSeconds(seconds, model) / CLIP_SECONDS);
 /**
  * The description sent to the video model for an ad in one shot: every shot in order, cut together by the model, with
  * the product as in the photos (its "@Image1" onwards), its own sound and nothing spoken or written.
@@ -96,4 +106,4 @@ export function oneShotPrompt(shots: string[], photos: number, name = "") {
 }
 /** Roughly what an ad of `seconds` costs before it is written: the video, and its shots (or its one shot). */
 export const adCredits = (seconds: number, model: AdModel = "minimax") =>
-  videoCredits(seconds) + (model === "seedance" ? oneShotCredits(seconds) : CLIP_CREDITS[AD_CLIP_QUALITY] * Math.ceil(seconds / CLIP_SECONDS));
+  videoCredits(seconds) + (oneShotOf(model) ? oneShotCredits(seconds, model) : CLIP_CREDITS[AD_CLIP_QUALITY] * Math.ceil(seconds / CLIP_SECONDS));
