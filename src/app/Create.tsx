@@ -2,15 +2,16 @@ import { t as say } from "../../shared/i18n";
 import { SITE } from "../../shared/site";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Repeat, Search, Wand2 } from "lucide-react";
-import { errorText, newKey, post, useAuth } from "../lib";
+import { ArrowLeft, ImagePlus, Repeat, Search, Wand2, X } from "lucide-react";
+import { errorText, fileUrl, newKey, post, useAuth } from "../lib";
 import { Switch, useToast } from "../ui";
 import { StyleArt } from "../art";
 import { ExampleVideo, useExamples } from "../examples";
 import { StoryStylePicker } from "./StoryStyles";
 import { VideoEditor } from "./EditVideo";
-import { creditBlock, CreditBlockNotice, MusicChoice, useOfferedVoice, VoiceSelect } from "./pickers";
-import { categories, isTemplate, templateIds, templates, type CategoryId, type TemplateId } from "../../shared/templates";
+import { creditBlock, CreditBlockNotice, MediaPicker, MusicChoice, UploadButton, useOfferedVoice, VoiceSelect } from "./pickers";
+import { categories, isTemplate, isTest, templateIds, templates, type CategoryId, type TemplateId } from "../../shared/templates";
+import { adCredits, adLengths, adModelNames, adModels, oneShotOf, PRODUCT_PHOTOS_MAX, type AdModel } from "../../shared/ad";
 import { languages, type MusicMood } from "../../shared/series";
 import { specCredits, type StorySpec } from "../../shared/formats";
 import { STORY_MAX_CHARS, storyStyles, type StoryStyle } from "../../shared/story";
@@ -23,18 +24,20 @@ import "./create.css";
 const DEMO_DRAFT = "hss-demo-draft";
 const lengths = [30, 45, 60, 90];
 
-function Gallery({ onPick }: { onPick: (id: TemplateId) => void }) {
+function Gallery({ onPick, admin }: { onPick: (id: TemplateId) => void; admin: boolean }) {
   const examples = useExamples();
   const [category, setCategory] = useState<CategoryId | "all">("all");
   const [query, setQuery] = useState("");
-  const shown = templateIds.filter((id) => (category === "all" || templates[id].category === category) &&
+  // A style still being tested is an administrator's to see; a category shows when it has a style to show.
+  const offered = templateIds.filter((id) => admin || !isTest(id));
+  const shown = offered.filter((id) => (category === "all" || templates[id].category === category) &&
     (!query.trim() || `${templates[id].name} ${templates[id].short}`.toLowerCase().includes(query.trim().toLowerCase())));
   return (
     <div className="stack" style={{ gap: 18 }}>
       <label className="search-field"><Search size={18} aria-hidden="true" /><input className="input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search styles: scary, history, POV…" aria-label="Search styles" /></label>
       <div className="filters" role="group" aria-label="Categories">
         <button type="button" className="filter" aria-pressed={category === "all"} onClick={() => setCategory("all")}>All</button>
-        {categories.map((c) => <button key={c.id} type="button" className="filter" aria-pressed={category === c.id} onClick={() => setCategory(c.id)}>{c.name}</button>)}
+        {categories.filter((c) => offered.some((id) => templates[id].category === c.id)).map((c) => <button key={c.id} type="button" className="filter" aria-pressed={category === c.id} onClick={() => setCategory(c.id)}>{c.name}</button>)}
       </div>
       <div className="template-grid">
         {shown.map((id) => {
@@ -43,6 +46,7 @@ function Gallery({ onPick }: { onPick: (id: TemplateId) => void }) {
             <button key={id} type="button" className="template-card" onClick={() => onPick(id)}>
               <span className="art">
                 {"popular" in t && t.popular && <span className="chip solid pop">Popular</span>}
+                {isTest(id) && <span className="chip solid pop">Admin test</span>}
                 {examples[id] ? <ExampleVideo example={examples[id]} /> : <StyleArt style={t.style} />}
               </span>
               <strong>{t.name}</strong>
@@ -63,6 +67,8 @@ type Form = {
   sounds: boolean;
   /** Cinematic (shared/film.ts): every scene an AI clip of this quality and, for an administrator, model. */
   film: boolean; filmQuality: ClipQuality; filmModel: ClipModel | "";
+  /** A product ad (shared/ad.ts): the photos of the product (the owner's uploads) and what it is called. */
+  photos: string[]; productName: string; adModel: AdModel;
 };
 /** Text that reads like a whole story rather than a topic: long, or several lines. */
 const storyLike = (text: string) => text.trim().length >= 280 || text.trim().split(/\n\s*\n|\n/).filter(Boolean).length >= 4;
@@ -74,7 +80,7 @@ export function mashupParts(prompt: string): { animal: string; object: string } 
 const formFor = (id: TemplateId, prompt = ""): Form => {
   const t = templates[id];
   const mashup = t.kind === "mashup" ? mashupParts(prompt) : { animal: "", object: "" };
-  return { prompt, script: "", title: "", ...mashup, seconds: t.seconds, language: SITE.narration, voiceId: t.voice, style: t.style, music: t.music, musicTrackId: null, subject: "", sounds: true, film: false, filmQuality: "regular", filmModel: "" };
+  return { prompt, script: "", title: "", ...mashup, seconds: t.seconds, language: SITE.narration, voiceId: t.voice, style: t.style, music: t.music, musicTrackId: null, subject: "", sounds: true, film: false, filmQuality: "regular", filmModel: "", photos: [], productName: "", adModel: "minimax" };
 };
 
 export function Create() {
@@ -83,7 +89,9 @@ export function Create() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const param = params.get("template") || "";
-  const template = isTemplate(param) ? param : null;
+  // A style still being tested opens for administrators only.
+  const template = isTemplate(param) && (!isTest(param) || !!user?.admin) ? param : null;
+  const [picking, setPicking] = useState(false);
   const [form, setForm] = useState<Form>(() => formFor(template || "facts", params.get("prompt") || ""));
   const [spec, setSpec] = useState<StorySpec | null>(null);
   const [writing, setWriting] = useState(false);
@@ -113,9 +121,13 @@ export function Create() {
   const left = user ? Math.max(0, user.limit - user.used) : null;
   const t = template ? templates[template] : null;
   // Any video can be cinematic, except a story over one background clip (it has no scenes to film).
-  const canFilm = !!t && t.kind !== "backdrop";
+  const ad = t?.kind === "ad";
+  // A model that films the whole ad in one shot (shared/ad.ts), and what that allows.
+  const oneShot = ad ? oneShotOf(form.adModel) : undefined;
+  const canFilm = !!t && t.kind !== "backdrop" && !ad;
+  const addPhoto = (id: string) => setForm((f) => (f.photos.includes(id) || f.photos.length >= PRODUCT_PHOTOS_MAX ? f : { ...f, photos: [...f.photos, id] }));
   const cinematic = canFilm && form.film;
-  const ready = !!t && (t.kind === "script" ? form.script.trim().length >= 20 : t.kind === "mashup" ? true : t.kind === "backdrop" ? true : form.prompt.trim().length >= 2 || template === "random");
+  const ready = !!t && (ad ? form.photos.length > 0 && form.prompt.trim().length >= 2 : t.kind === "script" ? form.script.trim().length >= 20 : t.kind === "mashup" ? true : t.kind === "backdrop" ? true : form.prompt.trim().length >= 2 || template === "random");
   const write = async () => {
     if (!template || !t) return;
     setWriting(true);
@@ -125,6 +137,7 @@ export function Create() {
         seconds: form.seconds, language: form.language, voiceId: form.voiceId, style: form.style, music: form.music, subject: form.subject, sounds: form.sounds,
         ...(form.musicTrackId && { musicTrackId: form.musicTrackId }),
         ...(cinematic && { film: { quality: form.filmQuality, ...(form.filmModel && { model: form.filmModel }) } }),
+        ...(ad && { product: { assets: form.photos, name: form.productName, model: form.adModel } }),
       });
       setSpec(draft);
       window.scrollTo({ top: 0 });
@@ -134,7 +147,7 @@ export function Create() {
       setWriting(false);
     }
   };
-  const cost = useMemo(() => (spec ? specCredits(spec, true) : videoCredits(form.seconds)), [spec, form.seconds]);
+  const cost = useMemo(() => (spec ? specCredits(spec, true) : ad ? adCredits(form.seconds, form.adModel) : videoCredits(form.seconds)), [spec, form.seconds, form.adModel, ad]);
   const block = user ? creditBlock(user, cost) : null;
   const make = async () => {
     if (!spec) return;
@@ -154,7 +167,7 @@ export function Create() {
     return (
       <div className="page">
         <div className="page-head"><div><h1>Choose a faceless style</h1><p>Story videos, POV clips, facts, brainrot, storytime or your own script.</p></div></div>
-        <Gallery onPick={(id) => setParams({ template: id })} />
+        <Gallery onPick={(id) => setParams({ template: id })} admin={!!user?.admin} />
       </div>
     );
   }
@@ -164,8 +177,8 @@ export function Create() {
         <div className="page-head">
           <div>
             <button type="button" className="link" onClick={() => setSpec(null)}><ArrowLeft size={15} aria-hidden="true" /> Back to the brief</button>
-            <h1 style={{ marginTop: 8 }}>{spec.title || t.name}{spec.film && <span className="chip" style={{ marginLeft: 10, verticalAlign: 6 }}>Cinematic</span>}</h1>
-            <p>Edit anything below. Nothing is made or charged until you press Make video.{spec.film ? " Every scene is an AI clip: the price counts each one." : ""}</p>
+            <h1 style={{ marginTop: 8 }}>{spec.title || t.name}{spec.film && <span className="chip" style={{ marginLeft: 10, verticalAlign: 6 }}>{spec.product ? "Product ad" : "Cinematic"}</span>}{oneShotOf(spec.product?.model) && <span className="chip" style={{ marginLeft: 10, verticalAlign: 6 }}>Product ad</span>}</h1>
+            <p>Edit anything below. Nothing is made or charged until you press Make video.{oneShotOf(spec.product?.model) ? " The whole ad is filmed in one shot from your photos, after its voice is recorded." : spec.product ? " Every scene is a shot filmed from your photos: the price counts each one." : spec.film ? " Every scene is an AI clip: the price counts each one." : ""}</p>
           </div>
           <div className="toolbar">
             <button type="button" className="btn" disabled={writing} onClick={write}>{writing ? <span className="spinner" aria-hidden="true" /> : <Wand2 size={16} aria-hidden="true" />} Write again</button>
@@ -188,7 +201,7 @@ export function Create() {
           <h1 style={{ marginTop: 8 }}>{t.name}</h1>
           <p>{t.short}. You'll see the script before anything is made.</p>
         </div>
-        {t.kind !== "script" && <Link className="btn" to={`/app/series/new?template=${template}`}><Repeat size={16} aria-hidden="true" /> Make it a series</Link>}
+        {t.kind !== "script" && !ad && <Link className="btn" to={`/app/series/new?template=${template}`}><Repeat size={16} aria-hidden="true" /> Make it a series</Link>}
       </div>
       <div className="brief-grid">
         <div className="card stack">
@@ -197,6 +210,42 @@ export function Create() {
               <textarea className="textarea" rows={9} maxLength={2400} value={form.script} placeholder={t.examples[0]} onChange={(e) => set({ script: e.target.value })} />
               <span className="hint">{form.script.length.toLocaleString(SITE.locale)} / 2,400 characters · every sentence or two becomes a scene.</span>
             </label>
+          )}
+          {ad && (
+            <>
+              <div className="field"><span>Photos of the product</span>
+                <div className="product-photos">
+                  {form.photos.map((id, n) => (
+                    <span key={id} className="product-photo">
+                      <img src={fileUrl(id)} alt={`The product, view ${n + 1}`} />
+                      <button type="button" className="icon-btn" aria-label={`Remove photo ${n + 1}`} onClick={() => set({ photos: form.photos.filter((x) => x !== id) })}><X size={14} aria-hidden="true" /></button>
+                    </span>
+                  ))}
+                  {form.photos.length < PRODUCT_PHOTOS_MAX && (
+                    <span className="row wrap" style={{ gap: 8 }}>
+                      <UploadButton type="image" multiple label="Upload photos" onUploaded={(a) => addPhoto(a.id)} />
+                      <button type="button" className="btn" onClick={() => setPicking(true)}><ImagePlus size={16} aria-hidden="true" /> Choose from your files</button>
+                    </span>
+                  )}
+                </div>
+                <span className="hint">{`1 to ${PRODUCT_PHOTOS_MAX} photos (JPG, PNG or WebP). The first one is the main view; add other sides and close-ups, on a plain background if you can. The ad shows the product as it is in them.`}</span>
+              </div>
+              <label className="field"><span>Product name <span className="muted small">(optional)</span></span>
+                <input className="input" maxLength={80} value={form.productName} placeholder="Aqua Steel bottle" onChange={(e) => set({ productName: e.target.value })} />
+              </label>
+              <label className="field"><span>Video model <span className="chip" style={{ marginLeft: 6 }}>Admin test</span></span>
+                <select className="select" value={form.adModel} onChange={(e) => { const adModel = e.target.value as AdModel; set({ adModel, seconds: Math.min(form.seconds, oneShotOf(adModel)?.max ?? form.seconds) }); }}>
+                  {adModels.map((m) => <option key={m} value={m}>{adModelNames[m]}</option>)}
+                </select>
+                <span className="hint">{oneShot
+                  ? `One request films the whole ad, up to ${oneShot.max} seconds, and cuts between its shots itself. About ${oneShot.times} times the price of MiniMax.`
+                  : "Every shot is drawn with your photos and filmed on its own, about 5 seconds each. A single shot can be made again later."}</span>
+              </label>
+              <label className="field"><span>What is it, and what should the ad say?</span>
+                <textarea className="textarea" rows={4} maxLength={STORY_MAX_CHARS} value={form.prompt} placeholder={t.examples[0]} onChange={(e) => set({ prompt: e.target.value })} />
+                <span className="hint">What it is, who it is for and what makes it good. The ad says only what you write here: no invented prices or claims.</span>
+              </label>
+            </>
           )}
           {t.kind === "mashup" && (
             <div className="form-row">
@@ -234,9 +283,11 @@ export function Create() {
           {t.kind !== "script" && t.kind !== "backdrop" && (
             <label className="field"><span>Length</span>
               <div className="seg" role="group" aria-label="Length">
-                {lengths.map((n) => <button key={n} type="button" aria-pressed={form.seconds === n} onClick={() => set({ seconds: n })}>{n < 60 ? `${n} s` : n === 60 ? "1 min" : "1½ min"}</button>)}
+                {(ad ? adLengths.filter((n) => !oneShot || n <= oneShot.max) : lengths).map((n) => <button key={n} type="button" aria-pressed={form.seconds === n} onClick={() => set({ seconds: n })}>{n < 60 ? `${n} s` : n === 60 ? "1 min" : "1½ min"}</button>)}
               </div>
-              <span className="hint">{creditsLabel(videoCredits(form.seconds))} to make (1 per {SECONDS_PER_CREDIT} seconds).</span>
+              {ad && oneShot ? <span className="hint">{`About ${creditsLabel(adCredits(form.seconds, form.adModel))}: the video, and its one shot. The draft shows the exact price before anything is charged.`}</span>
+                : ad ? <span className="hint">{`About ${creditsLabel(adCredits(form.seconds))}: the video, and a filmed shot for every ${CLIP_SECONDS} seconds of it. The draft shows the exact price before anything is charged.`}</span>
+                : <span className="hint">{creditsLabel(videoCredits(form.seconds))} to make (1 per {SECONDS_PER_CREDIT} seconds).</span>}
             </label>
           )}
           <div className="form-row">
@@ -249,13 +300,13 @@ export function Create() {
           </div>
           <MusicChoice label="Music" mood={form.music} trackId={form.musicTrackId} onChange={({ mood, trackId }) => set({ music: mood, musicTrackId: trackId })}
             moodName={(m) => (m === "auto" ? "Pick one that fits" : m === "none" ? "No music" : m[0].toUpperCase() + m.slice(1))} />
-          <div className="field">
+          {!ad && <div className="field">
             <span className="row" style={{ gap: 10 }}>
               <Switch checked={form.sounds} onChange={(sounds) => set({ sounds })} label="Sound effects" />
               <span>Sound effects</span>
             </span>
             <span className="hint">A whoosh on scene changes and sounds for scenes you'd hear (fire, waves, a crowd). Add, change or remove them in the editor.</span>
-          </div>
+          </div>}
           {canFilm && (
             <div className="field">
               <span className="row" style={{ gap: 10 }}>
@@ -287,7 +338,7 @@ export function Create() {
               )}
             </div>
           )}
-          {t.kind !== "backdrop" && (
+          {t.kind !== "backdrop" && !ad && (
             <label className="field"><span>Main character <span className="muted small">(optional)</span></span>
               <input className="input" maxLength={300} value={form.subject} placeholder="A curious orange fox with a blue scarf" onChange={(e) => set({ subject: e.target.value })} />
               <span className="hint">Drawn the same way in every picture.</span>
@@ -295,7 +346,11 @@ export function Create() {
           )}
         </div>
         <div className="card stack">
-          {t.kind === "backdrop" ? (
+          {ad ? (
+            <p className="muted small">{oneShot
+              ? "The whole ad is filmed in one shot from your photos, with its own sound, as long as its voiceover. A voiceover in the voice you chose, subtitles and music go over it. You can change every line and shot in the draft."
+              : "Each shot is drawn with your photos, so it shows your product in the shot's setting, then filmed for a few seconds with its own sound. A voiceover in the voice you chose, subtitles and music go over the shots. You can change every line and shot in the draft."}</p>
+          ) : t.kind === "backdrop" ? (
             <p className="muted small">Storytime videos play your story over a looping background clip from the library, with bold subtitles. You can swap the clip in the editor.</p>
           ) : (
             <>
@@ -306,10 +361,11 @@ export function Create() {
           <button type="button" className="btn primary big block" disabled={!ready || writing} onClick={write} style={{ marginTop: 8 }}>
             {writing ? <><span className="spinner" aria-hidden="true" /> Writing your draft…</> : <><Wand2 size={18} aria-hidden="true" /> Write the draft (free)</>}
           </button>
-          {!ready && <p className="hint center">{t.kind === "script" ? "Paste at least a sentence or two." : "Give it a topic first."}</p>}
+          {!ready && <p className="hint center">{ad ? (form.photos.length ? "Say what the product is first." : "Add a photo of the product first.") : t.kind === "script" ? "Paste at least a sentence or two." : "Give it a topic first."}</p>}
           <CreditBlockNotice block={block} />
         </div>
       </div>
+      {picking && <MediaPicker type="image" title="Choose a photo of the product" onPick={(a) => { addPhoto(a.id); setPicking(false); }} onClose={() => setPicking(false)} />}
     </div>
   );
 }

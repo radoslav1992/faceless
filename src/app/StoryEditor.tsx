@@ -13,7 +13,8 @@ import { SceneSound, SoundSection, useSoundLibrary } from "./sound-ui";
 import {
   clockText, mergeScenes, moveEdge, sceneIndex, segmentsOf, splitScene, toggleKey, useStoryClock, useStoryPlayer, type UploadTiming,
 } from "./story-model";
-import { filmClock, isFilm, narrationCurrent, pendingMedia, presenterCurrent, presenterNeeded, showsPresenter, specCredits, spokenSeconds, type StorySpec } from "../../shared/formats";
+import { pendingClipCredits, filmClock, isFilm, narrationCurrent, pendingMedia, presenterCurrent, presenterNeeded, showsPresenter, specCredits, spokenSeconds, type StorySpec } from "../../shared/formats";
+import { oneShotOf } from "../../shared/ad";
 import { shotSeconds, takeKey } from "../../shared/drama";
 import { presenterLayoutInfo, presenterQualityInfo } from "../../shared/presenter";
 import {
@@ -194,8 +195,14 @@ export function StoryEditor({ spec, onChange, initial, upload, renderedSeconds, 
         )}
       </EditorSection>
       {/* A film's shots speak for themselves: no presenter, and no clip behind them. */}
-      {!film && <PresenterSection spec={spec} onChange={onChange} />}
-      {!film && <EditorSection title="Background clip" hint="One clip loops behind the whole video instead of a picture per scene (storytime). No AI pictures are made."
+      {/* Nor does a product ad (shared/ad.ts), which is made of filmed shots. */}
+      {!film && !spec.product && <PresenterSection spec={spec} onChange={onChange} />}
+      {/* An ad filmed in one shot (shared/ad.ts): its one clip plays behind the whole video; filming it again is new AI work. */}
+      {oneShotOf(spec.product?.model) && <EditorSection title="The ad's film" hint="One clip, filmed from your photos and the shots' descriptions, plays behind the whole ad with its own sound."
+        action={spec.backdrop ? <button type="button" className="btn sm" onClick={() => onChange({ ...spec, backdrop: null })}><Film size={14} aria-hidden="true" /> Film it again</button> : undefined}>
+        <p className="muted small">{spec.backdrop ? "Changing a shot's description changes the film only when it is filmed again." : "It is filmed when the video is made, after the voice, and as long as the voice."}</p>
+      </EditorSection>}
+      {!film && !spec.product && <EditorSection title="Background clip" hint="One clip loops behind the whole video instead of a picture per scene (storytime). No AI pictures are made."
         action={spec.backdrop
           ? <button type="button" className="btn sm ghost" onClick={() => onChange({ ...spec, backdrop: null })}>Use pictures</button>
           : <button type="button" className="btn sm" onClick={onBackdrop}><Film size={14} aria-hidden="true" /> Choose clip</button>}>
@@ -423,7 +430,7 @@ export function storyPrice(spec: StorySpec, initial: boolean, recordingSeconds?:
   const script = storyScript(spec.scenes);
   const pending = pendingMedia(spec);
   const pictures = pending.filter((m) => m.kind === "image").length;
-  const clips = pending.filter((m) => m.kind === "clip").map((m) => ({ seconds: m.seconds ?? CLIP_SECONDS, quality: m.quality ?? "regular" }));
+  const clips = pending.filter((m) => m.kind === "clip").map((m) => ({ seconds: m.oneShot ?? m.seconds ?? CLIP_SECONDS, quality: m.quality ?? "regular" }));
   const seconds = recordingSeconds ?? speechSeconds(script);
   const voiceAgain = spec.narration.kind === "voice" && !narrationCurrent(spec);
   return {
@@ -432,7 +439,7 @@ export function storyPrice(spec: StorySpec, initial: boolean, recordingSeconds?:
     video: initial ? videoCredits(seconds) : 0,
     voice: !initial && voiceAgain && !isFilm(spec) ? voiceCredits(script) : 0,
     redo: initial ? 0 : pictureCredits(pictures),
-    clipCredits: clipCredits(clips),
+    clipCredits: pending.filter((m) => m.kind === "clip").reduce((n, m) => n + pendingClipCredits(m), 0),
     total: specCredits(spec, initial, recordingSeconds),
   };
 }

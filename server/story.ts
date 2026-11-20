@@ -15,6 +15,7 @@ import { voiceIdSchema } from "../shared/voices";
 import { offeredVoice, voiceUsable } from "./voices";
 import { SPEECH_CHARS_PER_SECOND, clipModels, clipQualities } from "../shared/credits";
 import { filmSpec } from "../shared/film";
+import { adSpec, oneShotOf, productSchema } from "../shared/ad";
 import { type FilmVoices, castMember, episodeTitle, filmPlaces, filmShots, lipSyncSpec, NARRATOR, SHOT_MAX_WORDS, shotsSpec } from "../shared/drama";
 import { isAdmin } from "./auth";
 import { languageCodes, languageName, type LanguageCode } from "../shared/series";
@@ -257,6 +258,15 @@ const kindRules: Record<Exclude<VideoKind, "script">, (r: WriteRequest) => strin
     "headline: the title question exactly as read in scene 1.",
     "The pictures are not shown (a background clip plays instead): keep each picture description short.",
   ],
+  // A product ad (shared/ad.ts): every scene is a shot filmed from photos of the product, which the artist has.
+  ad: () => [
+    "This is a short ad for the owner's product, which ownerRequest describes. The owner's product and brand are the exception to the rule about brands: name them exactly as the owner does, and no other brand.",
+    "Scene 1 is the hook: the need, the desire or the moment the product is for, in one short line. The middle scenes show the product in use and its main benefit. The last scene shows the product clearly and ends on a short call to action in the owner's words, or a plain one (\"Try it today\") when they gave none.",
+    "Say only what the owner said about the product. Never invent a price, a discount, a guarantee, an award, a review, a number, or a health, safety or performance claim.",
+    "Every scene is one shot of a few seconds: its `text` is one short spoken sentence of the voiceover, and its `picture` is what the camera shows, with motion in mind (a hand picks it up, it is poured, opened, worn, switched on; light moves across it). The product is in every picture, called \"the product\": the artist has photos of it, so say where it is and what happens to it, never what it looks like. People may use it; show hands or people from behind or the side, never a face in close-up.",
+    "subject: an empty string.",
+    "headline: the product's name as the owner wrote it, or a slogan of 2 to 5 words, in the narration's language (no emojis).",
+  ],
 };
 /**
  * What the owner asked for decides what the video is about. Without this, a whole story pasted into the topic box was
@@ -285,6 +295,7 @@ export async function writeVideo(env: Env, r: WriteRequest): Promise<StoryConcep
     `Each scene: \`text\`, ${film ? "one short spoken line" : "one or two short spoken sentences"}; \`picture\`, the picture that shows what is said, in 12 to 30 English words (subject, action, setting, composition), concrete and drawable, never text, captions or logos; \`keys\`, one or two key words copied exactly from the scene's text, the words a viewer should catch (they are coloured in the subtitles).`,
     ...(r.drama ? dramaRules(r.drama) : kindRules[t.kind as Exclude<VideoKind, "script">](r)),
     r.drama ? "subject: the cast as given in `subject` (data), unchanged: these are the people in the pictures."
+      : t.kind === "ad" ? "The product is the only recurring thing in the pictures."
       : r.subject
         ? "subject: keep the owner's recurring character (given as data) and put it in every picture."
         : SUBJECT_RULE,
@@ -494,6 +505,8 @@ const draftSchema = z.object({
   sounds: z.boolean().default(true),
   /** A cinematic video (shared/film.ts): its clips' quality and, from an administrator who chose one, their model. */
   film: z.object({ quality: z.enum(clipQualities).default("regular"), model: z.enum(clipModels).optional() }).optional(),
+  /** A product ad (shared/ad.ts): the owner's photos of the product, and its name. */
+  product: productSchema.optional(),
 });
 export type DraftRequest = z.input<typeof draftSchema>;
 /**
@@ -505,6 +518,15 @@ export async function draftVideo(env: Env, userId: string, input: DraftRequest, 
   // Anyone can make a cinematic video; only an administrator (`admin`) chooses its clips' model, to compare them.
   const film = d.film && (admin ? d.film : { quality: d.film.quality });
   const t = templateOf(d.template);
+  // A product ad is a test, for administrators; it is written about the product the owner describes and has photos of.
+  if (t.kind === "ad") {
+    if (!admin) throw new HTTPException(403, { message: "Product ads are still being tested and aren't available yet." });
+    if (!d.product) throw new HTTPException(400, { message: "Add a photo of the product first." });
+    if (d.prompt.length < 2) throw new HTTPException(400, { message: "Say what the product is first." });
+    // In one shot, the ad is one clip: no longer than its model makes in one request.
+    const oneShot = oneShotOf(d.product.model);
+    if (oneShot) d.seconds = Math.min(d.seconds, oneShot.max);
+  }
   // A voice asked for must be offered; the template's own is replaced by the default voice when it was hidden.
   if (d.voiceId && !(await voiceUsable(env, d.voiceId, null, userId))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
   const style = d.style || t.style, voiceId = d.voiceId || (await offeredVoice(env, t.voice));
@@ -536,13 +558,21 @@ export async function draftVideo(env: Env, userId: string, input: DraftRequest, 
   }
   if (!concept) throw new HTTPException(503, { message: "We couldn't write this video right now. Please try again in a minute." });
   const music = d.musicTrackId || !concept.music ? catalog[0] : catalog.find((m) => m.ref === concept!.music);
-  const sounds = d.sounds ? await chooseSounds(env, { userId, scenes: concept.scenes, create: true }) : null;
+  // An ad's sound is its shots' own, under the voice and the music: no sound effects from the library.
+  const sounds = d.sounds && t.kind !== "ad" ? await chooseSounds(env, { userId, scenes: concept.scenes, create: true }) : null;
   const spec = conceptToSpec(concept, {
-    kind: t.kind, voiceId, style, language: d.language, captions: d.captions, subject: d.subject, animate: d.animate,
+    // An ad is written as a story and becomes an ad with its product's photos (below).
+    kind: t.kind === "ad" ? "story" : t.kind, voiceId, style, language: d.language, captions: d.captions, subject: t.kind === "ad" ? "" : d.subject, animate: d.animate,
     music: music && (d.musicTrackId || d.music !== "none") ? { trackId: music.id, volume: t.kind === "backdrop" ? 0.18 : 0.25 } : null,
     backdropId, sounds,
   });
   if (!spec) throw new HTTPException(502, { message: "The video we wrote didn't come out right. Please try again." });
+  if (t.kind === "ad") {
+    // Checked as a whole: an ad is its kind and its product together (shared/formats.ts).
+    const ad = storySpec.safeParse(adSpec(spec, d.product!));
+    if (!ad.success) throw new HTTPException(502, { message: "The video we wrote didn't come out right. Please try again." });
+    return ad.data;
+  }
   return film ? filmSpec(spec, film) : spec;
 }
 /** Create: a draft from a template (free; the text model only, 40 an hour and 200 a day). */

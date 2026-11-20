@@ -222,6 +222,41 @@ The series page shows the story so far (`story` in `GET /api/series/:id`). Edits
 after it is made (free edits) are not followed by a new lip-sync; in a film, moving an edge changes two shots' words,
 so both are taken again.
 
+**Product ads** (`shared/ad.ts`; a test, for administrators). A short ad filmed from the owner's photos of a
+product: the video kind `ad`, with the `product` of its spec (one to four of the owner's uploaded pictures, and the
+product's name). In Create an administrator picks the Product ad style (the template `ad`, marked `test`: hidden from
+everyone else, from the public pages, series and the API), adds the photos, says what the product is and chooses 15,
+20 or 30 seconds. The writer (`kindRules.ad` in `server/story.ts`) writes a few shots with one line of voiceover
+each: a hook, the product in use, a clear last shot with a call to action, saying only what the owner said (no
+invented prices or claims). The draft (`adSpec`) is put together like a cinematic video: every scene a clip on a
+hard cut, with no character of the writer's, no background clip, presenter or library sounds. Then:
+- each shot's picture is drawn with the photos as its references (role `product` in `server/providers/fal.ts`: the
+  picture model's edit endpoint), so it shows that very product in the shot's setting; the product keeps its own
+  label and logo (`PRODUCT_TEXT`), and no reference sheet is drawn (`pictureSheets` gives none);
+- each shot is filmed from its picture by the films' video model, MiniMax H3 Max (`adShotRequest`), again with the
+  photos as its reference images, so the product keeps its shape, colours and label while the camera or a hand
+  moves; it is asked for the shot's own sound and nothing spoken (`adClipPrompt`). Billed by the second, about $0.08
+  at 768p; up to four photos fit the request's free allowance of references;
+- the voiceover is recorded as for any video and gets its subtitles; the render plays the shots' own sound quietly
+  under it and the music (`FILM_AMBIENCE`), and leaves out the film look so the product keeps its colours.
+It costs the video by its length plus every shot as a high-quality clip (two credits per five seconds): 7 credits
+for a 15-second ad of three shots. The photos stay the owner's uploads: they are checked to be their pictures when
+the video is saved (`server/videos.ts`), handed to fal as capability links while the run works, and never shown in
+the video themselves. Only administrators draft, make or remake one (`draftVideo`, `checkFilm`).
+
+Three video models are being compared, chosen in the ad's form (the product's `model`). The above is `minimax`. With
+`seedance` (Seedance 2.0 Fast) or `seedance-25` (Seedance 2.5) the ad is filmed **in one shot**: no pictures are
+drawn, and one request to Seedance's reference-to-video on fal (`oneShotRequest`; for `seedance`, another endpoint
+when `FAL_AD_ONE_SHOT_MODEL` names one) takes the photos and every shot's description (`oneShotPrompt`) and returns
+one vertical clip of up to 15 seconds (30 with Seedance 2.5) that the model cuts from shot to shot itself, with its
+own sound. It is made after the voice and asked for as long as the voice
+(`oneShotLength`), saved as an AI clip and set as the video's background clip (`backdrop.assetId`), which the render
+plays behind the whole ad with its sound under the voice and the music (`ONE_SHOT_SOUND`). Its scenes are only the
+voiceover's lines and the shots' descriptions. The editor's "Film it again" clears the background clip, so the next
+save films it anew. Priced per five seconds of clip (`oneShotModels`): 6 credits with Seedance 2.0 Fast (about $0.24 a second to run:
+19 credits for a 15-second ad, the longest it makes), 12 with Seedance 2.5 (about $0.47 a second: 37 credits for 15
+seconds, 74 for 30).
+
 **Cinematic videos** (`shared/film.ts`; for everyone). A narrated video made the way AI short
 films are, as a flag on the video (`film` in its spec), not a video type, so any story style can be made this way.
 In Create anyone switches Cinematic on and chooses the clips' quality; an administrator also chooses, of the models

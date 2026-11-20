@@ -8,7 +8,7 @@ import ts from "typescript";
 const roots = ["src", "shared", "server"];
 // Not here: the legal pages (Реч БГ has its own Bulgarian texts), the administrators' screens, and files whose strings are
 // instructions to AI models or names of fonts and models.
-const skip = /(^|\/)(i18n|locales)\/|\.test\.|\.d\.ts$|src\/public\/Legal\.tsx$|src\/app\/Admin[A-Za-z]*\.tsx$|server\/routes\/admin|shared\/(film|caption-fonts|credits|structured-data|track)\.ts$|server\/(providers|social)\//;
+const skip = /(^|\/)(i18n|locales)\/|\.test\.|\.d\.ts$|src\/public\/Legal\.tsx$|src\/app\/Admin[A-Za-z]*\.tsx$|server\/routes\/admin|shared\/(film|ad|caption-fonts|credits|structured-data|track)\.ts$|server\/(providers|social)\//;
 /** Properties whose text is an instruction to an AI model, never shown. */
 const instructions = new Set(["prompt", "brief", "system", "negative", "look", "family", "recipe"]);
 /** Whether a string in the server's code is a message for a person: an error or a validation message. */

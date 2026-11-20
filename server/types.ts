@@ -59,6 +59,8 @@ export interface Env {
   FAL_CLIP_MODEL?: string;
   /** More clip models administrators can choose per scene to compare them (comma-separated; Kling is always offered). */
   FAL_CLIP_MODEL_ADMIN?: string;
+  /** The Seedance endpoint on fal an ad in one shot is filmed with (shared/ad.ts), when not the default. */
+  FAL_AD_ONE_SHOT_MODEL?: string;
   /** Later pictures of a video drawn from its first as a reference (server/providers/fal.ts); "off" to stop it. */
   FAL_REFERENCE_MODEL?: string;
   ELEVENLABS_API_KEY?: string;

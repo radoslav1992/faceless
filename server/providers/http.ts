@@ -48,6 +48,10 @@ export async function failureCode(r: Response, prefix: string) {
   const body = (await r.json().catch(() => null)) as any;
   const types = [body?.error_type, ...(Array.isArray(body?.detail) ? body.detail.map((d: any) => d?.type) : [])];
   const detail = typeof body?.detail === "string" ? body.detail.toLowerCase() : typeof body?.error?.message === "string" ? body.error.message.toLowerCase() : "";
+  // What was refused, without the provider's message: the kinds of error and, for a request it found invalid, the
+  // fields it named (a wrong parameter of a model shows here in Workers Logs).
+  const fields = Array.isArray(body?.detail) ? body.detail.map((d: any) => (Array.isArray(d?.loc) ? d.loc.join(".").slice(0, 60) : null)).filter(Boolean).slice(0, 8) : [];
+  console.warn("Provider refused", { prefix, status: r.status, types: types.filter((t) => typeof t === "string").slice(0, 8), fields });
   if (types.includes("content_policy_violation") || /content.?policy|safety|nsfw|moderat/.test(detail)) return `${prefix}_REJECTED`;
   if ([401, 402, 403].includes(r.status) || /balance|credits|top.?up|quota/.test(detail)) return `${prefix}_UNAVAILABLE`;
   if (r.status === 429) return `${prefix}_BUSY`;

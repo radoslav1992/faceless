@@ -5,7 +5,7 @@ import type { MusicMood } from "./series";
 // and drawn; a template is a ready-made starting point (a niche and its look) people pick in Create, for a series or on
 // the public tool pages. `brief` goes to the script writer as data about the video, never as the owner's instructions.
 
-export const videoKinds = ["story", "pov", "mashup", "script", "backdrop"] as const;
+export const videoKinds = ["story", "pov", "mashup", "script", "backdrop", "ad"] as const;
 export type VideoKind = (typeof videoKinds)[number];
 export const kindInfo: Record<VideoKind, { name: string; short: string }> = {
   story: { name: "AI story", short: "A narrated story with a new AI picture for every sentence." },
@@ -13,6 +13,7 @@ export const kindInfo: Record<VideoKind, { name: string; short: string }> = {
   mashup: { name: "Brainrot mashup", short: "An absurd animal-and-object character with its own chant." },
   script: { name: "Text to video", short: "Your own words, narrated and illustrated scene by scene." },
   backdrop: { name: "Storytime", short: "A title card, then the story narrated over a looping background clip." },
+  ad: { name: "Product ad", short: "A short ad filmed from photos of your product, with a voiceover." },
 };
 
 export const categories = [
@@ -22,6 +23,7 @@ export const categories = [
   { id: "surreal", name: "Surreal & memes" },
   { id: "storytime", name: "Storytime" },
   { id: "script", name: "Your script" },
+  { id: "ads", name: "Ads" },
 ] as const;
 export type CategoryId = (typeof categories)[number]["id"];
 
@@ -32,6 +34,8 @@ export type Template = {
   style: StoryStyle; voice: string; seconds: number; music: MusicMood; popular?: boolean;
   /** A public tool page (/tools/<slug>) with its own title and description. */
   tool?: { slug: string; title: string; description: string; icon: string };
+  /** Still being tested: only administrators see it and make videos with it (server/story.ts, server/videos.ts). */
+  test?: true;
 };
 
 export const templates = {
@@ -179,6 +183,13 @@ export const templates = {
     style: "cinematic", voice: "george", seconds: 60, music: "auto",
     tool: { slug: "text-to-video", title: "Text to video AI generator", description: "Paste a script and get a faceless video: an AI voiceover, a matching picture for every sentence and timed captions.", icon: "file-text" },
   },
+  // A product ad (shared/ad.ts): filmed from the owner's photos of the product. A test, for administrators.
+  ad: {
+    name: "Product ad", category: "ads", kind: "ad", short: "Your product's photos, filmed as a short ad", test: true,
+    brief: "A short ad for the owner's product: a hook that shows the need or the desire, the product in use with its main benefit, and a clear last shot of the product with a call to action. Warm, concrete and honest; only what the owner said about the product.",
+    examples: ["A steel water bottle that keeps drinks cold for 24 hours", "Handmade lavender soap from a small family workshop", "Wireless earbuds with a 40-hour battery"],
+    style: "cinematic", voice: "george", seconds: 15, music: "upbeat",
+  },
   custom: {
     name: "Your own topic", category: "stories", kind: "story", short: "Describe the videos you want",
     brief: "Videos about the owner's topic, described in the prompt.",
@@ -190,8 +201,16 @@ export type TemplateId = keyof typeof templates;
 export const templateIds = Object.keys(templates) as TemplateId[];
 export const templateOf = (id: string): Template => (templates as Record<string, Template>)[id] ?? templates.custom;
 export const isTemplate = (id: string): id is TemplateId => Object.hasOwn(templates, id);
-/** Templates a series can run on (every one but a script, which needs the owner's words each time). */
-export const seriesTemplates = templateIds.filter((id) => templates[id].kind !== "script");
+/** Whether a template is still being tested (administrators only). */
+export const isTest = (id: TemplateId) => !!(templates[id] as Template).test;
+/** The styles everyone can use: what the public pages show and count. */
+export const openTemplateIds = templateIds.filter((id) => !isTest(id));
+/** The categories that have a style everyone can use. */
+export const openCategories = categories.filter((c) => openTemplateIds.some((id) => templates[id].category === c.id));
+/** Templates a series can run on (every one but a script, which needs the owner's words each time, and an ad, its product's photos). */
+export const seriesTemplates = templateIds.filter((id) => templates[id].kind !== "script" && templates[id].kind !== "ad");
+/** Templates the public API and MCP server make videos from: a product ad needs photos, which they do not take. */
+export const apiTemplateIds = templateIds.filter((id) => templates[id].kind !== "ad");
 /** The public tool pages. */
 export const tools = templateIds.filter((id) => !!(templates[id] as Template).tool).map((id) => ({ id, ...(templates[id] as Template).tool! }));
 export const toolBySlug = (slug: string) => tools.find((t) => t.slug === slug);

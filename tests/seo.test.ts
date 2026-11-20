@@ -6,7 +6,7 @@ import { faqPage } from "../shared/faq-page";
 import { plans } from "../shared/plans";
 import { publicPages } from "../shared/seo";
 import { jsonLd, structuredData } from "../shared/structured-data";
-import { templates, tools } from "../shared/templates";
+import { apiTemplateIds, categories, isTest, openCategories, openTemplateIds, seriesTemplates, templateIds, templates, tools } from "../shared/templates";
 import { toolPageCopy } from "../shared/tool-pages";
 import { testEnv } from "./helpers";
 
@@ -28,6 +28,17 @@ describe("public pages for crawlers", () => {
     for (const line of [toolPageCopy.history!.intro, ...toolPageCopy.history!.ideas, ...toolPageCopy.history!.faq.map(([q]) => q)]) expect(history).toContain(line);
     expect(history).toContain("More video tools");
   }, 60_000);
+
+  it("keeps a style that is still being tested off the public pages, series and the API", () => {
+    expect(templateIds).toContain("ad");
+    expect(isTest("ad")).toBe(true);
+    expect(templateIds.filter(isTest)).toEqual(["ad"]);
+    for (const list of [openTemplateIds, seriesTemplates, apiTemplateIds, tools.map((t) => t.id)]) expect(list).not.toContain("ad");
+    expect(openTemplateIds).toHaveLength(templateIds.length - 1);
+    // Its category shows only where its style does.
+    expect(openCategories.map((c) => c.id)).not.toContain("ads");
+    expect(openCategories).toHaveLength(categories.length - 1);
+  });
 
   it("gives every tool page its own words, ideas and questions, under a unique address", () => {
     expect(tools.length).toBe(18);

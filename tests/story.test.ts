@@ -5,15 +5,16 @@ import { planRender, type PlanContext } from "../server/render-plan";
 import { acceptScenePlan, acceptStory, conceptToSpec, OWNER_RULE, storyShape } from "../server/story";
 import { acceptNewSounds, acceptSounds, rankSounds } from "../server/sounds";
 import { alignedWords, ALIGNMENT_URL, forcedAlignment, languageCode, speak, SPEECH_MODEL } from "../server/providers/elevenlabs";
-import { adminClipModels, clipModelFor, falRequest, referenceModel, referencePrompt, submitFal } from "../server/providers/fal";
+import { adminClipModels, clipModelFor, falRequest, ONE_SHOT_25_MODEL, ONE_SHOT_MODEL, oneShotModel, oneShotRequest, PRODUCT_TEXT, referenceModel, referencePrompt, submitFal } from "../server/providers/fal";
 import { heygenClipRequest, heygenRetry } from "../server/providers/heygen";
 import { attention } from "../server/operations";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 import { languages, seriesSettingsSchema } from "../shared/series";
 import { FILM_AMBIENCE, filmSpec } from "../shared/film";
+import { AD_CLIP_QUALITY, adCredits, adSpec, ONE_SHOT_SOUND, oneShotModels, oneShotSeconds } from "../shared/ad";
 import { lipSyncSpec, shotSeconds, shotsSpec, takeKey, takeOf, voiceSampleText } from "../shared/drama";
 import { SCRIBE_URL } from "../server/speech";
-import { filmClock, estimatedSeconds, narrationCurrent, pendingMedia, pictureSheets, specCredits, specSchema, storySpec, type StorySpec } from "../shared/formats";
+import { filmClock, estimatedSeconds, narrationCurrent, pendingMedia, pictureSheets, referencedAssets, specCredits, specSchema, storySpec, type StorySpec } from "../shared/formats";
 import {
   AUTO_TRANSITIONS, characterSheetKey, clipFor, estimatedTimings, mergeScenes, moveEdge, narrationKey, placeOf, splitScene, toggleKey, resolveTransition, scenePrompt, scenesFromCounts, splitScenes, storyScript, storySegments,
   storyStyleIds, storyStyles, storyTiming, textWords, timedScript, transitionInfo, transitionKinds, voicedScript, FPS, STORY_MAX_SCENES,
@@ -768,7 +769,7 @@ function providers({ refuseClip = false, refuseHeyGen = false, heygenFails = 0, 
     }
     if (fal && url.endsWith("/status")) return Response.json({ status: "COMPLETED" });
     if (fal && refuse(fal[1])) return Response.json({ detail: [{ type: "content_policy_violation" }] }, { status: 422 });
-    if (fal) return Response.json(/kling|minimax\/h3|flux-3-max/.test(fal[1]) ? { video: { url: "https://v3.fal.media/files/clip.mp4" } } : { images: [{ url: "https://v3.fal.media/files/shot.jpg" }] });
+    if (fal) return Response.json(/kling|minimax\/h3|flux-3-max|seedance/.test(fal[1]) ? { video: { url: "https://v3.fal.media/files/clip.mp4" } } : { images: [{ url: "https://v3.fal.media/files/shot.jpg" }] });
     // HeyGen Video 1: a job, then "processing" once, then done (or refused when `refuseHeyGen`); its copy deleted.
     if (url === "https://api.heygen.com/v3/models/videos" && method === "POST") {
       // Out of API credits: HeyGen answers 400.
@@ -991,6 +992,186 @@ describe("narrated videos in the content run", () => {
     const plain = planRender({ ...video.spec, film: undefined }, { media, narration, watermark: "" } as PlanContext).compose;
     expect(plain.look).toBeUndefined();
     expect(plain.segments.every((s) => !s.audio)).toBe(true);
+  });
+
+  it("makes a product ad for an administrator: shots drawn and filmed with the product's photos, their sound under the voice, no film look", async () => {
+    const { env, sqlite, user, own, run } = await setup();
+    const product = { assets: [own], name: "Aqua Steel", model: "minimax" as const };
+    const brief = { template: "ad", prompt: "A steel water bottle that keeps drinks cold for 24 hours", seconds: 15, product };
+    const lines = ["Hot day, warm water again?", "Aqua Steel keeps your drink cold for 24 hours.", "Try it today."];
+    env.AI.run = async () => ({ status: "completed", output_text: JSON.stringify({
+      title: "Aqua Steel", topic: "steel bottle", caption: "Cold for a whole day.", hashtags: ["bottle"], headline: "Aqua Steel", subject: "", look: "A bright kitchen in the morning.", places: [], music: "",
+      scenes: lines.map((text, n) => ({ text, picture: `A hand lifts the product from a table, shot ${n + 1}`, keys: [], tone: "", place: "" })),
+    }) });
+    // A test: nobody but an administrator drafts one, or makes one drafted elsewhere.
+    expect((await call(worker, env, "POST", "/api/story/draft", brief, user.cookie)).status).toBe(403);
+    const plain = specSchema.parse({ format: "story", narration: { kind: "voice", voiceId: "george" }, scenes: lines.map((text, n) => ({ text, description: `A hand lifts the product, shot ${n + 1}`, keys: [] })) }) as StorySpec;
+    const ad = adSpec(plain, product);
+    const refused = await call(worker, env, "POST", "/api/videos", { spec: ad, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(refused.status).toBe(403);
+    expect(refused.data.error).toBe("Product ads are still being tested and aren't available yet.");
+    sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
+    // It needs a photo of the product and what the product is.
+    expect((await call(worker, env, "POST", "/api/story/draft", { ...brief, product: undefined }, user.cookie)).data.error).toBe("Add a photo of the product first.");
+    expect((await call(worker, env, "POST", "/api/story/draft", { ...brief, prompt: "" }, user.cookie)).data.error).toBe("Say what the product is first.");
+    // The draft: an ad with its product, every scene a filmed shot on a cut, no character of the writer's, no library sounds.
+    const draft = await call(worker, env, "POST", "/api/story/draft", brief, user.cookie);
+    expect(draft.status).toBe(200);
+    expect(draft.data.spec).toMatchObject({ kind: "ad", film: true, product, subject: "", backdrop: null, presenter: null, headline: { text: "Aqua Steel" } });
+    expect(draft.data.spec.sounds).toBeUndefined();
+    expect(draft.data.spec.scenes.map((s: any) => [s.text, s.source, s.transition, s.clipQuality, s.clipSeconds])).toEqual(lines.map((text) => [text, "clip", "cut", AD_CLIP_QUALITY, 5]));
+    // An ad is its kind and its photos together, made of filmed shots.
+    expect(specSchema.safeParse({ ...ad, product: undefined }).success).toBe(false);
+    expect(specSchema.safeParse({ ...ad, kind: "story" }).success).toBe(false);
+    expect(specSchema.safeParse({ ...ad, film: undefined }).success).toBe(false);
+    expect(specSchema.safeParse({ ...ad, product: { assets: [own, own] } }).success).toBe(false);
+    // Drawn from the photos alone (no sheets), which are kept with the video; priced as the video plus its shots.
+    expect(pictureSheets(ad)).toEqual([]);
+    expect(referencedAssets(ad)).toContain(own);
+    expect(specCredits(ad, true)).toBe(videoCredits(estimatedSeconds(ad)) + 3 * CLIP_CREDITS[AD_CLIP_QUALITY]);
+    expect(adCredits(15)).toBe(1 + 3 * CLIP_CREDITS[AD_CLIP_QUALITY]);
+    // The photos must be the owner's pictures.
+    const stranger = await call(worker, env, "POST", "/api/videos", { spec: { ...ad, product: { ...product, assets: [crypto.randomUUID()] } }, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(stranger.status).toBe(400);
+    const calls = providers();
+    const created = await call(worker, env, "POST", "/api/videos", { spec: ad, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(created.status).toBe(201);
+    await run();
+    const video = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
+    expect(video.renderStatus).toBe("ready");
+    expect(video.spec).toMatchObject({ kind: "ad", product });
+    const fal = calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/"));
+    // Each shot's picture: drawn with the photo as its reference, the product kept as it is, its label allowed.
+    const stills = fal.filter((c) => /^Draw a new picture of this scene/.test(c.body.prompt));
+    expect(stills).toHaveLength(3);
+    for (const c of stills) {
+      expect(c.url).toBe(`https://queue.fal.run/${referenceModel(env)}`);
+      expect(c.body.image_urls).toHaveLength(1);
+      expect(c.body.image_urls[0]).toMatch(/^https:\/\/app\.test\/api\/render-inputs\//);
+      expect(c.body.prompt).toContain("The product (Aqua Steel) is the one in the reference photos");
+      expect(c.body.prompt).toContain(PRODUCT_TEXT);
+      expect(c.body.prompt).toContain("The reference picture is a photo of the product this ad is for");
+      expect(c.body.prompt).not.toContain("No text, captions, logos or watermarks in the picture.");
+      expect(c.body.prompt).not.toContain("Match the art style");
+    }
+    expect(stills[0].body.prompt).toContain("Composed as a close-up product shot from an advertisement");
+    // Each shot: its picture filmed by the films' model with the photo, asked for its own sound and nothing spoken.
+    const shots = fal.filter((c) => c.url === "https://queue.fal.run/minimax/h3-max/reference-to-video");
+    expect(shots).toHaveLength(3);
+    for (const c of shots) {
+      expect(c.body).toMatchObject({ duration: 5, resolution: "768P", prompt_expansion_mode: "balanced" });
+      expect(c.body.image_url).toMatch(/^https:\/\/app\.test\/api\/render-inputs\//);
+      expect(c.body.reference_image_urls).toEqual(stills[0].body.image_urls);
+      expect(c.body.prompt).toContain("Image 1 is a photo of the product (Aqua Steel): keep it looking exactly as in it");
+      expect(c.body.prompt).toContain("no speech, no voices and no music.");
+    }
+    expect(shots[0].body.prompt).toMatch(/^A hand lifts the product, shot 1\. A slow push-in on the product\./);
+    expect(fal).toHaveLength(6);
+    // The voiceover is recorded as for any video.
+    expect(calls.filter((c) => c.url.includes("/v1/text-to-speech/"))).toHaveLength(1);
+    // The render: the shots' own sound quietly under the voice on hard cuts, and the product's colours left alone.
+    const narration = { key: "media/u/voice.wav", duration: 12, words: video.spec.generated.words };
+    const media = Object.fromEntries(video.spec.scenes.flatMap((s: any) => [s.clipId, s.imageId]).filter(Boolean)
+      .map((id: string, n: number) => [id, { key: `media/u/${n}`, kind: video.spec.scenes.some((s: any) => s.clipId === id) ? "video" : "image", duration: 5, width: 1080, height: 1920, ai: true }]));
+    media[own] = { key: `media/${user.id}/${own}.jpg`, kind: "image", duration: 0, width: 1080, height: 1920, ai: false };
+    const { compose } = planRender(video.spec, { media, narration, watermark: "" } as PlanContext);
+    expect(compose.look).toBeUndefined();
+    expect(compose.segments.map((s) => [s.kind, s.audio ?? null, s.transition ?? null])).toEqual([["video", FILM_AMBIENCE, null], ["video", FILM_AMBIENCE, null], ["video", FILM_AMBIENCE, null]]);
+    // The photo is not shown itself: only the shots are.
+    expect(compose.keys).not.toContain(`media/${user.id}/${own}.jpg`);
+  });
+
+  it("films a product ad in one shot with Seedance: one clip from the photos after the voice, played behind the whole ad with its sound", async () => {
+    const { env, sqlite, user, own, run } = await setup();
+    sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
+    const product = { assets: [own], name: "Aqua Steel", model: "seedance" as const };
+    const lines = ["Hot day, warm water again?", "Aqua Steel keeps your drink cold for 24 hours.", "Try it today."];
+    env.AI.run = async () => ({ status: "completed", output_text: JSON.stringify({
+      title: "Aqua Steel", topic: "steel bottle", caption: "Cold for a whole day.", hashtags: [], headline: "Aqua Steel", subject: "", look: "", places: [], music: "",
+      scenes: lines.map((text, n) => ({ text, picture: `A hand lifts the product from a table, shot ${n + 1}`, keys: [], tone: "", place: "" })),
+    }) });
+    // The draft: the lines and the shots' descriptions, no pictures or clips of their own, and no more than one clip's 15 seconds.
+    const draft = await call(worker, env, "POST", "/api/story/draft", { template: "ad", prompt: "A steel water bottle", seconds: 30, product }, user.cookie);
+    expect(draft.status).toBe(200);
+    const ad = specSchema.parse(draft.data.spec) as StorySpec;
+    expect(ad).toMatchObject({ kind: "ad", product, backdrop: null, presenter: null });
+    expect(ad.film).toBeUndefined();
+    expect(ad.scenes.map((s) => [s.text, s.source])).toEqual(lines.map((text) => [text, "image"]));
+    // One clip to make, priced by its length at the one-shot rate; nothing else.
+    const pending = pendingMedia(ad);
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({ kind: "clip", key: "backdrop", product: true, oneShot: oneShotSeconds(estimatedSeconds(ad) - 0.5, "seedance") });
+    expect(pending[0].credits).toBe(oneShotModels.seedance!.credits * Math.ceil(pending[0].oneShot! / 5));
+    expect(pending[0].prompt).toMatch(/^A vertical advertisement for a product \(Aqua Steel\), 3 shots of about the same length joined by hard cuts\. @Image1 is a photo of the product/);
+    expect(pending[0].prompt).toContain("Shot 1: A hand lifts the product from a table, shot 1. Shot 2: A hand lifts the product from a table, shot 2.");
+    expect(pending[0].prompt).toContain("no speech, no voice-over and no music.");
+    expect(specCredits(ad, true)).toBe(videoCredits(estimatedSeconds(ad)) + pending[0].credits!);
+    expect(adCredits(15, "seedance")).toBe(1 + 3 * 6);
+    // A library clip is never an ad's film.
+    expect(specSchema.safeParse({ ...ad, backdrop: { libraryId: crypto.randomUUID() } }).success).toBe(false);
+    // The request, and the operator's other Seedance endpoint.
+    expect(oneShotRequest({ prompt: "p", seconds: 40, photos: ["a", "b", "c", "d", "e"] })).toEqual({
+      model: "bytedance/seedance-2.0/fast/reference-to-video",
+      body: { prompt: "p", image_urls: ["a", "b", "c", "d"], resolution: "720p", duration: "15", aspect_ratio: "9:16", generate_audio: true },
+    });
+    expect(oneShotRequest({ prompt: "p", seconds: 2, photos: ["a"] }).body.duration).toBe("4");
+    expect(oneShotModel({ ...env, FAL_AD_ONE_SHOT_MODEL: "bytedance/seedance-2.5/flash/reference-to-video" })).toBe("bytedance/seedance-2.5/flash/reference-to-video");
+    expect(oneShotModel({ ...env, FAL_AD_ONE_SHOT_MODEL: "https://evil.example/x" })).toBe(ONE_SHOT_MODEL);
+    const calls = providers();
+    const created = await call(worker, env, "POST", "/api/videos", { spec: ad, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(created.status).toBe(201);
+    await run();
+    const video = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
+    expect(video.renderStatus).toBe("ready");
+    // One request to fal, after the voice was recorded: the photos, every shot, vertical, with sound, as long as the voice (at most 15 s).
+    const fal = calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/"));
+    expect(fal).toHaveLength(1);
+    expect(fal[0].url).toBe(`https://queue.fal.run/${ONE_SHOT_MODEL}`);
+    expect(fal[0].body).toMatchObject({ resolution: "720p", duration: "15", aspect_ratio: "9:16", generate_audio: true, prompt: pending[0].prompt });
+    expect(fal[0].body.image_urls).toHaveLength(1);
+    expect(fal[0].body.image_urls[0]).toMatch(/^https:\/\/app\.test\/api\/render-inputs\//);
+    expect(calls.findIndex((c) => c.url.includes("/v1/text-to-speech/"))).toBeLessThan(calls.indexOf(fal[0]));
+    // The clip is the video's background clip, kept with it; nothing more is asked for.
+    const clipId = video.spec.backdrop.assetId;
+    expect(clipId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(pendingMedia(video.spec)).toEqual([]);
+    expect(specCredits(video.spec, false)).toBe(0);
+    // Filming it again is new work at the same price.
+    expect(specCredits({ ...video.spec, backdrop: null }, false)).toBe(pendingMedia({ ...video.spec, backdrop: null })[0].credits);
+    // The render: the one clip behind the whole ad, with its own sound under the voice.
+    const narration = { key: "media/u/voice.wav", duration: 12, words: video.spec.generated.words };
+    const media = { [clipId]: { key: "media/u/film.mp4", kind: "video", duration: 15, width: 720, height: 1280, ai: true }, [own]: { key: `media/${user.id}/${own}.jpg`, kind: "image", duration: 0, width: 1080, height: 1920, ai: false } };
+    const { compose } = planRender(video.spec, { media, narration, watermark: "" } as unknown as PlanContext);
+    expect(compose.segments).toHaveLength(1);
+    expect(compose.segments[0]).toMatchObject({ kind: "video", audio: ONE_SHOT_SOUND, trim: 0 });
+    expect(compose.segments[0].loop).toBeUndefined();
+    expect(compose.look).toBeUndefined();
+    // Any other background clip stays silent.
+    const plain = planRender({ ...video.spec, kind: "story", product: undefined }, { media, narration, watermark: "" } as unknown as PlanContext).compose;
+    expect(plain.segments[0].audio).toBe(0);
+    // Seedance 2.5, the third model: its own endpoint, up to 30 seconds in one shot, at twice the credits.
+    const newer = { ...ad, product: { ...product, model: "seedance-25" as const } };
+    expect(specSchema.safeParse(newer).success).toBe(true);
+    expect(pendingMedia(newer)[0].credits).toBe(2 * pending[0].credits!);
+    expect(adCredits(30, "seedance-25")).toBe(2 + 6 * 12);
+    expect(oneShotSeconds(40, "seedance-25")).toBe(30);
+    expect(oneShotSeconds(40, "seedance")).toBe(15);
+    expect(oneShotModel(env, "seedance-25")).toBe("bytedance/seedance-2.5/reference-to-video");
+    // The operator's other endpoint replaces Seedance 2.0 Fast only.
+    expect(oneShotModel({ ...env, FAL_AD_ONE_SHOT_MODEL: "bytedance/seedance-2.5/flash/reference-to-video" }, "seedance-25")).toBe(ONE_SHOT_25_MODEL);
+    expect(oneShotRequest({ prompt: "p", seconds: 40, photos: ["a"], model: "seedance-25" }, ONE_SHOT_25_MODEL).body.duration).toBe("30");
+    const draft25 = await call(worker, env, "POST", "/api/story/draft", { template: "ad", prompt: "A steel water bottle", seconds: 30, product: newer.product }, user.cookie);
+    expect(draft25.data.spec.product.model).toBe("seedance-25");
+    // (More credits than the test's plan has: this ad is the dearer one.)
+    sqlite.prepare("UPDATE usage_windows SET quota=500 WHERE user_id=?").run(user.id);
+    const calls25 = providers();
+    const made = await call(worker, env, "POST", "/api/videos", { spec: newer, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(made.status).toBe(201);
+    await run();
+    const fal25 = calls25.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/"));
+    expect(fal25.map((c) => c.url)).toEqual([`https://queue.fal.run/${ONE_SHOT_25_MODEL}`]);
+    // As long as the voice (17 seconds here), which Seedance 2.0 Fast would have cut to 15.
+    expect(fal25[0].body).toMatchObject({ duration: "18", aspect_ratio: "9:16", resolution: "720p", generate_audio: true });
   });
 
   it("narrates a dialogue in its scenes' voices: one call per stretch, joined into one recording the video keeps", async () => {
