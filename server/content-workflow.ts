@@ -208,7 +208,8 @@ async function generateMedia(
     const length = m.cutaway ? await clipLength(e, run, m, 2) : 0;
     if (fallback && !canFallBack(e, refs.length > 0)) throw new Error("GENERATION_REJECTED");
     // A model chosen for the scene counts only when its owner is an administrator who may choose it.
-    const clipModel = kind === "clip" && !m.lipSync && !m.acted && !m.cutaway && !m.product ? instead ?? await sceneClipModel(e, run, m) : undefined;
+    // An ad's shot has no model to choose, unless its ad's model is one of the clip models (HeyGen Video 1).
+    const clipModel = kind === "clip" && !m.lipSync && !m.acted && !m.cutaway && (!m.product || m.fixedModel) ? instead ?? m.fixedModel ?? await sceneClipModel(e, run, m) : undefined;
     await patchState(e, run.id, (s) => { (s.claims ||= {})[name] = true; });
     await phase(kind === "clip" ? "clip" : "images");
     // A talking scene: its picture, lip-synced to its stretch of the voice (made before this, shared/drama.ts).
@@ -223,12 +224,12 @@ async function generateMedia(
       : m.oneShot
       ? await submitFalOneShot(e, { prompt: m.prompt, ...(await oneShotPlan(e, run, m.oneShot)), photos: refs.map((r) => r.url) })
       // An ad's shot: its picture filmed with the photos of the product (shared/ad.ts), which `references` gives.
-      : m.product && kind === "clip"
+      : m.product && kind === "clip" && !clipModel
       ? await submitFalAdShot(e, { image: image ?? await sourcePicture(e, run, m), prompt: m.prompt, seconds: m.seconds ?? CLIP_SECONDS, photos: refs.map((r) => r.url), name: await productName(e, run) })
       : m.lipSync
       ? await submitFalLipSync(e, image ?? await sourcePicture(e, run, m), await lineAudio(e, run, m))
       : clipModel === "heygen-video-1" && image
-      ? { heygen: await submitHeyGenClip(e, `${run.id}-${name}`, heygenClipRequest(m.prompt, image, await clipLength(e, run, m), m.quality)) }
+      ? { heygen: await submitHeyGenClip(e, `${run.id}-${name}`, heygenClipRequest(m.prompt, image, await clipLength(e, run, m), m.quality, !!m.product)) }
       : await submitFal(e, kind, m.prompt, { image, seconds: m.seconds, clipQuality: m.quality, clipModel, references: refs.length ? refs : undefined, fallback, audio: m.audio });
     await patchState(e, run.id, (s) => { (s.tickets ||= {})[name] = t; });
     return t;
@@ -321,7 +322,7 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
         // An ad in one shot is filmed from the photos alone.
         : m.oneShot ? await generateMedia(e, step, run, `ai-${i}`, m, phase, undefined, () => productPhotos(e, run, first))
         // An ad's shot is filmed from its picture with the same photos.
-        : m.product ? await generateMedia(e, step, run, `ai-${i}`, m, phase, () => sourcePicture(e, run, m), () => productPhotos(e, run, first))
+        : m.product && !m.fixedModel ? await generateMedia(e, step, run, `ai-${i}`, m, phase, () => sourcePicture(e, run, m), () => productPhotos(e, run, first))
         : m.lipSync || m.cutaway ? await generateMedia(e, step, run, `ai-${i}`, m, phase, () => sourcePicture(e, run, m))
           : await makeClip(e, step, run, `ai-${i}`, m, phase, models.get(i)!, m.from ? () => sourcePicture(e, run, m) : undefined);
       await step.do(`ai-${i}-apply`, async () => updateSpec(e, videoId, (spec) => {
@@ -338,7 +339,7 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
   // the voice's clock (HeyGen bills by the second). Every other clip is made before it, like the pictures: one refused
   // stops the run before the voice is paid for.
   const models = new Map<number, ClipModel>();
-  for (const [i, m] of pending.entries()) if (m.kind === "clip" && !m.lipSync && !m.acted && !m.cutaway && !m.product) models.set(i, await step.do(`ai-${i}-model`, () => sceneClipModel(e, run, m)));
+  for (const [i, m] of pending.entries()) if (m.kind === "clip" && !m.lipSync && !m.acted && !m.cutaway && (!m.product || m.fixedModel)) models.set(i, m.fixedModel ?? await step.do(`ai-${i}-model`, () => sceneClipModel(e, run, m)));
   // A lip-synced clip is made from its scene's stretch of the voice, so after it too (it has no model to choose); so
   // is a film's cutaway, asked for as long as its scene is on the voice's clock.
   // So is an ad's one shot, asked for as long as the voice.

@@ -88,7 +88,8 @@ under `/api/admin` answers 404 to anyone else.
   7 credits and costs about $1.20 in clips plus three pictures and the voice. To open it to everyone: remove
   `test: true` from the `ad` template in `shared/templates.ts` and the two administrator checks (`draftVideo` in
   `server/story.ts`, `checkFilm` in `server/videos.ts`), and give it a tool page if it should have one.
-  The form's **Video model** compares three: MiniMax H3 Max shot by shot (above), and Seedance in one shot (one
+  The form's **Video model** compares four: MiniMax H3 Max shot by shot (above); HeyGen Video 1 shot by shot, from
+  each shot's picture without the photos (4 credits for 15 seconds; needs `HEYGEN_API_KEY`); and Seedance in one shot (one
   request films the whole ad, after the voice): Seedance 2.0 Fast, at most 15 seconds (19 credits, about $3.60 to
   run), and Seedance 2.5, up to 30 seconds (37 credits for 15 seconds, about $7 to run). When a
   provider refuses a request, Workers Logs show `Provider refused` with the fields it named: a wrong parameter of a

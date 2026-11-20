@@ -248,6 +248,8 @@ export type PendingMedia = {
   oneShot?: number;
   /** What it costs, when not a clip's usual price by its length and quality. */
   credits?: number;
+  /** The model the clip is made with whoever owns it: an ad's shots are its model's (shared/ad.ts). */
+  fixedModel?: ClipModel;
 };
 /** The credits of a picture or clip still to make that is priced as a clip. */
 export const pendingClipCredits = (m: PendingMedia) => m.credits ?? clipCredits([{ seconds: m.seconds ?? 5, quality: m.quality }]);
@@ -324,8 +326,11 @@ export function pendingMedia(spec: Spec): PendingMedia[] {
     else if (s.source === "clip" && s.cutaway && !s.clipId && !showsPresenter(spec, i))
       out.push({ kind: "clip", prompt: cutawayPrompt(s, i), path: ["scenes", i], key: "clipId", from: "imageId", seconds: s.clipSeconds, quality: s.clipQuality, cutaway: true });
     else if (s.source === "clip" && spec.product && !s.clipId)
-      // An ad's shot: filmed from its picture with the product's photos, with its own sound.
-      out.push({ kind: "clip", prompt: adClipPrompt(s.description, i), path: ["scenes", i], key: "clipId", from: "imageId", seconds: s.clipSeconds, quality: s.clipQuality, product: true, audio: true });
+      // An ad's shot: filmed from its picture with the product's photos, with its own sound; by HeyGen Video 1, from the picture alone.
+      out.push({
+        kind: "clip", prompt: adClipPrompt(s.description, i), path: ["scenes", i], key: "clipId", from: "imageId", seconds: s.clipSeconds, quality: s.clipQuality, product: true, audio: true,
+        ...(spec.product.model === "heygen" && { fixedModel: "heygen-video-1" as const }),
+      });
     else if (s.source === "clip" && !s.cutaway && !s.clipId && !showsPresenter(spec, i))
       out.push({
         kind: "clip", prompt: spec.film ? filmClipPrompt(s.description, i) : clipPrompt(s.description), path: ["scenes", i], key: "clipId", from: "imageId",

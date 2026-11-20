@@ -161,11 +161,12 @@ const HEYGEN_CLIP_MAX = 30;
  * fetches the picture from its capability link. The schema is strict: only these fields. The clip's own sound is
  * never played (the render takes only its picture).
  */
-export function heygenClipRequest(prompt: string, image: string, seconds: number | undefined, quality: ClipQuality = "regular") {
+export function heygenClipRequest(prompt: string, image: string, seconds: number | undefined, quality: ClipQuality = "regular", product = false) {
   return {
     model: "heygen-video-1",
     mode: "image_to_video",
-    prompt: `${prompt.trim()} No text, captions, logos or watermarks in the picture.`,
+    // An ad's product keeps the label and logo its picture shows (shared/ad.ts); nothing else is ever written.
+    prompt: `${prompt.trim()} ${product ? "The product keeps its own label and logo exactly as in the first frame; no other text, captions, logos or watermarks in the picture." : "No text, captions, logos or watermarks in the picture."}`,
     image: { type: "url", url: image },
     duration: Math.min(HEYGEN_CLIP_MAX, Math.max(CLIP_SECONDS, Math.ceil(seconds ?? CLIP_SECONDS))),
     resolution: quality === "high" ? "1080p" : "768p",
