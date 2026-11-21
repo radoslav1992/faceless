@@ -4,10 +4,20 @@ This repository is Hookstreak Shorts. The same code also builds a second site: *
 with its own name, logo, currency, database, storage and Stripe account. Hookstreak is the default and does not
 change: a build without `SITE=rechbg` renders the pages it always did.
 
-Status: Реч БГ builds (`npm run build:rechbg`) with the public pages, the app, the legal pages and the e-mails in
-Bulgarian, its name and logo, and prices in euro. Its database and bucket exist; it is not deployed yet: the
-first deploy replaces the earlier Реч БГ app. What is left
-is under "Deployment" and "Still to do".
+**Its name.** Since 2026-11-21 the Bulgarian site is called **„Машина за истории“** (the name of its owner's TikTok
+and YouTube channels), at **mashinazaistorii.com**. Before that it was Реч БГ at rechbg.com, a name from the earlier
+speech product. Only what people see changed (`shared/brand.ts`, the mark in `src/ui.tsx`, `sites/rechbg/`, the
+catalog, the legal texts): its id in the code stays `rechbg` (the build's `SITE`, the branch, the Worker `rech-bg`,
+the database), and this document and the code's comments still call it Реч БГ.
+
+The move to the new address is in two deploys, so a problem with the new domain never takes the site down:
+1. the new name, with mashinazaistorii.com added as a second address of the Worker (`routes` in
+   `wrangler.rechbg.jsonc`) while `SITE_URL` stays rechbg.com: the new address only has to load;
+2. once it does, and the new domain is in the Turnstile widget and has e-mail sending: `SITE_URL` and the contact
+   address move to it, and rechbg.com redirects there.
+
+Status: deployed since 2026-11-19 from the branch `rechbg`, with the public pages, the app, the legal pages and the
+e-mails in Bulgarian, its name and logo, and prices in euro, on its own database and bucket.
 
 ## How a build knows its site
 

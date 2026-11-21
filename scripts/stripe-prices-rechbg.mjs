@@ -36,7 +36,7 @@ for (const plan of plans) {
     if (!create) { console.log(`missing ${names[plan.id]} · €${amount} / ${interval}`); continue; }
     // One product per plan, named as the plan: Checkout, receipts and the billing portal show the product's name.
     const product = (await stripe.products.search({ query: `metadata['rechbg_plan']:'${plan.id}' AND active:'true'`, limit: 1 })).data[0]
-      ?? await stripe.products.create({ name: `Реч БГ · ${names[plan.id]}`, metadata: { rechbg_plan: plan.id } });
+      ?? await stripe.products.create({ name: `Машина за истории · ${names[plan.id]}`, metadata: { rechbg_plan: plan.id } });
     const price = await stripe.prices.create({
       product: product.id, currency: "eur", unit_amount: amount * 100, recurring: { interval, interval_count: 1 },
       // The price shown is the price paid: VAT is inside it.

@@ -1,7 +1,7 @@
 {
   "id": "/app",
-  "name": "Реч БГ",
-  "short_name": "Реч БГ",
+  "name": "Машина за истории",
+  "short_name": "Истории",
   "description": "Кратки видеа, написани, озвучени, илюстрирани и със субтитри вместо вас, за TikTok, YouTube Shorts и Instagram Reels.",
   "start_url": "/app",
   "scope": "/",

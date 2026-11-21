@@ -8,10 +8,10 @@ import { PRODUCT } from "../shared/brand";
 
 /** The mark: a ghost whose face is a play button. Same drawing as public/favicon.svg. */
 export function LogoMark({ size = 22 }: { size?: number }) {
-  // Реч БГ's mark: four bars of a sound wave.
+  // „Машина за истории“'s mark: an upright screen (a vertical video) with a play triangle. Same drawing as sites/rechbg/public/favicon.svg.
   if (SITE.id === "rechbg") return (
-    <svg width={size} height={size} viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="7" strokeLinecap="round" aria-hidden="true">
-      <path d="M13 26v12M26 14v36M39 21v22M52 28v8" />
+    <svg width={size} height={size} viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="17" y="7" width="30" height="50" rx="9" /><path d="M27 24v16l13-8z" fill="currentColor" strokeWidth="3" />
     </svg>
   );
   return (

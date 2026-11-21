@@ -21,8 +21,9 @@
     "CONTACT_EMAIL": "info@rechbg.com",
     "COMPANY_NAME": "Радослав Додников (Кова студио)",
   },
-  // The Worker already serves rechbg.com: the first deploy of this config replaces the earlier app there at once.
-  "routes": [{ "pattern": "rechbg.com", "custom_domain": true }],
+  // The site's addresses. mashinazaistorii.com is its new one (the site is „Машина за истории“ since 2026-11-21);
+  // rechbg.com, the earlier one, stays until SITE_URL moves to the new address, and redirects there after that.
+  "routes": [{ "pattern": "rechbg.com", "custom_domain": true }, { "pattern": "mashinazaistorii.com", "custom_domain": true }],
   "assets": {
     "directory": "./dist-rechbg",
     "binding": "ASSETS",
