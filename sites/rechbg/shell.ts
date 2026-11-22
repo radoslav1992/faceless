@@ -8,12 +8,12 @@ import type { Plugin } from "vite";
 //   offline page (sites/rechbg/public).
 // - src/i18n/rechbg.ts loaded before the app.
 
-const TITLE = "Реч БГ — видеа без лице на автопилот";
+const TITLE = "Машина за истории — видеа без лице на автопилот";
 const DESCRIPTION =
-  "Изберете ниша, глас и стил на картините веднъж. Реч БГ пише, озвучава, илюстрира и поставя субтитри на ново кратко видео за всеки час от вашия график, готово за TikTok, YouTube Shorts и Instagram Reels.";
+  "Изберете ниша, глас и стил на картините веднъж. „Машина за истории“ пише, озвучава, илюстрира и поставя субтитри на ново кратко видео за всеки час от вашия график, готово за TikTok, YouTube Shorts и Instagram Reels.";
 const NOSCRIPT = `<noscript>
       <main style="max-width: 640px; margin: 48px auto; padding: 0 16px; font-family: system-ui, sans-serif; line-height: 1.5">
-        <h1>Реч БГ</h1>
+        <h1>Машина за истории</h1>
         <p>${DESCRIPTION}</p>
         <p>Свържете своя YouTube канал, за да публикувате видеата си като Shorts в часовете, които зададете.</p>
         <p>Включете JavaScript, за да използвате приложението.</p>
@@ -41,7 +41,7 @@ export function rechbgShell(): Plugin[] {
       let out = replace(html, /<html lang="en">/, '<html lang="bg">', "the language");
       out = replace(out, /<title>[^<]*<\/title>/, `<title>${TITLE}</title>`, "the title");
       out = replace(out, /(<meta\s+name="description"\s+content=")[^"]*(")/, `<meta name="description" content="${DESCRIPTION}"`, "the description");
-      out = replace(out, /(<meta name="apple-mobile-web-app-title" content=")[^"]*(")/, '<meta name="apple-mobile-web-app-title" content="Реч БГ"', "the app's title");
+      out = replace(out, /(<meta name="apple-mobile-web-app-title" content=")[^"]*(")/, '<meta name="apple-mobile-web-app-title" content="Машина за истории"', "the app's title");
       return replace(out, /<noscript>[\s\S]*?<\/noscript>/, NOSCRIPT, "the summary for readers without scripts");
     },
     closeBundle() {

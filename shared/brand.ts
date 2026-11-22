@@ -13,11 +13,14 @@ const hookstreak = {
   pitch:
     "Pick a niche, a voice and an art style once. Hookstreak Shorts writes, narrates, illustrates and subtitles a new short video for every slot in your schedule, ready for TikTok, YouTube Shorts and Instagram Reels, and posts it straight to YouTube. Posting to TikTok and Instagram is coming soon.",
 };
-/** Реч БГ: Hookstreak in Bulgarian (shared/site.ts). */
+/**
+ * Hookstreak in Bulgarian (shared/site.ts): „Машина за истории“ (mashinazaistorii.com), called Реч БГ until 2026-11-21.
+ * Its id in the code stays `rechbg` (the build's SITE, the branch, the Worker, the database).
+ */
 const rechbg: typeof hookstreak = {
-  name: "Реч БГ", family: "Реч", product: "БГ", slug: "rech-bg",
+  name: "Машина за истории", family: "Машина", product: "за истории", slug: "mashina-za-istorii",
   tagline: "Видеа без лице на автопилот",
   pitch:
-    "Изберете ниша, глас и стил на картините веднъж. Реч БГ пише, озвучава, илюстрира и поставя субтитри на ново кратко видео за всеки час от вашия график, готово за TikTok, YouTube Shorts и Instagram Reels, и го публикува направо в YouTube. Публикуването в TikTok и Instagram предстои скоро.",
+    "Изберете ниша, глас и стил на картините веднъж. „Машина за истории“ пише, озвучава, илюстрира и поставя субтитри на ново кратко видео за всеки час от вашия график, готово за TikTok, YouTube Shorts и Instagram Reels, и го публикува направо в YouTube. Публикуването в TikTok и Instagram предстои скоро.",
 };
 export const PRODUCT: Readonly<typeof hookstreak> = typeof __SITE__ === "string" && __SITE__ === "rechbg" ? rechbg : hookstreak;

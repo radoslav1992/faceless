@@ -45,7 +45,7 @@ it("gives each site its own Worker, database, bucket and workflows", () => {
   expect(rechbg).toContain('"migrations": [{ "tag": "media-v1", "new_sqlite_classes": ["MediaRenderer"] }]');
   expect(hookstreak).toContain(String.raw`"define": { "__SITE__": "\"hookstreak\"" }`);
   expect(rechbg).toContain(String.raw`"define": { "__SITE__": "\"rechbg\"" }`);
-  expect(rechbg).toContain('"routes": [{ "pattern": "rechbg.com", "custom_domain": true }]');
+  expect(rechbg).toContain('"routes": [{ "pattern": "rechbg.com", "custom_domain": true }, { "pattern": "mashinazaistorii.com", "custom_domain": true }]');
   // Реч БГ deploys from its own branch, never from main: a merge to main changes Hookstreak alone.
   const deploy = readFileSync(".github/workflows/deploy-rechbg.yml", "utf8");
   expect(deploy).toContain("\non:\n  push:\n    branches: [rechbg]\n  workflow_dispatch:\n");
