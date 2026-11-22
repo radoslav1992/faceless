@@ -1,3 +1,6 @@
 /* Реч БГ only (src/i18n/rechbg.ts). Headings in a font that has Cyrillic; Bulgarian letterforms come with lang="bg". */
 :root { --display: "Manrope Variable", "Inter Variable", system-ui, sans-serif; }
 h1, h2, h3 { letter-spacing: -0.03em; }
+
+/* The home page's headline is longer in Bulgarian: smaller on a phone, so it stays within a few lines. */
+@media (max-width: 560px) { html[lang="bg"] .hero h1 { font-size: 29px; } }

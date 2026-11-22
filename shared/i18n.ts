@@ -57,7 +57,6 @@ export function translator(catalog: Catalog | null, missed?: (text: string) => v
   /** The translation of a text, or undefined. A template's changing parts are translated too where they have words of their own (a plan's name). */
   const find = (core: string, depth: number): string | undefined => {
     if (Object.hasOwn(catalog!.exact, core)) return catalog!.exact[core];
-    for (const [pattern, replacement] of catalog!.patterns) if (pattern.test(core)) return core.replace(pattern, replacement);
     for (const { pattern, words, parts, grammar } of catalog!.templates) {
       const match = pattern.exec(core);
       if (!match) continue;
@@ -67,6 +66,8 @@ export function translator(catalog: Catalog | null, missed?: (text: string) => v
         return (depth < 2 ? find(part.trim(), depth + 1) : undefined) ?? part;
       });
     }
+    // Last, the catch-all patterns ("Show …"): a template written for the very text comes before them.
+    for (const [pattern, replacement] of catalog!.patterns) if (pattern.test(core)) return core.replace(pattern, replacement);
     return undefined;
   };
   return (text: string): string => {

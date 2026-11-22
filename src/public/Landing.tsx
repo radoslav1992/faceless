@@ -2,10 +2,7 @@ import { t as say } from "../../shared/i18n";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { homeFaq } from "../../shared/faq";
-import {
-  ArrowRight, CalendarClock, Captions, Check, ChevronLeft, ChevronRight, Columns2, Compass, Download, Image as ImageIcon, Mic, PenLine, Plus, ScanFace, Scissors, Send,
-  Sparkles, Wand2, X,
-} from "lucide-react";
+import { ArrowRight, CalendarClock, Captions, Check, Compass, Download, Image as ImageIcon, Mic, PenLine, Plus, Send, Volume2, VolumeX, Wand2, X } from "lucide-react";
 import { useAuth } from "../lib";
 import { SamplePhone, reel } from "./Phone";
 import { PlanCards } from "./Pricing";
@@ -13,12 +10,13 @@ import { PlanCards } from "./Pricing";
 import { openCategories as categories, openTemplateIds as templateIds, templates, type CategoryId } from "../../shared/templates";
 import { PRODUCT } from "../../shared/brand";
 import { SECONDS_PER_CREDIT } from "../../shared/credits";
-import { storyStyles, type StoryStyle } from "../../shared/styles";
+import { plans } from "../../shared/plans";
+import type { StoryStyle } from "../../shared/styles";
 import { StyleArt } from "../art";
 import { useExamples, type Example } from "../examples";
 
-// The home page: what the product does, its popular formats, how it compares, what every video includes, how it works,
-// a video to try right here, every style, clips, plans and questions. Every word and picture on it is ours; it shows
+// The home page: what the product does, its styles, how it compares, what every video includes, how it works, a video
+// to try right here, plans and questions. Every word and picture on it is ours; it shows
 // real videos made with the styles (Admin → Examples) or drawn samples (and a drawing of the dashboard), never invented
 // results, users or reviews.
 
@@ -89,11 +87,19 @@ function Demo() {
   );
 }
 
-/** The gallery of faceless styles: filter by category, open one in Create (sign-up first). */
-export function StyleGallery({ to }: { to: (id: string) => string }) {
+/** The styles with the popular ones in front (what a shortened gallery and the hero show first). */
+const popularFirst = [...templateIds].sort((a, b) => Number("popular" in templates[b] && templates[b].popular) - Number("popular" in templates[a] && templates[a].popular));
+/**
+ * The gallery of faceless styles: filter by category, open one in Create (sign-up first). With `first`, it opens
+ * with that many styles, the popular ones in front (half as many on a phone), and a button shows the rest.
+ */
+export function StyleGallery({ to, first }: { to: (id: string) => string; first?: number }) {
   const examples = useExamples();
   const [category, setCategory] = useState<CategoryId | "all">("all");
-  const shown = templateIds.filter((id) => category === "all" || templates[id].category === category);
+  const [all, setAll] = useState(false);
+  // A category is short enough to show whole.
+  const short = !!first && !all && category === "all" && templateIds.length > first;
+  const shown = short ? popularFirst.slice(0, first) : templateIds.filter((id) => category === "all" || templates[id].category === category);
   return (
     <div className="stack" style={{ gap: 22 }}>
       <div className="filters" role="group" aria-label="Filter styles">
@@ -103,7 +109,7 @@ export function StyleGallery({ to }: { to: (id: string) => string }) {
           return <button key={c.id} type="button" className="filter" aria-pressed={category === c.id} onClick={() => setCategory(c.id)}>{c.name} <span className="count">{n}</span></button>;
         })}
       </div>
-      <div className="gallery">
+      <div className={`gallery${short ? " short" : ""}`}>
         {shown.map((id) => {
           const t = templates[id];
           return (
@@ -119,6 +125,9 @@ export function StyleGallery({ to }: { to: (id: string) => string }) {
           );
         })}
       </div>
+      {short && <div className="center-row"><button type="button" className="btn" onClick={() => setAll(true)}>{`Show all ${templateIds.length} styles`}</button></div>}
+      {/* Only where a drawing stands in for a video. */}
+      {shown.some((id) => !examples[id]) && <p className="sample-note">Drawn samples. Your videos are written and drawn fresh for your topic.</p>}
     </div>
   );
 }
@@ -132,51 +141,6 @@ export function Faq({ items }: { items: [string, string][] }) {
           <div className="answer"><p>{a}</p></div>
         </details>
       ))}
-    </div>
-  );
-}
-
-/** The formats the coverflow shows: the popular ones. */
-const showcase = templateIds.filter((id) => "popular" in templates[id] && templates[id].popular);
-const categoryName = (id: CategoryId) => categories.find((c) => c.id === id)?.name ?? "";
-const musicLabel = (mood: string) => (mood === "none" ? "No music" : mood === "auto" ? "Matching music" : `${mood[0].toUpperCase()}${mood.slice(1)} music`);
-
-/** Popular formats in a 3D coverflow: the one in front can be made at once. */
-function FormatCarousel({ to, examples }: { to: (id: string) => string; examples: Record<string, Example> }) {
-  const [at, setAt] = useState(0);
-  const n = showcase.length;
-  const go = (step: number) => setAt((x) => (x + step + n) % n);
-  return (
-    <div className="coverflow" role="region" aria-roledescription="carousel" aria-label="Popular formats">
-      <div className="cf-stage">
-        {showcase.map((id, i) => {
-          let off = i - at;
-          if (off > n / 2) off -= n;
-          if (off < -n / 2) off += n;
-          const t = templates[id];
-          const front = off === 0;
-          return (
-            <div key={id} className="cf-card" data-off={Math.abs(off) > 2 ? "far" : off} role="group" aria-roledescription="slide"
-              aria-label={`${i + 1} of ${n}: ${t.name}`} aria-hidden={!front}>
-              {/* A card at the side comes to the front when clicked (keyboards use the buttons below). */}
-              {!front && <button type="button" className="cf-pick" tabIndex={-1} onClick={() => setAt(i)} aria-label={`Show ${t.name}`} />}
-              <span className="cf-kind">{categoryName(t.category)}</span>
-              <strong className="cf-name">{t.name}</strong>
-              <SamplePhone style={t.style} kind={t.kind} title={t.kind === "pov" ? `POV: ${t.examples[0]}` : t.kind === "mashup" ? "Toastero Froggarino" : t.examples[0]}
-                caption={t.short} backdrop={t.kind === "backdrop" ? "bd-city" : undefined} example={examples[id]} autoplay={front} />
-              <span className="cf-facts" aria-label={`${storyStyles[t.style].name} art, about ${t.seconds} seconds, ${musicLabel(t.music).toLowerCase()}`}>
-                <span>{storyStyles[t.style].name}</span><span>~{t.seconds} s</span><span>{musicLabel(t.music)}</span>
-              </span>
-              {front && <Link className="btn primary" to={to(id)}>Make one <ArrowRight size={16} aria-hidden="true" /></Link>}
-            </div>
-          );
-        })}
-      </div>
-      <div className="cf-controls">
-        <button type="button" className="cf-nav" onClick={() => go(-1)} aria-label="Previous format"><ChevronLeft size={20} /></button>
-        <span className="cf-count" aria-live="polite">{templates[showcase[at]].name}</span>
-        <button type="button" className="cf-nav" onClick={() => go(1)} aria-label="Next format"><ChevronRight size={20} /></button>
-      </div>
     </div>
   );
 }
@@ -225,15 +189,18 @@ const included: [typeof Mic, string, string][] = [
 
 /** The hero's videos: real examples (popular styles first) once there are three, else the drawn samples. */
 function heroExamples(examples: Record<string, Example>) {
-  const ids = [...templateIds].sort((a, b) => Number("popular" in templates[b] && templates[b].popular) - Number("popular" in templates[a] && templates[a].popular));
-  const found = ids.filter((id) => examples[id]).slice(0, 5);
+  const found = popularFirst.filter((id) => examples[id]).slice(0, 5);
   return found.length >= 3 ? found : null;
 }
+/** The trial's credits, and the 30-second videos they make (two credits each). */
+const trial = plans.find((p) => p.id === "free")!.credits;
 
 export function Landing() {
   const { user } = useAuth();
   const examples = useExamples();
   const shown = heroExamples(examples);
+  // The hero video that plays with its sound (a tap turns it on, another one off): faceless videos sell on the voice.
+  const [sounding, setSounding] = useState<string | null>(null);
   const start = user ? "/app" : "/register";
   const make = (id: string) => (user ? `/app/create?template=${id}` : `/register?next=${encodeURIComponent(`/app/create?template=${id}`)}`);
   return (
@@ -248,15 +215,31 @@ export function Landing() {
               <Link className="btn primary big" to={start}>{user ? "Open dashboard" : "Start for free"}</Link>
               <Link className="btn big" to="/tools">Browse video tools</Link>
             </div>
-            <p className="hero-note">Free trial · no card needed · cancel any time</p>
+            <p className="hero-note">{`Free trial: ${trial} credits, enough for ${trial / 2} videos · no card needed · cancel any time`}</p>
             {shown ? (
               <div className="reel" aria-label={`Example videos made with ${PRODUCT.name}`}>
-                {shown.map((id) => <SamplePhone key={id} caption="" title={templates[id].name} label={`Example: ${templates[id].name}`} example={examples[id]} autoplay />)}
+                {shown.map((id) => (
+                  <SamplePhone key={id} caption="" title={templates[id].name} label={`Example: ${templates[id].name}`} example={examples[id]} autoplay sound={sounding === id}>
+                    <button type="button" className="ph-sound" aria-pressed={sounding === id} aria-label={sounding === id ? `Mute ${templates[id].name}` : `Play ${templates[id].name} with sound`}
+                      onClick={() => setSounding(sounding === id ? null : id)}>
+                      {sounding === id ? <Volume2 size={16} aria-hidden="true" /> : <VolumeX size={16} aria-hidden="true" />}
+                    </button>
+                  </SamplePhone>
+                ))}
               </div>
             ) : (
               <div className="reel" aria-label="Example videos (drawn samples)">
                 {reel.map((r) => <SamplePhone key={r.title} {...r} />)}
               </div>
+            )}
+            {/* Proof: the product's own channels (shared/brand.ts), never invented users or numbers. */}
+            {PRODUCT.channels.length > 0 && (
+              <p className="hero-proof">
+                <span>Our own channels:</span>
+                {PRODUCT.channels.map((c) => (
+                  <a key={c.url} className="chip" href={c.url} target="_blank" rel="noopener noreferrer">{c.platform} · {`${c.followers} followers`}</a>
+                ))}
+              </p>
             )}
           </div>
         </div>
@@ -269,8 +252,8 @@ export function Landing() {
             <h2 className="title">Made for <span className="glow-text">every niche</span></h2>
             <p className="sub">Each format comes with its own script recipe, voice, art style and music. Pick one and get your first video in minutes.</p>
           </div>
-          <FormatCarousel to={make} examples={examples} />
-          <p className="sample-note">Drawn samples. Your videos are written and drawn fresh for your topic.</p>
+          <StyleGallery to={make} first={12} />
+          <p className="price-note">Already filming? Turn podcasts, interviews and streams into vertical shorts. <Link className="text-link" to={user ? "/app/clips" : `/register?next=${encodeURIComponent("/app/clips")}`}>Clip a video <ArrowRight size={15} aria-hidden="true" /></Link></p>
         </div>
       </section>
 
@@ -344,34 +327,6 @@ export function Landing() {
             </div>
             <Demo />
           </div>
-        </div>
-      </section>
-
-      <section className="pub-section">
-        <div className="pub-wrap">
-          <div className="pub-section-head">
-            <span className="kicker">All styles</span>
-            <h2 className="title">Start from a format that works</h2>
-            <p className="sub">Every style comes with its own script recipe, voice, art style and music. Make one video, or turn it into a series.</p>
-          </div>
-          <StyleGallery to={make} />
-        </div>
-      </section>
-
-      <section className="pub-section">
-        <div className="pub-wrap">
-          <div className="pub-section-head">
-            <span className="kicker">Clips</span>
-            <h2 className="title">Already filming? Turn long videos into shorts</h2>
-            <p className="sub">Upload a podcast, interview, stream or webinar. We listen to it, pick the moments that work on their own and make them vertical.</p>
-          </div>
-          <div className="feature-list">
-            <div className="feature"><Sparkles size={22} className="accent-text" aria-hidden="true" /><h3>A virality score for every moment</h3><p>Each moment is scored on its hook, payoff, clarity and energy, and on the laughs and applause it gets, with a reason it works. An estimate, never a promise of views. Ask for a topic if you like.</p></div>
-            <div className="feature"><ScanFace size={22} className="accent-text" aria-hidden="true" /><h3>Framed on the speaker</h3><p>The vertical crop cuts to whoever is talking: we hear who speaks and watch whose lips move. Or stack two speakers, put your camera over your screen, or place the crop yourself.</p></div>
-            <div className="feature"><Columns2 size={22} className="accent-text" aria-hidden="true" /><h3>Captions and cuts</h3><p>Word-by-word captions in twenty-one styles, a hook title, and long pauses and filler words cut out.</p></div>
-            <div className="feature"><Scissors size={22} className="accent-text" aria-hidden="true" /><h3>Edit and download</h3><p>Trim any clip on its words, then post the batch to your YouTube channel, one a day or whenever you choose, or download it. Posting to TikTok and Instagram is coming soon.</p></div>
-          </div>
-          <p className="price-note"><Link className="text-link" to={user ? "/app/clips" : `/register?next=${encodeURIComponent("/app/clips")}`}>Clip a video <ArrowRight size={15} aria-hidden="true" /></Link></p>
         </div>
       </section>
 
