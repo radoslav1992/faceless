@@ -235,7 +235,7 @@ export function Landing() {
             {/* Proof: the product's own channels (shared/brand.ts), never invented users or numbers. */}
             {PRODUCT.channels.length > 0 && (
               <p className="hero-proof">
-                <span>{`Our own channels run on ${PRODUCT.name}:`}</span>
+                <span>Our own channels:</span>
                 {PRODUCT.channels.map((c) => (
                   <a key={c.url} className="chip" href={c.url} target="_blank" rel="noopener noreferrer">{c.platform} · {`${c.followers} followers`}</a>
                 ))}
