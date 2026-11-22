@@ -15,14 +15,17 @@
   // Dashboard variables and secrets survive deploys.
   "keep_vars": true,
   // What the earlier app had as defaults in its code and this one reads from its settings. Sign-ups and payments
-  // need all three. rechbg.com has Email Sending set up in Cloudflare.
+  // need all three. E-mail is still sent from rechbg.com, which has Email Sending set up in Cloudflare (EMAIL_FROM in
+  // the Worker's variables, CONTACT_EMAIL here): it moves when the new domain has it too.
   "vars": {
-    "SITE_URL": "https://rechbg.com",
+    // The site's one public address: every other host of the Worker (rechbg.com) is sent on to it (server/config.ts
+    // canonicalUrl), links in e-mails point to it, and the renderer downloads its files from it.
+    "SITE_URL": "https://mashinazaistorii.com",
     "CONTACT_EMAIL": "info@rechbg.com",
     "COMPANY_NAME": "Радослав Додников (Кова студио)",
   },
-  // The site's addresses. mashinazaistorii.com is its new one (the site is „Машина за истории“ since 2026-11-21);
-  // rechbg.com, the earlier one, stays until SITE_URL moves to the new address, and redirects there after that.
+  // The site's addresses. mashinazaistorii.com is its own (the site is „Машина за истории“ since 2026-11-21);
+  // rechbg.com, the earlier one, stays so that its links keep working: it redirects to SITE_URL.
   "routes": [{ "pattern": "rechbg.com", "custom_domain": true }, { "pattern": "mashinazaistorii.com", "custom_domain": true }],
   "assets": {
     "directory": "./dist-rechbg",

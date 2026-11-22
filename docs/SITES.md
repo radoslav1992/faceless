@@ -10,11 +10,18 @@ speech product. Only what people see changed (`shared/brand.ts`, the mark in `sr
 catalog, the legal texts): its id in the code stays `rechbg` (the build's `SITE`, the branch, the Worker `rech-bg`,
 the database), and this document and the code's comments still call it Реч БГ.
 
-The move to the new address is in two deploys, so a problem with the new domain never takes the site down:
+The move to the new address was made in two deploys, so a problem with the new domain could not take the site down:
 1. the new name, with mashinazaistorii.com added as a second address of the Worker (`routes` in
-   `wrangler.rechbg.jsonc`) while `SITE_URL` stays rechbg.com: the new address only has to load;
-2. once it does, and the new domain is in the Turnstile widget and has e-mail sending: `SITE_URL` and the contact
-   address move to it, and rechbg.com redirects there.
+   `wrangler.rechbg.jsonc`) while `SITE_URL` stayed rechbg.com. The Worker has one public address (`canonicalUrl` in
+   `server/config.ts`): until the second step the new address answered by redirecting to rechbg.com, Stripe's
+   webhook included, which Stripe does not follow;
+2. `SITE_URL` is mashinazaistorii.com (2026-11-22): rechbg.com now redirects there, path and all. The new domain
+   must be among the Turnstile widget's hostnames, or nobody can sign in. Stripe's webhook is
+   `https://mashinazaistorii.com/api/billing/webhook`.
+
+E-mail is still sent from, and the contact address still is, info@rechbg.com (`EMAIL_FROM` in the Worker's
+variables, `CONTACT_EMAIL` and `send_email` in `wrangler.rechbg.jsonc`): they move once the new domain has e-mail
+sending in Cloudflare.
 
 Status: deployed since 2026-11-19 from the branch `rechbg`, with the public pages, the app, the legal pages and the
 e-mails in Bulgarian, its name and logo, and prices in euro, on its own database and bucket.
@@ -117,7 +124,7 @@ and its own; nothing is shared with Hookstreak.
 | Workflows | `faceless-content`, `faceless-publish` | `rechbg-content`, `rechbg-publish` |
 | Renderer (Durable Object migration) | `renderer-v1` | `media-v1`: the class exists in that Worker since the earlier app |
 | App files | `dist` | `dist-rechbg` |
-| Address | hookstreak.app | rechbg.com |
+| Address | hookstreak.app | mashinazaistorii.com (rechbg.com redirects to it) |
 | Deploy | every push to `main` (Actions → Deploy) | every push to the branch `rechbg` (Actions → Deploy Реч БГ), which can also be run by hand; or `npm run deploy:rechbg` |
 
 **The branch `rechbg` is Реч БГ's release.** It does not exist until the site is ready to go live: creating it from
@@ -134,7 +141,7 @@ first. Accounts, projects and files of the earlier app are not carried over: its
 
 Read by the new code under the same names, so nothing to do:
 
-- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (the webhook's address stays `https://rechbg.com/api/billing/webhook`),
+- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (the webhook's address is `https://mashinazaistorii.com/api/billing/webhook` since the site's rename),
   `FAL_KEY`, `ELEVENLABS_API_KEY`, `HEYGEN_API_KEY`, `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`.
 - `ADMIN_EMAILS`, `COMPANY_ADDRESS`, `COMPANY_ID` (shown as ЕИК), `EMAIL_FROM`.
 - `REGISTRATION_ENABLED`, `BILLING_ENABLED`, `MEDIA_ENABLED`, all `true`.

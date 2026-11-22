@@ -5,6 +5,7 @@ import { CURRENCY, price } from "../shared/money";
 import { PRODUCT } from "../shared/brand";
 import { IMMEDIATE_START_TEXT, IMMEDIATE_START_VERSION } from "../shared/withdrawal";
 import { rendererName } from "../server/renderer";
+import { canonicalUrl } from "../server/config";
 
 // Two sites from one codebase (docs/SITES.md): what Hookstreak is must not move, and Реч БГ's setup must follow the code.
 it("is Hookstreak in name, currency and consent wording", () => {
@@ -46,6 +47,11 @@ it("gives each site its own Worker, database, bucket and workflows", () => {
   expect(hookstreak).toContain(String.raw`"define": { "__SITE__": "\"hookstreak\"" }`);
   expect(rechbg).toContain(String.raw`"define": { "__SITE__": "\"rechbg\"" }`);
   expect(rechbg).toContain('"routes": [{ "pattern": "rechbg.com", "custom_domain": true }, { "pattern": "mashinazaistorii.com", "custom_domain": true }]');
+  // Its one public address is the new one; the earlier address, still the Worker's, is sent on to it with its path.
+  expect(rechbg).toContain('"SITE_URL": "https://mashinazaistorii.com"');
+  const site = { SITE_URL: "https://mashinazaistorii.com" } as any;
+  expect(canonicalUrl(site, new URL("https://rechbg.com/pricing?x=1"))).toBe("https://mashinazaistorii.com/pricing?x=1");
+  expect(canonicalUrl(site, new URL("https://mashinazaistorii.com/api/billing/webhook"))).toBeNull();
   // Реч БГ deploys from its own branch, never from main: a merge to main changes Hookstreak alone.
   const deploy = readFileSync(".github/workflows/deploy-rechbg.yml", "utf8");
   expect(deploy).toContain("\non:\n  push:\n    branches: [rechbg]\n  workflow_dispatch:\n");
