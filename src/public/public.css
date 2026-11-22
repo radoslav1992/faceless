@@ -105,8 +105,10 @@
 }
 .sample-note { text-align: center; color: var(--muted); font-size: 13px; margin-top: 18px; }
 /* The product's own channels under the hero's videos. */
-.hero-proof { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; justify-content: center; margin: 0 0 34px; color: var(--muted); font-size: 14px; }
-.hero-proof .chip { text-decoration: none; }
+.hero-proof { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; justify-content: center; margin: 22px 0 0; color: var(--text); font-size: 15px; font-weight: 600; }
+.proof-link { display: inline-flex; align-items: center; gap: 7px; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--brand); color: var(--text); text-decoration: none; font-weight: 500; background: rgba(184, 245, 58, 0.08); }
+.proof-link strong { color: var(--brand); font-weight: 700; }
+.proof-link:hover, .proof-link:focus-visible { background: rgba(184, 245, 58, 0.18); }
 /* A hero video's sound, on or off: a round button in the phone's corner. */
 .ph-sound { position: absolute; right: 8px; bottom: 8px; z-index: 3; width: 34px; height: 34px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.25); background: rgba(0, 0, 0, 0.6); color: #fff; display: grid; place-items: center; cursor: pointer; }
 .ph-sound[aria-pressed="true"] { background: var(--brand); color: #0c0d10; border-color: transparent; }
