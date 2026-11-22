@@ -216,6 +216,15 @@ export function Landing() {
               <Link className="btn big" to="/tools">Browse video tools</Link>
             </div>
             <p className="hero-note">{`Free trial: ${trial} credits, enough for ${trial / 2} videos · no card needed · cancel any time`}</p>
+            {/* Proof, right under the buttons: the product's own channels (shared/brand.ts), never invented users or numbers. */}
+            {PRODUCT.channels.length > 0 && (
+              <p className="hero-proof">
+                <span>Our own channels:</span>
+                {PRODUCT.channels.map((c) => (
+                  <a key={c.url} className="proof-link" href={c.url} target="_blank" rel="noopener noreferrer"><strong>{c.platform}</strong> {`${c.followers} followers`}</a>
+                ))}
+              </p>
+            )}
             {shown ? (
               <div className="reel" aria-label={`Example videos made with ${PRODUCT.name}`}>
                 {shown.map((id) => (
@@ -231,15 +240,6 @@ export function Landing() {
               <div className="reel" aria-label="Example videos (drawn samples)">
                 {reel.map((r) => <SamplePhone key={r.title} {...r} />)}
               </div>
-            )}
-            {/* Proof: the product's own channels (shared/brand.ts), never invented users or numbers. */}
-            {PRODUCT.channels.length > 0 && (
-              <p className="hero-proof">
-                <span>Our own channels:</span>
-                {PRODUCT.channels.map((c) => (
-                  <a key={c.url} className="chip" href={c.url} target="_blank" rel="noopener noreferrer">{c.platform} · {`${c.followers} followers`}</a>
-                ))}
-              </p>
             )}
           </div>
         </div>
