@@ -37,18 +37,21 @@ export function Captions({ text, color = "#fff", accent = "var(--brand)" }: { te
   );
 }
 
-export function SamplePhone({ style, title, caption, kind = "story", label, children, backdrop, color, example, autoplay }: {
+export function SamplePhone({ style, title, caption, kind = "story", label, children, backdrop, color, example, autoplay, sound }: {
   style?: StoryStyle; title?: string; caption: string; kind?: VideoKind; label?: string; children?: ReactNode; color?: string;
   /** A CSS backdrop class (storytime) instead of a drawn picture. */
   backdrop?: string;
   /** A real video made in this style (Admin → Examples), shown instead of the drawing; `autoplay` plays it in view. */
   example?: Example; autoplay?: boolean;
+  /** The example plays with its sound (the home page's videos, one at a time). */
+  sound?: boolean;
 }) {
   const titleClass = kind === "pov" ? "ph-title pov" : kind === "mashup" ? "ph-title loud" : "ph-title";
   if (example) {
     return (
-      <div className="phone" role="img" aria-label={label || `Example video${title ? `: ${title}` : ""}`}>
-        <ExampleVideo example={example} autoplay={autoplay} />
+      // With something to press inside it (the home page's sound button), it is a group, not one picture.
+      <div className="phone" role={children ? "group" : "img"} aria-label={label || `Example video${title ? `: ${title}` : ""}`}>
+        <ExampleVideo example={example} autoplay={autoplay} sound={sound} />
         {children}
       </div>
     );

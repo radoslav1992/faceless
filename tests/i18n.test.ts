@@ -62,3 +62,11 @@ it("has Bulgarian for every reason a video can fail, with and without the refund
   }
   expect(missed).toEqual([]);
 });
+
+// A template with more fixed words wins over a shorter one that would also fit ("Show {1}").
+it("says the home page's new lines in Bulgarian", () => {
+  const say = translator(catalogOf(bg));
+  expect(say("Show all 22 styles")).toBe("Вижте всички 22 стила");
+  expect(say("Free trial: 4 credits, enough for 2 videos · no card needed · cancel any time")).toBe("Безплатен пробен период: 4 кредита, достатъчни за 2 видеа · без карта · отказ по всяко време");
+  expect(say("Play Fun facts with sound")).toBe("Пуснете „Любопитни факти“ със звук");
+});

@@ -24,8 +24,19 @@ export const reloadExamples = () => { request = null; };
 
 const media = (query: string) => typeof window !== "undefined" && !!window.matchMedia?.(query).matches;
 
-export function ExampleVideo({ example, autoplay = false, className }: { example: Example; autoplay?: boolean; className?: string }) {
+export function ExampleVideo({ example, autoplay = false, className, sound = false }: {
+  example: Example; autoplay?: boolean; className?: string;
+  /** Played with its sound, from the start: the whole video, since the cards' short preview is silent. */
+  sound?: boolean;
+}) {
   const ref = useRef<HTMLVideoElement>(null);
+  // Turned on by a tap (so the browser allows sound): from the first word.
+  useEffect(() => {
+    const video = ref.current;
+    if (!video || !sound) return;
+    video.currentTime = 0;
+    video.play().catch(() => { /* the file is gone */ });
+  }, [sound]);
   useEffect(() => {
     const video = ref.current;
     if (!video) return;
@@ -53,9 +64,9 @@ export function ExampleVideo({ example, autoplay = false, className }: { example
     return () => cleanups.forEach((f) => f());
   }, [autoplay, example.video, example.preview]);
   // Without a cover, the first frame stands in for one.
-  const src = example.preview ?? example.video;
+  const src = sound ? example.video : example.preview ?? example.video;
   return (
     <video ref={ref} className={className} src={example.poster ? src : `${src}#t=0.1`} poster={example.poster ?? undefined}
-      muted loop playsInline preload={example.poster ? "none" : "metadata"} aria-hidden="true" tabIndex={-1} />
+      muted={!sound} loop playsInline preload={example.poster ? "none" : "metadata"} aria-hidden="true" tabIndex={-1} />
   );
 }

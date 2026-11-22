@@ -104,6 +104,13 @@
   .reel .phone { width: 29vw; }
 }
 .sample-note { text-align: center; color: var(--muted); font-size: 13px; margin-top: 18px; }
+/* The product's own channels under the hero's videos. */
+.hero-proof { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; justify-content: center; margin: 0 0 34px; color: var(--muted); font-size: 14px; }
+.hero-proof .chip { text-decoration: none; }
+/* A hero video's sound, on or off: a round button in the phone's corner. */
+.ph-sound { position: absolute; right: 8px; bottom: 8px; z-index: 3; width: 34px; height: 34px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.25); background: rgba(0, 0, 0, 0.6); color: #fff; display: grid; place-items: center; cursor: pointer; }
+.ph-sound[aria-pressed="true"] { background: var(--brand); color: #0c0d10; border-color: transparent; }
+.ph-sound:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 
 /* Home: popular formats in a 3D coverflow */
 .coverflow { position: relative; overflow: hidden; padding: 8px 0 4px; }
@@ -246,6 +253,11 @@
 
 /* Galleries: templates (faceless styles) and tools */
 .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 16px; }
+/* On a phone: two styles a row (one a row made the home page some thirty screens long), and half of a shortened gallery. */
+@media (max-width: 560px) {
+  .gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .gallery.short > :nth-child(n+7) { display: none; }
+}
 .style-card { display: flex; flex-direction: column; gap: 8px; text-decoration: none; color: var(--text); background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
 .style-card .phone { box-shadow: none; border-radius: 16px; transition: transform 0.2s, border-color 0.2s; }
 .style-card:hover .phone, .style-card:focus-visible .phone { transform: translateY(-3px); border-color: var(--brand); }
