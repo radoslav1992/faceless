@@ -28,7 +28,7 @@ rather than delivering them without.
 | R2 bucket `faceless-media` (private) | `MEDIA` | Created (location: Eastern North America). On another account: `npx wrangler r2 bucket create faceless-media --location weur` |
 | Workflows `faceless-content` (`ContentGeneration`) and `faceless-publish` (`Publication`) | `CONTENT`, `PUBLISH` | Created by `wrangler deploy` |
 | Container `MediaRenderer` (`renderer/Dockerfile`, up to 3 instances of `standard-2`, each rendering one job at a time) | `MEDIA_RENDERER` (Durable Object, migration `renderer-v1`) | Enable Containers on the account; `wrangler deploy` builds and pushes the image. The first rollout takes a few minutes |
-| Workers AI | `AI` | Nothing to create; scripts and picture descriptions run on `TEXT_MODEL` (default `openai/gpt-6-luna`) |
+| Workers AI | `AI` | Nothing to create; scripts and picture descriptions run on `WRITER_MODEL` (default `google/gemini-4-carbon`), sound and clip choices on `TEXT_MODEL` (default `openai/gpt-6-luna`) |
 | Email Sending | `EMAIL` | Onboard the domain in Cloudflare Email, then add `"allowed_sender_addresses": ["hello@your-domain"]` to the `send_email` entry in `wrangler.jsonc` |
 | Cron `* * * * *` | – | Set by `wrangler deploy` (`triggers` in `wrangler.jsonc`) |
 | Turnstile widget | – | Create one for the domain; set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` |
@@ -115,7 +115,8 @@ the Worker reads (`Env` in `server/types.ts`); `.dev.vars.example` lists them fo
 | `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_DAILY`, `STRIPE_PRICE_DOUBLE`, `STRIPE_PRICE_STUDIO` | text | Monthly price IDs (section 3) |
 | `STRIPE_PRICE_STARTER_YEARLY`, `STRIPE_PRICE_DAILY_YEARLY`, `STRIPE_PRICE_DOUBLE_YEARLY`, `STRIPE_PRICE_STUDIO_YEARLY` | text | Yearly price IDs (section 3) |
 | `STRIPE_AUTOMATIC_TAX` | text | `true` when Stripe Tax is set up: tax, tax ID collection and a required billing address at checkout |
-| `TEXT_MODEL` | text | Optional Workers AI model for scripts and picture descriptions (default `openai/gpt-6-luna`) |
+| `WRITER_MODEL` | text | Optional model that writes scripts and plans their pictures (default `google/gemini-4-carbon`). A `google/` model is asked in Google's request shape, any other in the Responses API's |
+| `TEXT_MODEL` | text | Optional model for sound and clip choices, and for a script the writer's model could not write (default `openai/gpt-6-luna`) |
 | `DESCRIBE_MODEL` | text | Optional multimodal model (images and audio) that fills in library items' details in Admin → Library (default `google/gemini-4-argon`) |
 | `FAL_KEY` | secret | AI pictures (`openai/gpt-image-2.5/flare/text-to-image`) and clips: `fal-ai/kling-video/v2.5-turbo/standard/image-to-video` at regular quality (720p) and `…/pro/image-to-video` at high quality (1080p) |
 | `FAL_IMAGE_MODEL` | text | Optional picture model: `openai/gpt-image-2.5/sunburst/text-to-image`, `fal-ai/nano-banana-2`, `google/nano-banana-2.1` (it then draws the scene pictures too, with `google/nano-banana-2.1/edit`, unless `FAL_REFERENCE_MODEL` says otherwise) or `fal-ai/flux/schnell` (cheapest); anything else uses the default |

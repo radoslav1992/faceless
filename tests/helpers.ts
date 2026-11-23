@@ -122,6 +122,9 @@ export function testEnv(overrides: Record<string, unknown> = {}) {
     DB: db,
     MEDIA: bucket(),
     AI: { run: async () => { throw new Error("AI not mocked"); } },
+    // The tests' writer answers in the text model's shape (the Responses API); the writer's own model and its shape
+    // (server/ai.ts) are tested in core.test.ts.
+    WRITER_MODEL: "openai/gpt-6-luna",
     ASSETS: { fetch: async () => new Response("<!doctype html><title>app</title>", { headers: { "Content-Type": "text/html" } }) },
     CONTENT: workflow(),
     PUBLISH: workflow(),

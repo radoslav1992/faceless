@@ -442,7 +442,8 @@ A style without one shows its drawing (`StyleArt`, cropped to fill the 9:16 tile
 
 ## Writing
 
-The script writer (`writeVideo` in `server/story.ts`, rech-bg's studio writer on this app's text model) gets the
+The script writer (`writeVideo` in `server/story.ts`, rech-bg's studio writer on this app's writer model: `WRITER_MODEL`, Gemini 4 Carbon,
+with the text model behind it when it has no answer, `server/ai.ts`) gets the
 template's brief, the owner's prompt and recent titles as **data**, never as instructions. Its rules: original content
 only, no existing characters, brands or real private people, no invented statistics or quotes, no hate, sexual
 content, graphic violence or medical, legal or financial advice; spoken text in the narration language, picture
