@@ -318,7 +318,7 @@ async function makeVideo(e: Env, step: WorkflowStep, run: RunInfo, phase: Phase)
       const shot = m.acted ? await makeTake(e, step, run, `ai-${i}`, m, phase) : null;
       const assetId = shot ? shot.assetId : m.kind === "image"
         // An ad's pictures are drawn from the photos of its product; any other from the video's reference sheets.
-        ? await drawPicture(e, step, run, `ai-${i}`, m, phase, () => (m.product ? productPhotos(e, run, first) : referencePictures(e, run, sheets, first.scenes[m.path[1] as number]?.place)))
+        ? await drawPicture(e, step, run, `ai-${i}`, m, phase, () => (m.product ? productPhotos(e, run, first) : m.people ? peoplePhotos(e, run, first) : referencePictures(e, run, sheets, first.scenes[m.path[1] as number]?.place)))
         // An ad in one shot is filmed from the photos alone.
         : m.oneShot ? await generateMedia(e, step, run, `ai-${i}`, m, phase, undefined, () => productPhotos(e, run, first))
         // An ad's shot is filmed from its picture with the same photos.
@@ -634,21 +634,24 @@ async function referencePictures(e: Env, run: RunInfo, sheets: Sheets, place = "
 }
 
 /**
- * The photos of an ad's product (shared/ad.ts) as capability links, in the owner's order: what its pictures are drawn
- * from and its shots filmed with. They are the owner's own uploads, checked when the video was saved (server/videos.ts).
+ * The owner's photos a video's pictures are drawn with, as capability links in the owner's order. They are the
+ * owner's own uploads, checked when the video was saved (server/videos.ts).
  */
-async function productPhotos(e: Env, run: RunInfo, spec: StorySpec): Promise<Reference[]> {
-  const ids = spec.product?.assets ?? [];
+async function photoReferences(e: Env, run: RunInfo, ids: string[], role: Reference["role"]): Promise<Reference[]> {
   if (!ids.length) return [];
   const rows = (await e.DB.prepare(`SELECT id,object_key FROM media_assets WHERE user_id=? AND status='ready' AND mime LIKE 'image/%' AND id IN (${ids.map(() => "?").join(",")})`)
     .bind(run.user_id, ...ids).all<{ id: string; object_key: string }>()).results;
   const keys = new Map(rows.map((r) => [r.id, r.object_key]));
-  // A photo deleted since: the ad can't show the product without it.
+  // A photo deleted since: the video can't show what it showed without it.
   if (ids.some((id) => !keys.has(id))) throw new Error("MEDIA_INPUT");
   const refs: Reference[] = [];
-  for (const id of ids) refs.push({ url: await inputUrl(e, run.id, keys.get(id)!), role: "product" });
+  for (const id of ids) refs.push({ url: await inputUrl(e, run.id, keys.get(id)!), role });
   return refs;
 }
+/** The photos of an ad's product (shared/ad.ts): what its pictures are drawn from and its shots filmed with. */
+const productPhotos = (e: Env, run: RunInfo, spec: StorySpec) => photoReferences(e, run, spec.product?.assets ?? [], "product");
+/** The photos of the people a video is for (shared/people.ts): its pictures show them. */
+const peoplePhotos = (e: Env, run: RunInfo, spec: StorySpec) => photoReferences(e, run, spec.people?.assets ?? [], "person");
 /**
  * An ad's one shot: the model it is filmed with, and how long it is asked for: as long as the voice recorded for it
  * (shared/ad.ts oneShotSeconds), else the `estimate` made from its script.

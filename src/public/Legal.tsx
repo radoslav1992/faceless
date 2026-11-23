@@ -246,6 +246,13 @@ function terms(op: Operator): Section[] {
             or have anything narrated in it. You can delete it at any time in Settings, which deletes it at ElevenLabs too. Narration in a cloned
             voice is AI narration like any other, and is marked and disclosed as such.
           </p>
+          <p>
+            <strong>Photos of people.</strong> Where we offer it, you can add photos of people to a video so that its pictures show them. Use
+            only photos of yourself, or of people who have given you permission to use their photo this way (for a child, their parent or
+            guardian), and you confirm this each time. The photos are sent to our picture provider to draw the video's pictures and are not
+            shown themselves; the pictures are AI pictures like any other, and are marked and disclosed as such. You can delete the photos at
+            any time in your files.
+          </p>
         </>
       ),
     },

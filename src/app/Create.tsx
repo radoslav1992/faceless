@@ -12,6 +12,7 @@ import { VideoEditor } from "./EditVideo";
 import { creditBlock, CreditBlockNotice, MediaPicker, MusicChoice, UploadButton, useOfferedVoice, VoiceSelect } from "./pickers";
 import { categories, isTemplate, isTest, templateIds, templates, type CategoryId, type TemplateId } from "../../shared/templates";
 import { adCredits, adLengths, adModelNames, adModels, oneShotOf, PRODUCT_PHOTOS_MAX, type AdModel } from "../../shared/ad";
+import { PEOPLE_PHOTOS_MAX, PEOPLE_PHOTOS_OPEN, takesPeople } from "../../shared/people";
 import { languages, type MusicMood } from "../../shared/series";
 import { specCredits, type StorySpec } from "../../shared/formats";
 import { STORY_MAX_CHARS, storyStyles, type StoryStyle } from "../../shared/story";
@@ -60,6 +61,40 @@ function Gallery({ onPick, admin }: { onPick: (id: TemplateId) => void; admin: b
   );
 }
 
+/**
+ * Photos the video is made with (an ad's product, a greeting's people): small previews, each with a button to take it
+ * out, and two ways to add one, an upload or one of the owner's files.
+ */
+function PhotoField({ label, hint, photos, max, onChange, alt, pick, optional = false }: {
+  label: string; hint: string; photos: string[]; max: number; onChange: (photos: string[]) => void; alt: (n: number) => string; pick: string; optional?: boolean;
+}) {
+  const [picking, setPicking] = useState(false);
+  // Several uploads finish one after another: each is added to the list as it is then.
+  const list = useRef(photos);
+  list.current = photos;
+  const add = (id: string) => { if (!list.current.includes(id) && list.current.length < max) onChange([...list.current, id]); };
+  return (
+    <div className="field"><span>{label}{optional && <> <span className="muted small">(optional)</span></>}</span>
+      <div className="product-photos">
+        {photos.map((id, n) => (
+          <span key={id} className="product-photo">
+            <img src={fileUrl(id)} alt={alt(n + 1)} />
+            <button type="button" className="icon-btn" aria-label={`Remove photo ${n + 1}`} onClick={() => onChange(photos.filter((x) => x !== id))}><X size={14} aria-hidden="true" /></button>
+          </span>
+        ))}
+        {photos.length < max && (
+          <span className="row wrap" style={{ gap: 8 }}>
+            <UploadButton type="image" multiple label="Upload photos" onUploaded={(a) => add(a.id)} />
+            <button type="button" className="btn" onClick={() => setPicking(true)}><ImagePlus size={16} aria-hidden="true" /> Choose from your files</button>
+          </span>
+        )}
+      </div>
+      <span className="hint">{hint}</span>
+      {picking && <MediaPicker type="image" title={pick} onPick={(a) => { add(a.id); setPicking(false); }} onClose={() => setPicking(false)} />}
+    </div>
+  );
+}
+
 type Form = {
   prompt: string; script: string; title: string; animal: string; object: string; seconds: number;
   language: string; voiceId: string; style: StoryStyle; music: MusicMood; musicTrackId: string | null; subject: string;
@@ -69,6 +104,8 @@ type Form = {
   film: boolean; filmQuality: ClipQuality; filmModel: ClipModel | "";
   /** A product ad (shared/ad.ts): the photos of the product (the owner's uploads) and what it is called. */
   photos: string[]; productName: string; adModel: AdModel;
+  /** Photos of the people a greeting is for (shared/people.ts), and the owner's word that they may use them. */
+  people: string[]; peopleConsent: boolean;
 };
 /** Text that reads like a whole story rather than a topic: long, or several lines. */
 const storyLike = (text: string) => text.trim().length >= 280 || text.trim().split(/\n\s*\n|\n/).filter(Boolean).length >= 4;
@@ -80,7 +117,7 @@ export function mashupParts(prompt: string): { animal: string; object: string } 
 const formFor = (id: TemplateId, prompt = ""): Form => {
   const t = templates[id];
   const mashup = t.kind === "mashup" ? mashupParts(prompt) : { animal: "", object: "" };
-  return { prompt, script: "", title: "", ...mashup, seconds: t.seconds, language: SITE.narration, voiceId: t.voice, style: t.style, music: t.music, musicTrackId: null, subject: "", sounds: true, film: false, filmQuality: "regular", filmModel: "", photos: [], productName: "", adModel: "minimax" };
+  return { prompt, script: "", title: "", ...mashup, seconds: t.seconds, language: SITE.narration, voiceId: t.voice, style: t.style, music: t.music, musicTrackId: null, subject: "", sounds: true, film: false, filmQuality: "regular", filmModel: "", photos: [], productName: "", adModel: "minimax", people: [], peopleConsent: false };
 };
 
 export function Create() {
@@ -91,7 +128,6 @@ export function Create() {
   const param = params.get("template") || "";
   // A style still being tested opens for administrators only.
   const template = isTemplate(param) && (!isTest(param) || !!user?.admin) ? param : null;
-  const [picking, setPicking] = useState(false);
   const [form, setForm] = useState<Form>(() => formFor(template || "facts", params.get("prompt") || ""));
   const [spec, setSpec] = useState<StorySpec | null>(null);
   const [writing, setWriting] = useState(false);
@@ -125,9 +161,11 @@ export function Create() {
   // A model that films the whole ad in one shot (shared/ad.ts), and what that allows.
   const oneShot = ad ? oneShotOf(form.adModel) : undefined;
   const canFilm = !!t && t.kind !== "backdrop" && !ad;
-  const addPhoto = (id: string) => setForm((f) => (f.photos.includes(id) || f.photos.length >= PRODUCT_PHOTOS_MAX ? f : { ...f, photos: [...f.photos, id] }));
+  // Photos of the people a greeting is for (shared/people.ts): a test, for administrators.
+  const withPeople = !!template && takesPeople(template) && (PEOPLE_PHOTOS_OPEN || !!user?.admin);
   const cinematic = canFilm && form.film;
   const ready = !!t && (ad ? form.photos.length > 0 && form.prompt.trim().length >= 2 : t.kind === "script" ? form.script.trim().length >= 20 : t.kind === "mashup" ? true : t.kind === "backdrop" ? true : form.prompt.trim().length >= 2 || template === "random");
+  const peopled = withPeople && form.people.length > 0;
   const write = async () => {
     if (!template || !t) return;
     setWriting(true);
@@ -138,6 +176,7 @@ export function Create() {
         ...(form.musicTrackId && { musicTrackId: form.musicTrackId }),
         ...(cinematic && { film: { quality: form.filmQuality, ...(form.filmModel && { model: form.filmModel }) } }),
         ...(ad && { product: { assets: form.photos, name: form.productName, model: form.adModel } }),
+        ...(peopled && { people: { assets: form.people, consent: true } }),
       });
       setSpec(draft);
       window.scrollTo({ top: 0 });
@@ -213,23 +252,8 @@ export function Create() {
           )}
           {ad && (
             <>
-              <div className="field"><span>Photos of the product</span>
-                <div className="product-photos">
-                  {form.photos.map((id, n) => (
-                    <span key={id} className="product-photo">
-                      <img src={fileUrl(id)} alt={`The product, view ${n + 1}`} />
-                      <button type="button" className="icon-btn" aria-label={`Remove photo ${n + 1}`} onClick={() => set({ photos: form.photos.filter((x) => x !== id) })}><X size={14} aria-hidden="true" /></button>
-                    </span>
-                  ))}
-                  {form.photos.length < PRODUCT_PHOTOS_MAX && (
-                    <span className="row wrap" style={{ gap: 8 }}>
-                      <UploadButton type="image" multiple label="Upload photos" onUploaded={(a) => addPhoto(a.id)} />
-                      <button type="button" className="btn" onClick={() => setPicking(true)}><ImagePlus size={16} aria-hidden="true" /> Choose from your files</button>
-                    </span>
-                  )}
-                </div>
-                <span className="hint">{`1 to ${PRODUCT_PHOTOS_MAX} photos (JPG, PNG or WebP). The first one is the main view; add other sides and close-ups, on a plain background if you can. The ad shows the product as it is in them.`}</span>
-              </div>
+              <PhotoField label="Photos of the product" photos={form.photos} max={PRODUCT_PHOTOS_MAX} onChange={(photos) => set({ photos })} alt={(n) => `The product, view ${n}`} pick="Choose a photo of the product"
+                hint={`1 to ${PRODUCT_PHOTOS_MAX} photos (JPG, PNG or WebP). The first one is the main view; add other sides and close-ups, on a plain background if you can. The ad shows the product as it is in them.`} />
               <label className="field"><span>Product name <span className="muted small">(optional)</span></span>
                 <input className="input" maxLength={80} value={form.productName} placeholder="Aqua Steel bottle" onChange={(e) => set({ productName: e.target.value })} />
               </label>
@@ -280,6 +304,19 @@ export function Create() {
                 <span className="row wrap" style={{ gap: 6 }}>{t.examples.map((x) => <button key={x} type="button" className="chip button" onClick={() => set({ prompt: say(x) })}>{x}</button>)}</span>
               )}
             </label>
+          )}
+          {withPeople && (
+            <>
+              <PhotoField optional label="Photos of the people you're greeting" photos={form.people} max={PEOPLE_PHOTOS_MAX} onChange={(people) => set({ people, ...(people.length === 0 && { peopleConsent: false }) })}
+                alt={(n) => `Photo ${n} of the people`} pick="Choose a photo of the people"
+                hint={`Up to ${PEOPLE_PHOTOS_MAX} photos (JPG, PNG or WebP) with clear faces. The video's pictures are drawn with them, so the people appear in its scenes in the art style you choose. The photos themselves are not shown.`} />
+              {form.people.length > 0 && (
+                <label className="row" style={{ gap: 10, alignItems: "flex-start" }}>
+                  <input type="checkbox" checked={form.peopleConsent} onChange={(e) => set({ peopleConsent: e.target.checked })} style={{ marginTop: 3 }} />
+                  <span className="small">I have these people's permission to use their photos in this video (for a child, their parent's or guardian's).</span>
+                </label>
+              )}
+            </>
           )}
           {t.kind !== "script" && t.kind !== "backdrop" && (
             <label className="field"><span>Length</span>
@@ -359,14 +396,14 @@ export function Create() {
               <StoryStylePicker value={form.style} onChange={(style) => set({ style })} />
             </>
           )}
-          <button type="button" className="btn primary big block" disabled={!ready || writing} onClick={write} style={{ marginTop: 8 }}>
+          <button type="button" className="btn primary big block" disabled={!ready || writing || (peopled && !form.peopleConsent)} onClick={write} style={{ marginTop: 8 }}>
             {writing ? <><span className="spinner" aria-hidden="true" /> Writing your draft…</> : <><Wand2 size={18} aria-hidden="true" /> Write the draft (free)</>}
           </button>
+          {ready && peopled && !form.peopleConsent && <p className="hint center">Confirm that you have these people's permission first.</p>}
           {!ready && <p className="hint center">{ad ? (form.photos.length ? "Say what the product is first." : "Add a photo of the product first.") : t.kind === "script" ? "Paste at least a sentence or two." : "Give it a topic first."}</p>}
           <CreditBlockNotice block={block} />
         </div>
       </div>
-      {picking && <MediaPicker type="image" title="Choose a photo of the product" onPick={(a) => { addPhoto(a.id); setPicking(false); }} onClose={() => setPicking(false)} />}
     </div>
   );
 }

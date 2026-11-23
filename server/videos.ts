@@ -12,6 +12,7 @@ import { voiceUsable } from "./voices";
 import { isAdmin } from "./auth";
 import { avatarFor } from "./avatars";
 import { heygenEnabled } from "./providers/heygen";
+import { PEOPLE_PHOTOS_OPEN } from "../shared/people";
 import {
   isFilm, isHighlight, paidMoment, playedSounds, presenterNeeded, referencedAssets, referencedLibrary, specCredits, specHook, specSchema, visualPart, type HighlightSpec, type Spec, type StorySpec,
 } from "../shared/formats";
@@ -53,12 +54,16 @@ export async function checkReferences(env: Env, userId: string, spec: Spec, kept
       throw new HTTPException(400, { message: "Choose a library sound effect for the scene changes and for each scene's sound." });
   }
   if (isHighlight(spec)) return checkSource(env, userId, spec);
-  // An ad's product is shown from the owner's photos of it (shared/ad.ts): pictures, each one of their files (above).
-  if (spec.product) {
-    const ids = spec.product.assets;
+  // An ad's product is shown from the owner's photos of it (shared/ad.ts), and a video's people from theirs
+  // (shared/people.ts): pictures, each one of their files (above).
+  for (const [ids, message] of [
+    [spec.product?.assets, "Choose pictures of the product: JPG, PNG or WebP files."],
+    [spec.people?.assets, "Choose pictures of the people: JPG, PNG or WebP files."],
+  ] as const) {
+    if (!ids) continue;
     const photos = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM media_assets WHERE user_id=? AND status='ready' AND mime LIKE 'image/%' AND id IN (${ids.map(() => "?").join(",")})`)
       .bind(userId, ...ids).first<{ n: number }>())?.n ?? 0;
-    if (photos !== ids.length) throw new HTTPException(400, { message: "Choose pictures of the product: JPG, PNG or WebP files." });
+    if (photos !== ids.length) throw new HTTPException(400, { message });
   }
   // An AI voice reads at most STORY_MAX_CHARS; an own voiceover is a recording with sound, up to the render's three minutes.
   if (spec.narration.kind === "voice") {
@@ -151,6 +156,7 @@ function checkFilm(env: Env, user: DbUser, spec: Spec) {
   const shots = spec.scenes.some((s) => s.acted);
   if (!isAdmin(env, user)) {
     if (spec.product) throw new HTTPException(403, { message: "Product ads are still being tested and aren't available yet." });
+    if (spec.people && !PEOPLE_PHOTOS_OPEN) throw new HTTPException(403, { message: "Photos of people are still being tested and aren't available yet." });
     if (shots || spec.scenes.some((s) => s.cutaway)) throw new HTTPException(403, { message: "Films of acted shots are still being tested and aren't available yet." });
     if (spec.scenes.some((s) => s.lipSync)) throw new HTTPException(403, { message: "Lip-synced scenes are still being tested and aren't available yet." });
   }

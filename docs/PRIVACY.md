@@ -96,3 +96,12 @@ portability requests come through the contact form and are answered by hand with
 Workers Logs carry user, run and publication IDs and short error codes, never email addresses, prompts or provider
 messages (`server/error-report.ts` scrubs messages). Keep the Cloudflare log retention at 30 days or less
 (docs/OPERATIONS.md).
+
+## Photos of people (a test)
+
+In a Holiday greeting an owner can add photos of the people they greet (`shared/people.ts`). They are ordinary
+uploads of the owner's: kept in their storage until they delete them, sent to fal (the picture provider) as
+short-lived capability links while the video's pictures are drawn, and never shown in the video. The owner confirms
+each time that they have those people's permission (kept with the video as `people.consent`); the terms of both sites
+say so since 2026-11-23. Photos of other people are personal data of people who are not users: the lawful basis rests
+on the owner's confirmation, which a lawyer should review before the feature is opened to everyone.

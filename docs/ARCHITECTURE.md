@@ -232,6 +232,15 @@ the centre of at most half of its pictures. Before it, a video came out as seven
 facts) and Holiday greeting (a wish to the people the owner names), drawn in the art style Festive
 (`shared/styles.ts`, its sample in `src/art.tsx`).
 
+**Photos of people** (`shared/people.ts`; a test, for administrators until `PEOPLE_PHOTOS_OPEN`). A Holiday greeting
+takes one to four photos of the people it greets (the `people` of its spec, with `consent: true`: the owner ticks
+that they have those people's permission, each time; the terms say so). The writer is told the people are in most
+pictures and never to describe them (`PEOPLE_RULE`); every picture is drawn with the photos as its references (role
+`person` in `server/providers/fal.ts`: those very people, in the video's own art style, never the photo pasted in),
+and no reference sheet is drawn. The photos are the owner's uploads, checked to be their pictures when the video is
+saved, handed to fal as capability links while the run works, and never shown in the video themselves. A picture the
+model refuses is drawn once more with the fallback model, as any picture is.
+
 **Product ads** (`shared/ad.ts`; a test, for administrators). A short ad filmed from the owner's photos of a
 product: the video kind `ad`, with the `product` of its spec (one to four of the owner's uploaded pictures, and the
 product's name). In Create an administrator picks the Product ad style (the template `ad`, marked `test`: hidden from

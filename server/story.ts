@@ -17,6 +17,7 @@ import { SPEECH_CHARS_PER_SECOND, clipModels, clipQualities } from "../shared/cr
 import { filmSpec } from "../shared/film";
 import { heygenEnabled } from "./providers/heygen";
 import { adSpec, oneShotOf, productSchema } from "../shared/ad";
+import { PEOPLE_PHOTOS_OPEN, PEOPLE_RULE, peopleSchema, takesPeople } from "../shared/people";
 import { type FilmVoices, castMember, episodeTitle, filmPlaces, filmShots, lipSyncSpec, NARRATOR, SHOT_MAX_WORDS, shotsSpec } from "../shared/drama";
 import { isAdmin } from "./auth";
 import { languageCodes, languageName, type LanguageCode } from "../shared/series";
@@ -203,6 +204,8 @@ export type WriteRequest = {
   recent: string[];
   /** Music the model may pick from (by code). */
   music?: { ref: string; name: string; tags?: string; description?: string }[];
+  /** The owner gave photos of the people the video is for (shared/people.ts): they are in its pictures. */
+  people?: boolean;
   /**
    * An episode of a drama (shared/drama.ts): the story's premise and cast, what happened in the episodes before, and
    * which episode of how many this is.
@@ -305,12 +308,14 @@ export async function writeVideo(env: Env, r: WriteRequest): Promise<StoryConcep
     ...(r.drama ? dramaRules(r.drama) : kindRules[t.kind as Exclude<VideoKind, "script">](r)),
     r.drama ? "subject: the cast as given in `subject` (data), unchanged: these are the people in the pictures."
       : t.kind === "ad" ? "The product is the only recurring thing in the pictures."
+      : r.people ? "subject: an empty string (the people in the pictures are the ones in the owner's photos)."
       : r.subject
         ? "subject: keep the owner's recurring character (given as data) and put it in every picture."
         : SUBJECT_RULE,
     LOOK_RULE,
     PLACES_RULE,
     ...(film || t.kind === "ad" || t.kind === "backdrop" ? [] : [VARIETY_RULE]),
+    ...(r.people ? [PEOPLE_RULE] : []),
     // A film's shots are drawn from a master shot of their place: every shot needs one, and a short episode few of them.
     ...(film ? [`For this film the places are stricter: at most ${filmPlaces(r.seconds)} of them${r.seconds <= 45 ? " (one is often enough)" : ""}, and every shot's \`place\` is the label of the place its scene is set in, written exactly the same, for cutaways and close-ups too: no shot has an empty place.`] : []),
     CAMERA_RULE,
@@ -517,6 +522,8 @@ const draftSchema = z.object({
   film: z.object({ quality: z.enum(clipQualities).default("regular"), model: z.enum(clipModels).optional() }).optional(),
   /** A product ad (shared/ad.ts): the owner's photos of the product, and its name. */
   product: productSchema.optional(),
+  /** Photos of the people the video is for (shared/people.ts), with the owner's word that they may use them. */
+  people: peopleSchema.optional(),
 });
 export type DraftRequest = z.input<typeof draftSchema>;
 /**
@@ -537,6 +544,11 @@ export async function draftVideo(env: Env, userId: string, input: DraftRequest, 
     // In one shot, the ad is one clip: no longer than its model makes in one request.
     const oneShot = oneShotOf(d.product.model);
     if (oneShot) d.seconds = Math.min(d.seconds, oneShot.max);
+  }
+  // Photos of the people a greeting is for: a test, for administrators, and only where a style takes them.
+  if (d.people) {
+    if (!PEOPLE_PHOTOS_OPEN && !admin) throw new HTTPException(403, { message: "Photos of people are still being tested and aren't available yet." });
+    if (!takesPeople(d.template)) throw new HTTPException(400, { message: "This style doesn't take photos of people." });
   }
   // A voice asked for must be offered; the template's own is replaced by the default voice when it was hidden.
   if (d.voiceId && !(await voiceUsable(env, d.voiceId, null, userId))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
@@ -564,7 +576,7 @@ export async function draftVideo(env: Env, userId: string, input: DraftRequest, 
   } else {
     concept = await writeVideo(env, {
       template: d.template, prompt: d.prompt, seconds: d.seconds, language: d.language, style, subject: d.subject,
-      mashup: d.mashup, title: d.title, recent, music: catalog,
+      mashup: d.mashup, title: d.title, recent, music: catalog, people: !!d.people,
     });
   }
   if (!concept) throw new HTTPException(503, { message: "We couldn't write this video right now. Please try again in a minute." });
@@ -584,7 +596,12 @@ export async function draftVideo(env: Env, userId: string, input: DraftRequest, 
     if (!ad.success) throw new HTTPException(502, { message: "The video we wrote didn't come out right. Please try again." });
     return ad.data;
   }
-  return film ? filmSpec(spec, film) : spec;
+  const made = film ? filmSpec(spec, film) : spec;
+  if (!d.people) return made;
+  // With photos of its people: they are who its pictures show, in place of a character of the writer's.
+  const peopled = storySpec.safeParse({ ...made, subject: "", people: d.people });
+  if (!peopled.success) throw new HTTPException(502, { message: "The video we wrote didn't come out right. Please try again." });
+  return peopled.data;
 }
 /** Create: a draft from a template (free; the text model only, 40 an hour and 200 a day). */
 story.post("/draft", async (c) => {
