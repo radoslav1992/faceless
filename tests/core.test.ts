@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import worker from "../server/index";
 import { addMonths, allowance, creditTopup, mailbox, periodMonth, webhook } from "../server/billing";
 import { now } from "../server/types";
+import { aiJson } from "../server/ai";
 import { CALL_CREDITS } from "../shared/growth";
 import { hashPassword } from "../server/security";
 import { call, signedIn, subscribe, testEnv, SITE } from "./helpers";
@@ -346,5 +347,44 @@ describe("public address", () => {
     const { env } = testEnv();
     for (const url of [`${SITE}/api/health`, "https://faceless.someone.workers.dev/api/health", "http://localhost:8787/api/health"])
       expect((await fetchAt(env, url)).status).toBe(200);
+  });
+});
+
+describe("the text model's answer", () => {
+  const story = { status: "completed", output_text: JSON.stringify({ ok: true }) };
+  const env = (answers: unknown[]) => {
+    const asked: number[] = [];
+    return { asked, env: { AI: { run: async (_model: string, request: any) => { asked.push(request.max_output_tokens); return answers[asked.length - 1]; } } } as any };
+  };
+  it("asks once more with twice the room when the answer was cut off, and says why an answer can't be used", async () => {
+    const logged: unknown[][] = [];
+    const error = vi.spyOn(console, "error").mockImplementation((...a) => { logged.push(a); });
+    try {
+      // Cut off at the bound (the model's thinking counts in it): asked again with twice the room.
+      const cut = env([{ status: "incomplete", incomplete_details: { reason: "max_output_tokens" }, output: [] }, story]);
+      expect(await aiJson(cut.env, "i", {}, {}, 3000, 5000)).toEqual({ ok: true });
+      expect(cut.asked).toEqual([3000, 6000]);
+      expect(logged).toEqual([["Text model ran out of room", { tokens: 3000 }]]);
+      // A usable answer is asked for once.
+      const fine = env([story]);
+      expect(await aiJson(fine.env, "i", {}, {}, 3000, 5000)).toEqual({ ok: true });
+      expect(fine.asked).toEqual([3000]);
+      // A refusal, and an answer cut off twice: no answer, logged with why and never with its words.
+      logged.length = 0;
+      const refused = env([{ status: "completed", output: [{ content: [{ type: "refusal", refusal: "I can't write that." }] }] }]);
+      expect(await aiJson(refused.env, "i", {}, {}, 3000, 5000)).toBeNull();
+      expect(refused.asked).toEqual([3000]);
+      const twice = env([{ status: "incomplete", incomplete_details: { reason: "max_output_tokens" } }, { status: "incomplete", incomplete_details: { reason: "max_output_tokens" } }]);
+      expect(await aiJson(twice.env, "i", {}, {}, 3000, 5000)).toBeNull();
+      expect(twice.asked).toEqual([3000, 6000]);
+      expect(logged).toEqual([
+        ["Text model gave no answer", { status: "completed", refused: true }],
+        ["Text model ran out of room", { tokens: 3000 }],
+        ["Text model gave no answer", { status: "incomplete", reason: "max_output_tokens" }],
+      ]);
+      expect(JSON.stringify(logged)).not.toContain("can't write");
+    } finally {
+      error.mockRestore();
+    }
   });
 });

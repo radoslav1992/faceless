@@ -368,8 +368,11 @@ again by itself.
   running, the latest image rolled out, errors). Three containers render one job each; more work waits for a free
   one, and runs time out after about 40 minutes of waiting or rendering.
 - **Workers AI** (the writer): drafts answer "We couldn't write this video right now", series slots are retried and
-  then skipped with reason `failed`, and `Text model failed` is logged (without the input). `TEXT_MODEL` switches the
-  model without a deploy.
+  then skipped with reason `failed`. The Worker's logs say why, never with the words: `Text model failed` (an error
+  or, with `timeout: true`, no answer in time), `Text model gave no answer` with its `status`, a `reason`
+  (`max_output_tokens`: the answer and the model's thinking did not fit) or `refused: true`, and `Text model ran out
+  of room` when an answer was cut off and asked for once more with twice the room. `TEXT_MODEL` switches the model
+  without a deploy.
 - **A social network**: Operations groups failed publications by network and message. For `TIMEOUT` or `INTERRUPTED`
   ask people to check their profile before retrying, so nothing posts twice. Many reconnections at once point at the
   app's credentials or a revoked permission at the network.
