@@ -371,8 +371,10 @@ again by itself.
   then skipped with reason `failed`. The Worker's logs say why, never with the words: `Text model failed` (an error
   or, with `timeout: true`, no answer in time), `Text model gave no answer` with its `status`, a `reason`
   (`max_output_tokens`: the answer and the model's thinking did not fit) or `refused: true`, and `Text model ran out
-  of room` when an answer was cut off and asked for once more with twice the room. `TEXT_MODEL` switches the model
-  without a deploy.
+  of room` when an answer was cut off and asked for once more with twice the room; each names its `model`. Scripts
+  are written by `WRITER_MODEL` (Gemini 4 Carbon); when it has no answer the same request goes to `TEXT_MODEL` and
+  `Text model fell back` is logged, so many of those mean the writer's model is failing and drafts are slow. Either
+  variable switches its model without a deploy (`WRITER_MODEL` set to the text model's name turns the writer back).
 - **A social network**: Operations groups failed publications by network and message. For `TIMEOUT` or `INTERRUPTED`
   ask people to check their profile before retrying, so nothing posts twice. Many reconnections at once point at the
   app's credentials or a revoked permission at the network.

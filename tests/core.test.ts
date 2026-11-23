@@ -3,7 +3,7 @@ import Stripe from "stripe";
 import worker from "../server/index";
 import { addMonths, allowance, creditTopup, mailbox, periodMonth, webhook } from "../server/billing";
 import { now } from "../server/types";
-import { aiJson } from "../server/ai";
+import { aiJson, DEFAULT_TEXT_MODEL, DEFAULT_WRITER_MODEL, writerModel } from "../server/ai";
 import { CALL_CREDITS } from "../shared/growth";
 import { hashPassword } from "../server/security";
 import { call, signedIn, subscribe, testEnv, SITE } from "./helpers";
@@ -352,39 +352,89 @@ describe("public address", () => {
 
 describe("the text model's answer", () => {
   const story = { status: "completed", output_text: JSON.stringify({ ok: true }) };
-  const env = (answers: unknown[]) => {
-    const asked: number[] = [];
-    return { asked, env: { AI: { run: async (_model: string, request: any) => { asked.push(request.max_output_tokens); return answers[asked.length - 1]; } } } as any };
+  const env = (answers: unknown[], vars: Record<string, string> = {}) => {
+    const asked: { model: string; request: any }[] = [];
+    return { asked, env: { ...vars, AI: { run: async (model: string, request: any) => { asked.push({ model, request }); const a = answers[asked.length - 1]; if (a instanceof Error) throw a; return a; } } } as any };
   };
-  it("asks once more with twice the room when the answer was cut off, and says why an answer can't be used", async () => {
+  const logs = () => {
     const logged: unknown[][] = [];
     const error = vi.spyOn(console, "error").mockImplementation((...a) => { logged.push(a); });
+    return { logged, restore: () => error.mockRestore() };
+  };
+  const model = DEFAULT_TEXT_MODEL;
+  it("asks once more with twice the room when the answer was cut off, and says why an answer can't be used", async () => {
+    const { logged, restore } = logs();
     try {
       // Cut off at the bound (the model's thinking counts in it): asked again with twice the room.
       const cut = env([{ status: "incomplete", incomplete_details: { reason: "max_output_tokens" }, output: [] }, story]);
       expect(await aiJson(cut.env, "i", {}, {}, 3000, 5000)).toEqual({ ok: true });
-      expect(cut.asked).toEqual([3000, 6000]);
-      expect(logged).toEqual([["Text model ran out of room", { tokens: 3000 }]]);
+      expect(cut.asked.map((a) => [a.model, a.request.max_output_tokens])).toEqual([[model, 3000], [model, 6000]]);
+      expect(logged).toEqual([["Text model ran out of room", { model, tokens: 3000 }]]);
       // A usable answer is asked for once.
       const fine = env([story]);
       expect(await aiJson(fine.env, "i", {}, {}, 3000, 5000)).toEqual({ ok: true });
-      expect(fine.asked).toEqual([3000]);
+      expect(fine.asked).toHaveLength(1);
       // A refusal, and an answer cut off twice: no answer, logged with why and never with its words.
       logged.length = 0;
       const refused = env([{ status: "completed", output: [{ content: [{ type: "refusal", refusal: "I can't write that." }] }] }]);
       expect(await aiJson(refused.env, "i", {}, {}, 3000, 5000)).toBeNull();
-      expect(refused.asked).toEqual([3000]);
+      expect(refused.asked).toHaveLength(1);
       const twice = env([{ status: "incomplete", incomplete_details: { reason: "max_output_tokens" } }, { status: "incomplete", incomplete_details: { reason: "max_output_tokens" } }]);
       expect(await aiJson(twice.env, "i", {}, {}, 3000, 5000)).toBeNull();
-      expect(twice.asked).toEqual([3000, 6000]);
+      expect(twice.asked.map((a) => a.request.max_output_tokens)).toEqual([3000, 6000]);
       expect(logged).toEqual([
-        ["Text model gave no answer", { status: "completed", refused: true }],
-        ["Text model ran out of room", { tokens: 3000 }],
-        ["Text model gave no answer", { status: "incomplete", reason: "max_output_tokens" }],
+        ["Text model gave no answer", { model, status: "completed", refused: true }],
+        ["Text model ran out of room", { model, tokens: 3000 }],
+        ["Text model gave no answer", { model, status: "incomplete", reason: "max_output_tokens" }],
       ]);
       expect(JSON.stringify(logged)).not.toContain("can't write");
     } finally {
-      error.mockRestore();
+      restore();
+    }
+  });
+  it("asks the writer's own model in its shape, and the text model when that one has no answer", async () => {
+    const { logged, restore } = logs();
+    const schema = { type: "object", required: ["ok"], properties: { ok: { type: "boolean" } } };
+    const said = (text: string, finishReason = "STOP") => ({ candidates: [{ finishReason, content: { role: "model", parts: [{ text: "Thinking about it.", thought: true }, { text }] } }] });
+    try {
+      expect(writerModel({} as any)).toBe("google/gemini-4-carbon");
+      expect(writerModel({ WRITER_MODEL: " google/gemini-4-argon " } as any)).toBe("google/gemini-4-argon");
+      const carbon = DEFAULT_WRITER_MODEL;
+      // A Google model: generateContent, the schema in its instructions, JSON asked for, room for its thinking.
+      const wrote = env([said('{"ok":true}')]);
+      expect(await aiJson(wrote.env, "Write it.", { topic: "snow" }, schema, 3000, 5000, carbon)).toEqual({ ok: true });
+      expect(wrote.asked).toHaveLength(1);
+      expect(wrote.asked[0].model).toBe(carbon);
+      expect(wrote.asked[0].request).toEqual({
+        contents: [{ role: "user", parts: [{ text: '{"topic":"snow"}' }] }],
+        systemInstruction: { parts: [{ text: `Write it.\nAnswer with one JSON object that fits this JSON Schema, with every required field, and nothing else:\n${JSON.stringify(schema)}` }] },
+        generationConfig: { responseMimeType: "application/json", maxOutputTokens: 3000 + 8192 },
+      });
+      // Its answer in a code fence is read too; cut off, it is asked once more with twice the room.
+      const cut = env([said('{"ok":', "MAX_TOKENS"), said('```json\n{"ok":true}\n```')]);
+      expect(await aiJson(cut.env, "i", {}, schema, 3000, 5000, carbon)).toEqual({ ok: true });
+      expect(cut.asked.map((a) => a.request.generationConfig.maxOutputTokens)).toEqual([3000 + 8192, 6000 + 8192]);
+      expect(logged).toEqual([["Text model ran out of room", { model: carbon, tokens: 3000 }]]);
+      // No answer from it (an error, a filter, words that are not JSON): the text model is asked, in its own shape.
+      for (const [failure, log] of [
+        [new Error("No such model"), ["Text model failed", { model: carbon, name: "Error", timeout: false }]],
+        [{ candidates: [{ finishReason: "SAFETY" }] }, ["Text model gave no answer", { model: carbon, status: "SAFETY", refused: true }]],
+        [{ promptFeedback: { blockReason: "OTHER" } }, ["Text model gave no answer", { model: carbon, status: "none", refused: true }]],
+        [said("Here is your script!"), ["Text model gave no answer", { model: carbon, status: "unreadable" }]],
+      ] as const) {
+        logged.length = 0;
+        const fell = env([failure, story]);
+        expect(await aiJson(fell.env, "i", {}, schema, 3000, 5000, carbon)).toEqual({ ok: true });
+        expect(fell.asked.map((a) => a.model)).toEqual([carbon, model]);
+        expect(fell.asked[1].request).toMatchObject({ instructions: "i", max_output_tokens: 3000, text: { format: { type: "json_schema", strict: true, schema } } });
+        expect(logged).toEqual([log, ["Text model fell back", { from: carbon, to: model }]]);
+      }
+      // The same model for both (TEXT_MODEL set to the writer's): asked once, nothing to fall back to.
+      const same = env([{ candidates: [{ finishReason: "SAFETY" }] }], { TEXT_MODEL: carbon });
+      expect(await aiJson(same.env, "i", {}, schema, 3000, 5000, carbon)).toBeNull();
+      expect(same.asked).toHaveLength(1);
+    } finally {
+      restore();
     }
   });
 });

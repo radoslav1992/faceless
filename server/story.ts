@@ -4,7 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { App, Env } from "./types";
 import { DAY, now } from "./types";
-import { aiJson, clean } from "./ai";
+import { aiJson, clean, writerModel } from "./ai";
 import { json } from "./db";
 import { hit, rate, sha } from "./security";
 import { spendSpeech, speechView, storedTranscript } from "./speech";
@@ -341,7 +341,7 @@ export async function writeVideo(env: Env, r: WriteRequest): Promise<StoryConcep
     music: (r.music || []).map((m) => ({ code: m.ref, name: m.name, tags: m.tags, ...(m.description && { description: m.description }) })),
     recentTitles: r.recent.slice(0, 40),
   };
-  return acceptStory(await aiJson(env, instructions, input, r.drama ? dramaJson : storyJson, Math.min(16000, 4000 + count * (r.drama ? 420 : 380)), 120000));
+  return acceptStory(await aiJson(env, instructions, input, r.drama ? dramaJson : storyJson, Math.min(16000, 4000 + count * (r.drama ? 420 : 380)), 120000, writerModel(env)));
 }
 
 export type SpecChoices = {
@@ -445,7 +445,7 @@ export async function planScenes(env: Env, texts: string[], style: StoryStyle, s
     (subject ? "subject: keep the given recurring character unless it does not fit, and put it in every picture it belongs in. " : `${SUBJECT_RULE} `) +
     `${LOOK_RULE} ${PLACES_RULE} ${VARIETY_RULE} ${CAMERA_RULE} ${TONE_RULE} title: a title of at most 70 characters in the scenes' language. Return ONLY JSON.`,
     { subject, scenes: texts.map((text, i) => ({ id: `s${i + 1}`, text: text.slice(0, 600) })) },
-    planJson, Math.min(16000, 3000 + texts.length * 300), 120000);
+    planJson, Math.min(16000, 3000 + texts.length * 300), 120000, writerModel(env));
   return acceptScenePlan(answer, texts);
 }
 const styleEnum = z.enum(storyStyleIds as [StoryStyle, ...StoryStyle[]]);

@@ -1082,6 +1082,34 @@ describe("narrated videos in the content run", () => {
     expect(compose.keys).not.toContain(`media/${user.id}/${own}.jpg`);
   });
 
+  it("has the writer's own model write the draft, in its shape, and the text model choose the sounds", async () => {
+    const { env, user } = await setup();
+    // As deployed: the writer's model is the default one (the tests' environment sets the text model for it).
+    delete env.WRITER_MODEL;
+    const lines = ["Snow fell on the village all night.", "By morning the baker had a plan.", "Nobody went hungry that Christmas."];
+    const asked: { model: string; request: any }[] = [];
+    env.AI.run = async (model: string, request: any) => {
+      asked.push({ model, request });
+      const answer = JSON.stringify({
+        title: "The baker's plan", topic: "a christmas tale", caption: "A small kindness.", hashtags: ["christmas"], headline: "The baker's plan", subject: "", look: "Warm window light on snow.",
+        places: [{ label: "the village square", description: "A small snowy square with a stone fountain, timber houses around it, warm lit windows and a bakery with a green door." }], music: "",
+        scenes: lines.map((text, n) => ({ text, picture: `Wide shot of the village square in the snow, moment ${n + 1}`, keys: [], tone: "", place: "the village square" })),
+      });
+      return model.startsWith("google/") ? { candidates: [{ finishReason: "STOP", content: { role: "model", parts: [{ text: answer }] } }] } : { status: "completed", output_text: answer };
+    };
+    const draft = await call(worker, env, "POST", "/api/story/draft", { template: "christmas", prompt: "A baker in a snowed-in village", seconds: 15 }, user.cookie);
+    expect(draft.status).toBe(200);
+    expect(draft.data.spec.scenes.map((x: any) => x.text)).toEqual(lines);
+    expect(draft.data.spec.places.map((x: any) => x.label)).toEqual(["the village square"]);
+    const writer = asked.find((a) => a.model === "google/gemini-4-carbon")!;
+    expect(writer.request.systemInstruction.parts[0].text).toMatch(/^You write the script/);
+    expect(writer.request.systemInstruction.parts[0].text).toContain(VARIETY_RULE);
+    expect(writer.request.systemInstruction.parts[0].text).toContain('"required":["title","topic"');
+    expect(JSON.parse(writer.request.contents[0].parts[0].text).ownerRequest).toBe("A baker in a snowed-in village");
+    expect(writer.request.generationConfig.responseMimeType).toBe("application/json");
+    // Everything else the text model is asked stays on it.
+    expect(new Set(asked.filter((a) => a !== writer).map((a) => a.model))).toEqual(new Set(["openai/gpt-6-luna"]));
+  });
   it("draws the people of a greeting into its pictures from their photos, with the owner's word that they may use them", async () => {
     const { env, sqlite, user, own, run } = await setup();
     const people = { assets: [own], consent: true as const };
