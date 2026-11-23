@@ -222,6 +222,16 @@ The series page shows the story so far (`story` in `GET /api/series/:id`). Edits
 after it is made (free edits) are not followed by a new lip-sync; in a film, moving an edge changes two shots' words,
 so both are taken again.
 
+**Pictures that differ.** The writer is told (`VARIETY_RULE` in `server/story.ts`) that each scene's picture is a
+moment of its own: where the text names another time, place or person the picture goes there; a video of six or more
+scenes is set in at least three places, at most two scenes in a row in one place, and the thing the video is about is
+the centre of at most half of its pictures. Before it, a video came out as seven views of one thing in one room. The
+`look` names an era and place only when the whole video happens in one. Not for a film's shots, an ad or storytime.
+
+**Holiday styles** (`shared/templates.ts`, category `holidays`): Christmas stories, Holiday traditions (checkable
+facts) and Holiday greeting (a wish to the people the owner names), drawn in the art style Festive
+(`shared/styles.ts`, its sample in `src/art.tsx`).
+
 **Product ads** (`shared/ad.ts`; a test, for administrators). A short ad filmed from the owner's photos of a
 product: the video kind `ad`, with the `product` of its spec (one to four of the owner's uploaded pictures, and the
 product's name). In Create an administrator picks the Product ad style (the template `ad`, marked `test`: hidden from

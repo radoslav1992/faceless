@@ -59,6 +59,10 @@ export const storyStyles = {
     name: "Pixel art", short: "Retro game",
     prompt: "16-bit pixel art scene, crisp visible pixels, limited retro game palette, simple dithered shading, side-on view, nostalgic video game look (original characters only)",
   },
+  festive: {
+    name: "Festive", short: "Cosy winter holidays",
+    prompt: "cosy winter holiday illustration, soft painterly gouache, warm golden light from windows, candles and string lights against deep blue snowy evenings, falling snow, evergreen branches, rich reds, forest greens and gold, rounded friendly characters in knitted clothes, gentle glow and soft shadows, like a classic Christmas picture book",
+  },
   neon: {
     name: "Neon", short: "Synthwave glow",
     prompt: "neon synthwave illustration, glowing magenta and cyan lights, dark night background, retro-futuristic city, reflections on wet surfaces, bold high-contrast colours",

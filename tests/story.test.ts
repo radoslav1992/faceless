@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import worker from "../server/index";
 import { ContentGeneration } from "../server/content-workflow";
 import { planRender, type PlanContext } from "../server/render-plan";
-import { acceptScenePlan, acceptStory, conceptToSpec, OWNER_RULE, storyShape } from "../server/story";
+import { acceptScenePlan, acceptStory, conceptToSpec, OWNER_RULE, storyShape, VARIETY_RULE } from "../server/story";
 import { acceptNewSounds, acceptSounds, rankSounds } from "../server/sounds";
 import { alignedWords, ALIGNMENT_URL, forcedAlignment, languageCode, speak, SPEECH_MODEL } from "../server/providers/elevenlabs";
 import { adminClipModels, clipModelFor, falRequest, ONE_SHOT_25_MODEL, ONE_SHOT_MODEL, oneShotModel, oneShotRequest, PRODUCT_TEXT, referenceModel, referencePrompt, submitFal } from "../server/providers/fal";
@@ -2159,6 +2159,9 @@ describe("planning and writing through the API", () => {
     expect(JSON.parse(seen[1].input).ownerRequest).toBe("octopus facts");
     // The owner's request decides what the video is about; a whole story pasted as the topic is retold, not set aside.
     expect(seen[1].instructions).toContain(OWNER_RULE);
+    // The pictures follow the text to its other times and places, never seven views of one thing in one room.
+    expect(seen[1].instructions).toContain(VARIETY_RULE);
+    expect(VARIETY_RULE).toContain("at least three places");
     expect(seen[1].instructions).toMatch(/retell that story in the template's tone/);
     expect(seen[1].instructions).toContain("Never repeat a topic from the recent titles, unless the owner's request asks for it.");
     const story = ["Every night, when the world falls asleep, a hidden library opens its doors.", "Inside, there are millions of books.", "A little boy wanders between the shelves."]
