@@ -127,6 +127,23 @@ export function StyleArt({ style }: { style: StoryStyle }) {
           <path d="M40 82 q6 -10 12 0 q-6 -3 -12 0Z" fill="#1e293b" />
         </svg>
       );
+    case "festive":
+      // A snowy evening: a lit window, a decorated tree with a star, falling snow.
+      return (
+        <svg viewBox="0 0 100 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+          <rect width="100" height="120" fill="#1f3157" />
+          <circle cx="78" cy="20" r="9" fill="#f4e3b1" />
+          <path d="M-4 96 Q26 82 54 92 T104 88 V124 H-4Z" fill="#eef3f8" />
+          <path d="M8 92 v-22 l13 -10 l13 10 v22Z" fill="#7b3f3a" />
+          <path d="M5 71 l16 -13 l16 13" fill="none" stroke="#eef3f8" strokeWidth="4" strokeLinecap="round" />
+          <rect x="15" y="76" width="12" height="10" rx="1.5" fill="#f7c95a" />
+          <path d="M62 44 l-11 16 h6 l-10 15 h7 l-11 16 h38 l-11 -16 h7 l-10 -15 h6Z" fill="#1f7a4d" />
+          <rect x="59.5" y="91" width="5" height="8" fill="#6b4226" />
+          <path d="M62 34 l2.4 5.4 5.8 .6 -4.4 3.9 1.3 5.7 -5.1 -3 -5.1 3 1.3 -5.7 -4.4 -3.9 5.8 -.6Z" fill="#f7c95a" />
+          <circle cx="57" cy="62" r="2.2" fill="#e5484d" /><circle cx="68" cy="70" r="2.2" fill="#f7c95a" /><circle cx="55" cy="80" r="2.2" fill="#f7c95a" /><circle cx="70" cy="84" r="2.2" fill="#e5484d" /><circle cx="63" cy="54" r="1.8" fill="#f7c95a" />
+          <g fill="#eef3f8"><circle cx="14" cy="18" r="1.4" /><circle cx="40" cy="30" r="1.2" /><circle cx="30" cy="48" r="1.4" /><circle cx="90" cy="46" r="1.3" /><circle cx="48" cy="12" r="1.2" /><circle cx="86" cy="68" r="1.4" /><circle cx="42" cy="66" r="1.1" /><circle cx="8" cy="40" r="1.2" /></g>
+        </svg>
+      );
     case "storybook":
       return (
         <svg viewBox="0 0 100 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">

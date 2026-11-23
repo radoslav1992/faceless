@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import worker from "../server/index";
 import { ContentGeneration } from "../server/content-workflow";
 import { planRender, type PlanContext } from "../server/render-plan";
-import { acceptScenePlan, acceptStory, conceptToSpec, OWNER_RULE, storyShape } from "../server/story";
+import { acceptScenePlan, acceptStory, conceptToSpec, OWNER_RULE, storyShape, VARIETY_RULE } from "../server/story";
 import { acceptNewSounds, acceptSounds, rankSounds } from "../server/sounds";
 import { alignedWords, ALIGNMENT_URL, forcedAlignment, languageCode, speak, SPEECH_MODEL } from "../server/providers/elevenlabs";
 import { adminClipModels, clipModelFor, falRequest, ONE_SHOT_25_MODEL, ONE_SHOT_MODEL, oneShotModel, oneShotRequest, PRODUCT_TEXT, referenceModel, referencePrompt, submitFal } from "../server/providers/fal";
@@ -12,6 +12,7 @@ import { call, signedIn, subscribe, testEnv } from "./helpers";
 import { languages, seriesSettingsSchema } from "../shared/series";
 import { FILM_AMBIENCE, filmSpec } from "../shared/film";
 import { AD_CLIP_QUALITY, adCredits, adSpec, ONE_SHOT_SOUND, oneShotModels, oneShotSeconds } from "../shared/ad";
+import { PEOPLE_PHOTOS_OPEN, PEOPLE_RULE } from "../shared/people";
 import { lipSyncSpec, shotSeconds, shotsSpec, takeKey, takeOf, voiceSampleText } from "../shared/drama";
 import { SCRIBE_URL } from "../server/speech";
 import { filmClock, estimatedSeconds, narrationCurrent, pendingMedia, pictureSheets, referencedAssets, specCredits, specSchema, storySpec, type StorySpec } from "../shared/formats";
@@ -1079,6 +1080,77 @@ describe("narrated videos in the content run", () => {
     expect(compose.segments.map((s) => [s.kind, s.audio ?? null, s.transition ?? null])).toEqual([["video", FILM_AMBIENCE, null], ["video", FILM_AMBIENCE, null], ["video", FILM_AMBIENCE, null]]);
     // The photo is not shown itself: only the shots are.
     expect(compose.keys).not.toContain(`media/${user.id}/${own}.jpg`);
+  });
+
+  it("draws the people of a greeting into its pictures from their photos, with the owner's word that they may use them", async () => {
+    const { env, sqlite, user, own, run } = await setup();
+    const people = { assets: [own], consent: true as const };
+    const brief = { template: "greeting", prompt: "Happy New Year to grandma and grandpa from their grandchildren", seconds: 30, people };
+    const lines = ["Dear grandma and grandpa, thank you for this year.", "We wish you health and a warm home.", "Happy New Year from all of us."];
+    const seen: string[] = [];
+    env.AI.run = async (_model: string, input: any) => {
+      seen.push(String(input.instructions));
+      return { status: "completed", output_text: JSON.stringify({
+        title: "Happy New Year", topic: "a greeting", caption: "With love.", hashtags: [], headline: "Happy New Year", subject: "an old couple", look: "A snowy evening.", places: [], music: "",
+        scenes: lines.map((text, n) => ({ text, picture: `Medium shot, the people from the photos by the tree, moment ${n + 1}`, keys: [], tone: "", place: "" })),
+      }) };
+    };
+    // A test: an administrator's, until it is opened.
+    expect(PEOPLE_PHOTOS_OPEN).toBe(false);
+    const refusedDraft = await call(worker, env, "POST", "/api/story/draft", brief, user.cookie);
+    expect([refusedDraft.status, refusedDraft.data.error]).toEqual([403, "Photos of people are still being tested and aren't available yet."]);
+    // Without photos the greeting is anyone's, as any style.
+    expect((await call(worker, env, "POST", "/api/story/draft", { ...brief, people: undefined }, user.cookie)).status).toBe(200);
+    // (The writer's instructions: the sound effects are chosen by a call after it.)
+    const written = () => seen.filter((i) => i.startsWith("You write the script")).at(-1)!;
+    expect(written()).not.toContain(PEOPLE_RULE);
+    sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
+    // The owner's word is required, and only a style that takes people takes them.
+    expect((await call(worker, env, "POST", "/api/story/draft", { ...brief, people: { assets: [own] } }, user.cookie)).status).toBe(400);
+    expect((await call(worker, env, "POST", "/api/story/draft", { ...brief, template: "facts" }, user.cookie)).data.error).toBe("This style doesn't take photos of people.");
+    const draft = await call(worker, env, "POST", "/api/story/draft", brief, user.cookie);
+    expect(draft.status).toBe(200);
+    // The writer is told the people are in the pictures and never to describe them; no character of its own is kept.
+    expect(written()).toContain(PEOPLE_RULE);
+    const spec = specSchema.parse(draft.data.spec) as StorySpec;
+    expect(spec).toMatchObject({ kind: "story", people, subject: "" });
+    expect(spec.film).toBeUndefined();
+    // Its pictures are drawn with the photos (no sheets), which are kept with the video.
+    expect(pictureSheets(spec)).toEqual([]);
+    expect(referencedAssets(spec)).toContain(own);
+    expect(pendingMedia(spec).map((m) => [m.kind, m.people])).toEqual([["image", true], ["image", true], ["image", true]]);
+    // Not with an ad's product, nor behind a background clip; and the photos must be the owner's pictures.
+    expect(specSchema.safeParse({ ...spec, backdrop: { libraryId: crypto.randomUUID() } }).success).toBe(false);
+    expect(specSchema.safeParse({ ...spec, people: { assets: [own] } }).success).toBe(false);
+    expect((await call(worker, env, "POST", "/api/videos", { spec: { ...spec, people: { ...people, assets: [crypto.randomUUID()] } }, idempotencyKey: crypto.randomUUID() }, user.cookie)).status).toBe(400);
+    const calls = providers();
+    const created = await call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    expect(created.status).toBe(201);
+    await run();
+    const video = (await call(worker, env, "GET", `/api/videos/${created.data.id}`, undefined, user.cookie)).data.video;
+    expect(video.renderStatus).toBe("ready");
+    expect(video.spec.people).toEqual(people);
+    // Three pictures, each drawn with the photo as its reference: those very people, in the video's own style.
+    const fal = calls.filter((c) => c.method === "POST" && c.url.startsWith("https://queue.fal.run/"));
+    expect(fal).toHaveLength(3);
+    for (const c of fal) {
+      expect(c.url).toBe(`https://queue.fal.run/${referenceModel(env)}`);
+      expect(c.body.image_urls).toHaveLength(1);
+      expect(c.body.image_urls[0]).toMatch(/^https:\/\/app\.test\/api\/render-inputs\//);
+      expect(c.body.prompt).toContain("the people from the photos by the tree");
+      expect(c.body.prompt).toContain("they are the ones in the reference photos");
+      expect(c.body.prompt).toContain("The reference picture is a photo of the people this video is for");
+      expect(c.body.prompt).toContain("never paste the photo in");
+      expect(c.body.prompt).toContain("No text, captions, logos or watermarks in the picture.");
+      expect(c.body.prompt).not.toContain("Match the art style");
+    }
+    // The photo is a reference only: the render shows the drawn pictures.
+    const narration = { key: "media/u/voice.wav", duration: 12, words: video.spec.generated.words };
+    const media = Object.fromEntries(video.spec.scenes.map((sc: any, n: number) => [sc.imageId, { key: `media/u/${n}`, kind: "image", duration: 0, width: 1080, height: 1920, ai: true }]));
+    media[own] = { key: `media/${user.id}/${own}.jpg`, kind: "image", duration: 0, width: 1080, height: 1920, ai: false };
+    const { compose } = planRender(video.spec, { media, narration, watermark: "" } as unknown as PlanContext);
+    expect(compose.keys).not.toContain(`media/${user.id}/${own}.jpg`);
+    expect(compose.segments).toHaveLength(3);
   });
 
   it("films a product ad's shots with HeyGen Video 1: from their pictures alone, as regular clips, only where HeyGen is set up", async () => {
@@ -2159,6 +2231,9 @@ describe("planning and writing through the API", () => {
     expect(JSON.parse(seen[1].input).ownerRequest).toBe("octopus facts");
     // The owner's request decides what the video is about; a whole story pasted as the topic is retold, not set aside.
     expect(seen[1].instructions).toContain(OWNER_RULE);
+    // The pictures follow the text to its other times and places, never seven views of one thing in one room.
+    expect(seen[1].instructions).toContain(VARIETY_RULE);
+    expect(VARIETY_RULE).toContain("at least three places");
     expect(seen[1].instructions).toMatch(/retell that story in the template's tone/);
     expect(seen[1].instructions).toContain("Never repeat a topic from the recent titles, unless the owner's request asks for it.");
     const story = ["Every night, when the world falls asleep, a hidden library opens its doors.", "Inside, there are millions of books.", "A little boy wanders between the shelves."]

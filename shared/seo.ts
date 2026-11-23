@@ -6,7 +6,7 @@ import { tools } from "./templates";
 // app updates them on navigation.
 const UPDATED = "2026-11-09";
 /** The terms and the privacy policy: the terms version recorded with every sign-up (TERMS_VERSION in server/auth.ts). */
-const LEGAL_UPDATED = "2026-11-10";
+const LEGAL_UPDATED = "2026-11-23";
 const toolPages = Object.fromEntries(tools.map((t) => [`/tools/${t.slug}`, { title: `${t.title} — ${PRODUCT.name}`, description: t.description, updated: UPDATED }]));
 export const publicPages: Record<string, { title: string; description: string; updated: string }> = {
   "/": { title: `${PRODUCT.name} — ${PRODUCT.tagline}`, description: PRODUCT.pitch, updated: UPDATED },

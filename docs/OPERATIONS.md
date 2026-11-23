@@ -94,6 +94,10 @@ under `/api/admin` answers 404 to anyone else.
   run), and Seedance 2.5, up to 30 seconds (37 credits for 15 seconds, about $7 to run). When a
   provider refuses a request, Workers Logs show `Provider refused` with the fields it named: a wrong parameter of a
   model shows there.
+- **Photos of people** (a test): in the **Holiday greeting** style, administrators can add up to four photos of the
+  people they greet and tick that they have their permission; the video's pictures then show those people, drawn in
+  its art style. To open it to everyone: set `PEOPLE_PHOTOS_OPEN` to `true` in `shared/people.ts`. Watch the first
+  ones for likeness and for pictures the model refuses (real faces, children).
 - **Cinematic videos**: in Create, everyone has a **Cinematic** switch (not on Storytime): every scene becomes an AI
   clip with a camera move, scenes cut hard and the video gets a film look. People choose the clips' quality; the
   clips are made with everyone's model (`FAL_CLIP_MODEL`, Kling unless set: its clips are silent, so the video has

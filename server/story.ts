@@ -17,6 +17,7 @@ import { SPEECH_CHARS_PER_SECOND, clipModels, clipQualities } from "../shared/cr
 import { filmSpec } from "../shared/film";
 import { heygenEnabled } from "./providers/heygen";
 import { adSpec, oneShotOf, productSchema } from "../shared/ad";
+import { PEOPLE_PHOTOS_OPEN, PEOPLE_RULE, peopleSchema, takesPeople } from "../shared/people";
 import { type FilmVoices, castMember, episodeTitle, filmPlaces, filmShots, lipSyncSpec, NARRATOR, SHOT_MAX_WORDS, shotsSpec } from "../shared/drama";
 import { isAdmin } from "./auth";
 import { languageCodes, languageName, type LanguageCode } from "../shared/series";
@@ -170,9 +171,17 @@ export function acceptStory(value: unknown, maxChars = STORY_MAX_CHARS): StoryCo
 const SUBJECT_RULE =
   "subject: when a person, creature or object appears in more than one scene, describe it once in 8 to 40 English words (age, face, hair, build, clothing and colours; at most two, each with a short label such as \"the night clerk\"), and call it by that label in every picture it is in, never describing it differently; else an empty string.";
 const LOOK_RULE =
-  "look: the world of the whole video for the pictures, in 15 to 35 English words: the era and part of the world, the time of day, the light and three or four main colours. Every picture keeps to it, so the scenes look like one film.";
+  "look: the world of the whole video for the pictures, in 15 to 35 English words: the light and three or four main colours and, when the whole video happens in one time and part of the world, the era, the place and the time of day too. A video that moves through times or places (a history, a journey, a list of facts) names only the light and the colours here, and each picture says its own era and place. Every picture keeps to it, so the scenes look like one film.";
 const PLACES_RULE =
   `places: the places the scenes are set in, at most four, each with a \`label\` of 2 to 4 English words (such as "the corner shop") and a \`description\` of 15 to 35 English words: its layout, walls and floor, the furniture and main objects and where they stand, its light and main colours. Each scene's \`place\`: the label of the place the camera is in, written exactly the same, or an empty string when it is in none of them (a close-up of an object, a map, a diagram). A picture taken inside a vehicle or a room is set there even when the street shows through its windows, and a picture never shows the inside and the outside of a place at once. A place keeps the same look in every scene set there: that scene's picture says what happens and from where it is seen, never describing the place differently.`;
+/**
+ * Pictures that differ. Written with one place and one subject in view, a video came out as seven views of the same
+ * thing in the same room (a manuscript on a table, two people in a cafe), which no camera angle saves: the pictures
+ * follow the text to its other times, places and people. Not for a film's shots (one scene in one place by design) or
+ * an ad (its product is in every shot).
+ */
+export const VARIETY_RULE =
+  "The pictures must differ from each other: several views of the same thing in the same room lose the viewer. Each `picture` shows what its own scene says, as a moment of its own: when the text names another time, place, person or thing (a year, a city, a laboratory, a crowd, 'today'), the picture goes there. A video of six or more scenes is set in at least three places, unless it tells of one event in one room, and no more than two scenes in a row are set in the same place. The thing the video is about (a book, a building, an animal, a rule) is the centre of at most half of the pictures: the others show the people, the places and the events around it.";
 // The pictures are drawn from reference sheets of the characters and places, so only the words of a picture give it
 // its own camera position: a scene in a place shown before needs a new one.
 const CAMERA_RULE =
@@ -195,6 +204,8 @@ export type WriteRequest = {
   recent: string[];
   /** Music the model may pick from (by code). */
   music?: { ref: string; name: string; tags?: string; description?: string }[];
+  /** The owner gave photos of the people the video is for (shared/people.ts): they are in its pictures. */
+  people?: boolean;
   /**
    * An episode of a drama (shared/drama.ts): the story's premise and cast, what happened in the episodes before, and
    * which episode of how many this is.
@@ -297,11 +308,14 @@ export async function writeVideo(env: Env, r: WriteRequest): Promise<StoryConcep
     ...(r.drama ? dramaRules(r.drama) : kindRules[t.kind as Exclude<VideoKind, "script">](r)),
     r.drama ? "subject: the cast as given in `subject` (data), unchanged: these are the people in the pictures."
       : t.kind === "ad" ? "The product is the only recurring thing in the pictures."
+      : r.people ? "subject: an empty string (the people in the pictures are the ones in the owner's photos)."
       : r.subject
         ? "subject: keep the owner's recurring character (given as data) and put it in every picture."
         : SUBJECT_RULE,
     LOOK_RULE,
     PLACES_RULE,
+    ...(film || t.kind === "ad" || t.kind === "backdrop" ? [] : [VARIETY_RULE]),
+    ...(r.people ? [PEOPLE_RULE] : []),
     // A film's shots are drawn from a master shot of their place: every shot needs one, and a short episode few of them.
     ...(film ? [`For this film the places are stricter: at most ${filmPlaces(r.seconds)} of them${r.seconds <= 45 ? " (one is often enough)" : ""}, and every shot's \`place\` is the label of the place its scene is set in, written exactly the same, for cutaways and close-ups too: no shot has an empty place.`] : []),
     CAMERA_RULE,
@@ -429,7 +443,7 @@ export async function planScenes(env: Env, texts: string[], style: StoryStyle, s
     "`keys`: one or two key words copied exactly from the scene's words, the ones a viewer should catch (they are coloured in the subtitles). " +
     `The pictures are drawn as: ${storyStyles[style].short.toLowerCase()}. ` +
     (subject ? "subject: keep the given recurring character unless it does not fit, and put it in every picture it belongs in. " : `${SUBJECT_RULE} `) +
-    `${LOOK_RULE} ${PLACES_RULE} ${CAMERA_RULE} ${TONE_RULE} title: a title of at most 70 characters in the scenes' language. Return ONLY JSON.`,
+    `${LOOK_RULE} ${PLACES_RULE} ${VARIETY_RULE} ${CAMERA_RULE} ${TONE_RULE} title: a title of at most 70 characters in the scenes' language. Return ONLY JSON.`,
     { subject, scenes: texts.map((text, i) => ({ id: `s${i + 1}`, text: text.slice(0, 600) })) },
     planJson, Math.min(12000, 1100 + texts.length * 170), 90000);
   return acceptScenePlan(answer, texts);
@@ -508,6 +522,8 @@ const draftSchema = z.object({
   film: z.object({ quality: z.enum(clipQualities).default("regular"), model: z.enum(clipModels).optional() }).optional(),
   /** A product ad (shared/ad.ts): the owner's photos of the product, and its name. */
   product: productSchema.optional(),
+  /** Photos of the people the video is for (shared/people.ts), with the owner's word that they may use them. */
+  people: peopleSchema.optional(),
 });
 export type DraftRequest = z.input<typeof draftSchema>;
 /**
@@ -528,6 +544,11 @@ export async function draftVideo(env: Env, userId: string, input: DraftRequest, 
     // In one shot, the ad is one clip: no longer than its model makes in one request.
     const oneShot = oneShotOf(d.product.model);
     if (oneShot) d.seconds = Math.min(d.seconds, oneShot.max);
+  }
+  // Photos of the people a greeting is for: a test, for administrators, and only where a style takes them.
+  if (d.people) {
+    if (!PEOPLE_PHOTOS_OPEN && !admin) throw new HTTPException(403, { message: "Photos of people are still being tested and aren't available yet." });
+    if (!takesPeople(d.template)) throw new HTTPException(400, { message: "This style doesn't take photos of people." });
   }
   // A voice asked for must be offered; the template's own is replaced by the default voice when it was hidden.
   if (d.voiceId && !(await voiceUsable(env, d.voiceId, null, userId))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
@@ -555,7 +576,7 @@ export async function draftVideo(env: Env, userId: string, input: DraftRequest, 
   } else {
     concept = await writeVideo(env, {
       template: d.template, prompt: d.prompt, seconds: d.seconds, language: d.language, style, subject: d.subject,
-      mashup: d.mashup, title: d.title, recent, music: catalog,
+      mashup: d.mashup, title: d.title, recent, music: catalog, people: !!d.people,
     });
   }
   if (!concept) throw new HTTPException(503, { message: "We couldn't write this video right now. Please try again in a minute." });
@@ -575,7 +596,12 @@ export async function draftVideo(env: Env, userId: string, input: DraftRequest, 
     if (!ad.success) throw new HTTPException(502, { message: "The video we wrote didn't come out right. Please try again." });
     return ad.data;
   }
-  return film ? filmSpec(spec, film) : spec;
+  const made = film ? filmSpec(spec, film) : spec;
+  if (!d.people) return made;
+  // With photos of its people: they are who its pictures show, in place of a character of the writer's.
+  const peopled = storySpec.safeParse({ ...made, subject: "", people: d.people });
+  if (!peopled.success) throw new HTTPException(502, { message: "The video we wrote didn't come out right. Please try again." });
+  return peopled.data;
 }
 /** Create: a draft from a template (free; the text model only, 40 an hour and 200 a day). */
 story.post("/draft", async (c) => {

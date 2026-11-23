@@ -23,6 +23,7 @@ export const categories = [
   { id: "surreal", name: "Surreal & memes" },
   { id: "storytime", name: "Storytime" },
   { id: "script", name: "Your script" },
+  { id: "holidays", name: "Holidays" },
   { id: "ads", name: "Ads" },
 ] as const;
 export type CategoryId = (typeof categories)[number]["id"];
@@ -182,6 +183,25 @@ export const templates = {
     examples: ["Paste your script here. Every sentence or two becomes a scene with its own picture."],
     style: "cinematic", voice: "george", seconds: 60, music: "auto",
     tool: { slug: "text-to-video", title: "Text to video AI generator", description: "Paste a script and get a faceless video: an AI voiceover, a matching picture for every sentence and timed captions.", icon: "file-text" },
+  },
+  // The winter holidays: tales, where the customs come from, and a greeting to the people the owner names.
+  christmas: {
+    name: "Christmas stories", category: "holidays", kind: "story", short: "Cosy tales for the holidays", popular: true,
+    brief: "A short original Christmas tale with warmth and a little wonder: ordinary people or animals, a small kindness or a wish, snow and lights, and a gentle ending that leaves a smile. Folk figures of the holiday (Santa Claus, the snowman) may appear as tradition has them; no brands and no characters from films or books.",
+    examples: ["The snowman who wanted to see the Christmas lights", "A lost mitten that found its way home on Christmas Eve", "The baker who gave away the last loaf before Christmas"],
+    style: "festive", voice: "laura", seconds: 45, music: "calm",
+  },
+  christmasfacts: {
+    name: "Holiday traditions", category: "holidays", kind: "story", short: "Where the customs come from",
+    brief: "True, checkable facts about Christmas and New Year customs and where they come from (the tree, the carols, the gifts, the foods, how different countries celebrate), one per scene, the most surprising one last. Nothing invented, no legends told as facts.",
+    examples: ["Why we decorate a Christmas tree", "How the New Year is welcomed around the world", "Where Santa Claus comes from"],
+    style: "festive", voice: "george", seconds: 45, music: "inspiring",
+  },
+  greeting: {
+    name: "Holiday greeting", category: "holidays", kind: "story", short: "A warm wish for family, friends or customers",
+    brief: "A short, heartfelt holiday greeting spoken to the people the owner names, from the one the owner names: thanks for the year, a warm wish for the holidays and for the new year, in simple sincere words. A greeting, not a story: no plot, no twist. The pictures are cosy winter and holiday moments (a lit window, a table set for the family, hands wrapping a gift, snow on a street), never a face in close-up.",
+    examples: ["Merry Christmas to our customers from the team of a small bakery", "Happy New Year to grandma and grandpa from their grandchildren", "Season's greetings to our colleagues, with thanks for the year"],
+    style: "festive", voice: "laura", seconds: 30, music: "calm",
   },
   // A product ad (shared/ad.ts): filmed from the owner's photos of the product. A test, for administrators.
   ad: {
