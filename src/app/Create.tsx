@@ -3,7 +3,7 @@ import { SITE } from "../../shared/site";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, ImagePlus, Repeat, Search, Wand2, X } from "lucide-react";
-import { errorText, fileUrl, newKey, post, useAuth } from "../lib";
+import { api, errorText, fileUrl, newKey, post, useAuth } from "../lib";
 import { Switch, useToast } from "../ui";
 import { StyleArt } from "../art";
 import { ExampleVideo, useExamples } from "../examples";
@@ -149,6 +149,11 @@ export function Create() {
     }
     setForm(next);
     setSpec(null);
+    // A draft the assistant wrote (src/app/Agent.tsx) opens in the editor as it is.
+    const drafted = params.get("agentDraft");
+    if (drafted) {
+      api<{ spec: StorySpec }>(`/agent/drafts/${encodeURIComponent(drafted)}`).then((d) => setSpec(d.spec)).catch((e) => toast(errorText(e), "bad"));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the style changes
   }, [template]);
   const set = (patch: Partial<Form>) => setForm((f) => ({ ...f, ...patch }));

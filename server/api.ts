@@ -250,7 +250,7 @@ restApi.get("/files/:id", async (c) => {
 
 // MCP --------------------------------------------------------------------------------------------------------------
 export const MCP_PROTOCOL = "2025-06-18";
-const tools = [
+export const mcpTools = [
   {
     name: "list_video_types",
     description: `The video types (faceless styles) ${PRODUCT.name} can make, with art styles, voices and languages.`,
@@ -349,7 +349,8 @@ type Rpc = { jsonrpc: "2.0"; id?: string | number | null; method: string; params
 const result = (id: Rpc["id"], value: unknown) => ({ jsonrpc: "2.0", id: id ?? null, result: value });
 const rpcError = (id: Rpc["id"], code: number, message: string) => ({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
 
-async function callTool(env: Env, user: DbUser, name: string, args: any) {
+/** One of the tools above, run for a person (the MCP endpoint, and the assistant: server/agent.ts). */
+export async function callTool(env: Env, user: DbUser, name: string, args: any) {
   switch (name) {
     case "list_video_types":
       return {
@@ -381,7 +382,7 @@ async function handle(env: Env, user: DbUser, m: Rpc) {
         instructions: `Make faceless short videos with ${PRODUCT.name}: call list_video_types, then create_video, then get_video until it is ready. To clip the owner's long videos: list_long_videos (or import_video from a link), find_clips, then make_clip.`,
       });
     case "ping": return result(m.id, {});
-    case "tools/list": return result(m.id, { tools });
+    case "tools/list": return result(m.id, { tools: mcpTools });
     case "tools/call": {
       try {
         const value = await callTool(env, user, String(m.params?.name || ""), m.params?.arguments);

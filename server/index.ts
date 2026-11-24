@@ -1,3 +1,4 @@
+import { agent } from "./agent";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { HTTPException } from "hono/http-exception";
@@ -136,6 +137,7 @@ app.route("/api/keys", apiKeys);
 app.route("/api/voices", voiceClones);
 app.route("/api/affiliate", affiliate);
 app.route("/api/calls", calls);
+app.route("/api/agent", agent);
 app.route("/api/admin", admin);
 app.all("/api/*", (c) => c.json({ error: "Not found." }, 404));
 app.route("/", referralLinks);

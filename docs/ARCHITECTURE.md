@@ -68,7 +68,8 @@ video), `0006_example_previews.sql` (the examples' short previews), `0007_librar
 genre or category), `0008_avatars.sql` (the presenters' avatars), `0009_growth.sql` (affiliates, commissions,
 payouts and calls for credits), `0010_tiktok_drafts.sql`, `0011_youtube_data.sql` (YouTube channel details' age, the
 "made for kids" answer), `0012_sound_effects.sql` (library sound effects), `0015_series_character.sql` (a series'
-main character as drawn) and `0016_voice_clones.sql` (customers' cloned voices); D1 always enforces foreign keys.
+main character as drawn), `0016_voice_clones.sql` (customers' cloned voices) and `0017_agent.sql` (the assistant's
+chats, drafts and skills); D1 always enforces foreign keys.
 
 | Area | Tables |
 | --- | --- |
@@ -834,6 +835,39 @@ checks as the app; making a video through the API is limited to 30 an hour.
 - **Signed download links**: a ready video's `download` is
   `/api/v1/files/:video?exp=&sig=`, an HMAC-SHA256 (keyed with `TOKEN_ENCRYPTION_KEY`) of the video, its render and the
   expiry, valid for one hour, served as an attachment without a session.
+
+## The assistant
+
+A chat in which an agent makes videos with the app's own tools (`shared/agent.ts`, `server/agent.ts`,
+`src/app/Agent.tsx`, `/app/assistant`). A test: administrators only, in the menu and on the server, until
+`AGENT_OPEN` in `shared/agent.ts`.
+
+- **The loop** runs in the Worker. A turn asks the model, runs the tools it calls and gives their results back, up to
+  ten rounds, until it answers in words. The model is Claude Sonnet 5.5 (`AGENT_MODEL`, default
+  `anthropic/claude-sonnet-5.5`) through the Workers AI binding, in Anthropic's Messages shape, at effort
+  `AGENT_EFFORT` (`low`). A turn is answered as it happens: one JSON object per line (`TurnEvent`: words, a tool's
+  start and end, a card, an action, an error), the last one the chat as it stands. One turn at a time per chat
+  (`busy_until`); 40 turns an hour and 200 a day per person.
+- **Tools**: those of the API and MCP server under the same names (`callTool` in `server/api.ts`: video types,
+  videos, series, long videos, clips, the account), and the assistant's own: `list_voices`, `search_library`,
+  `list_my_files`, `show_media`, `write_draft`, `get_draft`, `edit_draft`, `make_video`, `load_skill`. A draft is the
+  writer's (`draftVideo`, with Create's limits), kept in `agent_drafts`; it opens in the editor
+  (`/app/create?template=…&agentDraft=…`) and is made once, however often that is asked (`video_id`).
+- **What it shows**: a tool's result can carry cards (`Card`): media to look at or play (a picture, a clip, music, a
+  sound, a voice: only what the owner is offered, checked on the server), a draft with its scenes and cost, a video
+  that updates itself while it is made.
+- **Spending** (`SPENDS`: `make_video`, `make_clip`, `find_clips` with credits): the call is priced before it runs and
+  is not run. The turn stops, the chat shows the action with its cost, and `POST …/actions` with `confirm` runs it
+  as the app's own screens would (the same checks and limits) and lets the model go on; `decline`, or saying
+  something else instead, answers the call as not done. A call that can't be priced is never run.
+- **Skills** (`agent_skills`): a name, a line saying when it fits, and instructions. The site's (no owner,
+  administrators write them) and each person's own, up to 20. The model's instructions list the names and the lines;
+  a skill's text reaches it only through `load_skill`.
+- **What is stored** (`agent_messages`): the messages in order as the model's API has them (words, tool calls, tool
+  results) with what the chat shows. The model's thinking is kept only while a turn runs and never stored, so a
+  stored chat never carries a thinking block made under other instructions (a deploy, a changed skill); a request
+  the provider refuses is asked once more without the turn's thinking. Calls left open by a lost connection are
+  answered as interrupted when the owner next writes. The model reads the latest 80 messages, from a whole turn on.
 
 ## Safety and privacy
 

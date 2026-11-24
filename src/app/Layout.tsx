@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   House, PenSquare, Repeat, Clapperboard, CalendarDays, Share2, CircleDollarSign, Settings, Shield, PanelLeftClose, PanelLeftOpen, Clock, Menu, LogOut, Coins, Scissors,
-  Download, Share, SquarePlus, HandCoins,
-} from "lucide-react";
+  Download, Share, SquarePlus, HandCoins, Sparkles } from "lucide-react";
+import { AGENT_OPEN } from "../../shared/agent";
 import { post, timeLeft, useAuth, number } from "../lib";
 import { planById } from "../../shared/plans";
 import { Logo, LogoMark, Modal, useToast } from "../ui";
@@ -54,6 +54,7 @@ export function AppLayout() {
           </button>
         </div>
         <Link to="/app/create" className="btn primary block new-video" title={collapsed ? "Create video" : undefined}><PenSquare size={18} aria-hidden="true" /><span className="text">Create video</span></Link>
+        {(AGENT_OPEN || user.admin) && item("/app/assistant", Sparkles, "Assistant")}
         {item("/app", House, "Home", { end: true })}
         {item("/app/series", Repeat, "Series")}
         {item("/app/clips", Scissors, "Clips")}
