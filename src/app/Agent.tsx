@@ -17,7 +17,11 @@ import "./agent.css";
 type ChatInfo = { id: string; title: string; updatedAt: number };
 type ChatView = { id: string; title: string; items: ChatItem[]; waiting: boolean; busy: boolean };
 /** What a turn has sent so far, shown until its last word replaces it with the chat as it stands. */
-type Live = { texts: string[]; steps: { tool: string; state: "start" | "done" | "failed" }[]; cards: Card[]; actions: PendingAction[] };
+type Live = {
+  texts: string[]; steps: { tool: string; state: "start" | "done" | "failed" }[]; cards: Card[]; actions: PendingAction[];
+  /** The message the model is writing right now, as far as it has come. */
+  writing: string;
+};
 
 /** What each tool is doing, in words. */
 const STEPS: Record<string, string> = {
@@ -55,7 +59,7 @@ async function stream(path: string, body: unknown, on: (e: TurnEvent) => void) {
 }
 
 /** The model's words: paragraphs, short lists and **bold**; never translated (they are already the owner's language). */
-function Words({ text }: { text: string }) {
+function Words({ text, writing = false }: { text: string; writing?: boolean }) {
   const bold = (s: string): ReactNode[] => s.split(/(\*\*[^*]+\*\*)/g).map((part, i) => (/^\*\*[^*]+\*\*$/.test(part) ? <strong key={i} translate="no">{part.slice(2, -2)}</strong> : part));
   const blocks: ReactNode[] = [];
   let list: string[] = [];
@@ -67,7 +71,7 @@ function Words({ text }: { text: string }) {
     if (line.trim()) blocks.push(<p key={blocks.length} translate="no">{bold(line.replace(/^#+\s*/, ""))}</p>);
   }
   flush();
-  return <div className="agent-words" translate="no">{blocks}</div>;
+  return <div className={`agent-words${writing ? " writing" : ""}`} translate="no">{blocks}</div>;
 }
 
 function Media({ items }: { items: MediaItem[] }) {
@@ -177,6 +181,16 @@ function Steps({ steps }: { steps: (Step | { tool: string; state: string })[] })
   );
 }
 
+/** The sign that the assistant is at work: three moving dots, and what it is doing. */
+function Working({ label, hint }: { label: string; hint?: string }) {
+  return (
+    <div className="agent-working" role="status">
+      <span className="agent-dots" aria-hidden="true"><i /><i /><i /></span>
+      <span>{label}{hint && <span className="muted"> · {hint}</span>}</span>
+    </div>
+  );
+}
+
 function Cards({ cards, send, busy, last = false }: { cards: Card[]; send: (text: string) => void; busy: boolean; last?: boolean }) {
   return (
     <>
@@ -231,7 +245,7 @@ export function Agent() {
 
   /** A turn: its events are shown as they come, then the chat as it stands. False when it was not taken. */
   const turn = useCallback(async (chatId: string, path: string, body: unknown, shown: ChatItem[]): Promise<boolean> => {
-    setLive({ texts: [], steps: [], cards: [], actions: [] });
+    setLive({ texts: [], steps: [], cards: [], actions: [], writing: "" });
     setChat((c) => ({ id: chatId, title: c?.id === chatId ? c.title : "", items: shown, waiting: false, busy: true }));
     try {
       await stream(`/agent/chats/${chatId}/${path}`, body, (e) => {
@@ -239,7 +253,10 @@ export function Agent() {
         else if (e.event === "error") toast(e.message, "bad");
         else setLive((l) => {
           if (!l) return l;
-          if (e.event === "text") return { ...l, texts: [...l.texts, e.text] };
+          // Words as they are written; the whole message then takes their place.
+          if (e.event === "delta") return { ...l, writing: l.writing + e.text };
+          if (e.event === "undo") return { ...l, writing: "" };
+          if (e.event === "text") return { ...l, texts: [...l.texts, e.text], writing: "" };
           if (e.event === "card") return { ...l, cards: [...l.cards, e.card] };
           if (e.event === "action") return { ...l, actions: [...l.actions, e.action] };
           // A step that ends replaces its start.
@@ -338,16 +355,23 @@ export function Agent() {
               {item.actions.filter((a) => a.status === "pending").map((a) => <Action key={a.id} action={a} disabled={busy} onDecide={(d) => decide(a, d)} />)}
             </div>
           )))}
-        {live && (
-          <div className="agent-msg assistant">
-            {live.texts.map((x, i) => <Words key={i} text={x} />)}
-            <Steps steps={live.steps} />
-            <Cards cards={live.cards} send={send} busy />
-            {live.actions.map((a) => <Action key={a.id} action={a} disabled onDecide={() => {}} />)}
-            {!live.actions.length && !live.steps.some((s) => s.state === "start") && <div className="agent-thinking"><span className="spinner" aria-hidden="true" /> Thinking</div>}
-          </div>
-        )}
-        {!live && chat?.busy && <div className="agent-msg assistant"><div className="agent-thinking"><span className="spinner" aria-hidden="true" /> Still working on your last message</div></div>}
+        {live && (() => {
+          // The step that is running is named by the sign below; the list holds what is done.
+          const running = live.steps.filter((x) => x.state === "start").at(-1);
+          return (
+            <div className="agent-msg assistant">
+              {live.texts.map((x, i) => <Words key={i} text={x} />)}
+              <Steps steps={live.steps.filter((x) => x.state !== "start")} />
+              <Cards cards={live.cards} send={send} busy />
+              {live.writing && <Words text={live.writing} writing />}
+              {live.actions.map((a) => <Action key={a.id} action={a} disabled onDecide={() => {}} />)}
+              {!live.actions.length && (running
+                ? <Working label={stepLabel(running.tool)} hint={SLOW[running.tool]} />
+                : <Working label={live.writing ? "Writing" : "Thinking"} />)}
+            </div>
+          );
+        })()}
+        {!live && chat?.busy && <div className="agent-msg assistant"><Working label="Still working on your last message" /></div>}
       </div>
 
       <form className="agent-composer" onSubmit={(e) => { e.preventDefault(); void send(text); }}>

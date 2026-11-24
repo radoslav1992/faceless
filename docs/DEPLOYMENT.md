@@ -120,6 +120,7 @@ the Worker reads (`Env` in `server/types.ts`); `.dev.vars.example` lists them fo
 | `STRIPE_AUTOMATIC_TAX` | text | `true` when Stripe Tax is set up: tax, tax ID collection and a required billing address at checkout |
 | `AGENT_MODEL` | text | Optional model of the assistant (default `anthropic/claude-sonnet-5.5`), asked in Anthropic's Messages shape through Workers AI |
 | `AGENT_EFFORT` | text | Optional: how hard the assistant's model thinks: `low` (default), `medium` or `high` |
+| `AGENT_STREAM` | text | Optional: `off` sends the assistant's replies whole instead of as they are written |
 | `WRITER_MODEL` | text | Optional model that writes scripts and plans their pictures (default `google/gemini-4-carbon`). A `google/` model is asked in Google's request shape, any other in the Responses API's |
 | `TEXT_MODEL` | text | Optional model for sound and clip choices, and for a script the writer's model could not write (default `openai/gpt-6-luna`) |
 | `DESCRIBE_MODEL` | text | Optional multimodal model (images and audio) that fills in library items' details in Admin → Library (default `google/gemini-4-argon`) |

@@ -45,6 +45,8 @@ export interface Env {
   /** The assistant's model (server/agent.ts; default Claude Sonnet 5.5) and how hard it thinks: low (default), medium or high. */
   AGENT_MODEL?: string;
   AGENT_EFFORT?: string;
+  /** `off`: the assistant's replies are sent whole, not as they are written. */
+  AGENT_STREAM?: string;
   /** The model that writes scripts and plans their pictures (default: server/ai.ts DEFAULT_WRITER_MODEL). */
   WRITER_MODEL?: string;
   /** The text model for sound and clip choices, and for scripts when the writer's model fails. */

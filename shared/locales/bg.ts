@@ -2359,6 +2359,7 @@ export const bg: Words = {
     "Write the draft (free)": "Напишете черновата (безплатно)",
     "Write to us": "Пишете ни",
     "writes, narrates, illustrates and subtitles short videos in your niche, ready on your schedule.": "пише, озвучава, илюстрира и поставя субтитри на кратки видеа във вашата ниша, готови по вашия график.",
+    "Writing": "Пише",
     "Writing the draft": "Пише черновата",
     "Writing your draft…": "Пишем черновата ви…",
     "Written for you": "Написано за вас",

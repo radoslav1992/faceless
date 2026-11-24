@@ -486,25 +486,117 @@ function systemPrompt(skills: SkillRow[]) {
 }
 type ModelMessage = { role: "user" | "assistant"; content: unknown[] };
 type ModelAnswer = { content: any[]; stop: string };
-async function askModel(env: Env, system: string, tools: ToolDef[], messages: ModelMessage[]): Promise<ModelAnswer | null> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const result = await Promise.race([
-      env.AI.run(agentModel(env), { max_tokens: 8000, system, messages, tools, output_config: { effort: agentEffort(env) } }),
-      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("AI_TIMEOUT")), MODEL_MS); }),
-    ]);
-    const r = z.object({ content: z.array(z.object({ type: z.string() }).loose()), stop_reason: z.string().nullish() }).safeParse(result);
-    if (!r.success) {
-      console.error("Agent model gave no answer", { model: agentModel(env), status: "unreadable" });
-      return null;
+/** How a turn hears the model write: its words as they come, and a word that what came so far is taken back. */
+type Listener = { text: (delta: string) => void; undo: () => void };
+/**
+ * Until when replies are asked for whole. Set when a streamed answer could not be read and the same request, asked
+ * whole, could: every round would otherwise be paid for twice.
+ */
+let streamOffUntil = 0;
+/** For tests: streaming as a new Worker has it. */
+export const resetAgentStream = () => { streamOffUntil = 0; };
+const streaming = (env: Env) => env.AGENT_STREAM?.trim().toLowerCase() !== "off" && Date.now() >= streamOffUntil;
+
+/**
+ * The model's answer read from its stream (Anthropic's server-sent events: blocks that start, grow by deltas and
+ * stop), its words passed on as they come. Null when the stream held no answer.
+ */
+async function readStream(stream: ReadableStream<Uint8Array>, onText: (delta: string) => void): Promise<ModelAnswer | null> {
+  const blocks: any[] = [];
+  const inputs: string[] = [];
+  let stop = "", broken = false, rest = "";
+  const event = (line: string) => {
+    if (!line.startsWith("data:")) return;
+    let e: any;
+    try { e = JSON.parse(line.slice(5)); } catch { return; }
+    if (!e || typeof e !== "object") return;
+    const at = Number.isInteger(e.index) ? (e.index as number) : -1;
+    if (e.type === "content_block_start" && at >= 0 && e.content_block && typeof e.content_block.type === "string") {
+      blocks[at] = { ...e.content_block };
+      inputs[at] = "";
+    } else if (e.type === "content_block_delta" && blocks[at] && e.delta) {
+      const d = e.delta;
+      if (d.type === "text_delta" && typeof d.text === "string") { blocks[at].text = (blocks[at].text || "") + d.text; if (d.text) onText(d.text); }
+      else if (d.type === "input_json_delta" && typeof d.partial_json === "string") inputs[at] += d.partial_json;
+      else if (d.type === "thinking_delta" && typeof d.thinking === "string") blocks[at].thinking = (blocks[at].thinking || "") + d.thinking;
+      else if (d.type === "signature_delta" && typeof d.signature === "string") blocks[at].signature = (blocks[at].signature || "") + d.signature;
+    } else if (e.type === "content_block_stop" && blocks[at]?.type === "tool_use") {
+      // A call's arguments arrive as pieces of JSON: half of them is no call.
+      try { blocks[at].input = inputs[at].trim() ? JSON.parse(inputs[at]) : {}; } catch { broken = true; }
+    } else if (e.type === "message_delta" && typeof e.delta?.stop_reason === "string") {
+      stop = e.delta.stop_reason;
+    } else if (e.type === "error") {
+      broken = true;
     }
-    return { content: r.data.content, stop: r.data.stop_reason || "end_turn" };
-  } catch (e) {
-    // Never log the conversation or the provider's message.
-    console.error("Agent model failed", { model: agentModel(env), name: e instanceof Error ? e.name : "UnknownError", timeout: e instanceof Error && e.message === "AI_TIMEOUT" });
-    return null;
+  };
+  const reader = stream.getReader(), decoder = new TextDecoder();
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      rest += decoder.decode(value, { stream: true });
+      const lines = rest.split("\n");
+      rest = lines.pop() ?? "";
+      lines.forEach((l) => event(l.replace(/\r$/, "")));
+    }
+    event(rest);
   } finally {
-    clearTimeout(timer);
+    reader.releaseLock();
+  }
+  const content = blocks.filter(Boolean);
+  if (!content.length) return null;
+  // Cut off in the middle of a call: read as an answer that ran out of room (none of its calls are run).
+  if (broken) return { content, stop: "max_tokens" };
+  return { content, stop: stop || (content.some((b) => b.type === "tool_use") ? "tool_use" : "end_turn") };
+}
+/**
+ * The model's answer. With a listener it is asked for as a stream and its words are passed on as they are written;
+ * a stream that can't be read is taken back and the answer asked for whole, as it is without a listener.
+ */
+async function askModel(env: Env, system: string, tools: ToolDef[], messages: ModelMessage[], listener?: Listener): Promise<ModelAnswer | null> {
+  const model = agentModel(env);
+  const request = { max_tokens: 8000, system, messages, tools, output_config: { effort: agentEffort(env) } };
+  const timed = async <T>(work: () => Promise<T>): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([work(), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("AI_TIMEOUT")), MODEL_MS); })]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const whole = (result: unknown): ModelAnswer | null => {
+    const r = z.object({ content: z.array(z.object({ type: z.string() }).loose()), stop_reason: z.string().nullish() }).safeParse(result);
+    return r.success ? { content: r.data.content, stop: r.data.stop_reason || "end_turn" } : null;
+  };
+  // Never log the conversation or the provider's message.
+  const failed = (e: unknown, streamed: boolean) => console.error("Agent model failed", { model, streamed, name: e instanceof Error ? e.name : "UnknownError", timeout: e instanceof Error && e.message === "AI_TIMEOUT" });
+  let unread = false;
+  if (listener && streaming(env)) {
+    try {
+      const answer = await timed(async () => {
+        const result: any = await env.AI.run(model, { ...request, stream: true });
+        // (A binding that answers whole all the same is read as it is.)
+        return typeof result?.getReader === "function" ? readStream(result as ReadableStream<Uint8Array>, listener.text) : whole(result);
+      });
+      if (answer) return answer;
+      unread = true;
+    } catch (e) {
+      failed(e, true);
+    }
+    listener.undo();
+  }
+  try {
+    const answer = whole(await timed(() => env.AI.run(model, request)));
+    if (!answer) console.error("Agent model gave no answer", { model, status: "unreadable" });
+    else if (unread) {
+      // The stream was the trouble: for the next ten minutes answers are asked for whole, once each.
+      streamOffUntil = Date.now() + 600_000;
+      console.error("Agent stream unreadable", { model });
+    }
+    return answer;
+  } catch (e) {
+    failed(e, false);
+    return null;
   }
 }
 /** What is kept of the model's answer: its words and its tool calls. */
@@ -539,9 +631,11 @@ async function work(run: Run, rows: Row[], emit: Emit) {
   // The model's own answers of this turn, whole (its thinking with them), for as long as the turn runs.
   const live = new Map<string, unknown[]>();
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    let answer = await askModel(env, system, tools, history(rows, live));
+    // Its words go to the chat as it writes them (and are taken back if the stream fails).
+    const listener: Listener = { text: (delta) => emit({ event: "delta", text: delta }), undo: () => emit({ event: "undo" }) };
+    let answer = await askModel(env, system, tools, history(rows, live), listener);
     // Asked once more without this turn's thinking: a request the provider refused over it still gets its answer.
-    if (!answer && live.size) { live.clear(); answer = await askModel(env, system, tools, history(rows, live)); }
+    if (!answer && live.size) { live.clear(); answer = await askModel(env, system, tools, history(rows, live), listener); }
     if (!answer) return emit({ event: "error", message: "The assistant couldn't answer right now. Please try again in a minute." });
     let blocks = kept(answer.content, answer.stop);
     if (answer.stop === "refusal" || !blocks.length) blocks = [{ type: "text", text: answer.stop === "refusal" ? t("I can't help with that.") : "…" }];

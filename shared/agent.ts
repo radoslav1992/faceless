@@ -58,6 +58,9 @@ export type ChatItem =
   | { kind: "assistant"; id: string; text: string; steps: Step[]; cards: Card[]; actions: PendingAction[] };
 /** What a turn sends while it works (server-sent events: one JSON object per `data:` line). */
 export type TurnEvent =
+  /** The model's words as it writes them; `text` then gives the whole message, and `undo` takes back what was streamed. */
+  | { event: "delta"; text: string }
+  | { event: "undo" }
   | { event: "text"; text: string }
   | { event: "step"; tool: string; state: "start" | "done" | "failed" }
   | { event: "card"; card: Card }
