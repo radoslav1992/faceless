@@ -845,12 +845,20 @@ A chat in which an agent makes videos with the app's own tools (`shared/agent.ts
 - **The loop** runs in the Worker. A turn asks the model, runs the tools it calls and gives their results back, up to
   ten rounds, until it answers in words. The model is Claude Sonnet 5.5 (`AGENT_MODEL`, default
   `anthropic/claude-sonnet-5.5`) through the Workers AI binding, in Anthropic's Messages shape, at effort
-  `AGENT_EFFORT` (`low`). A turn is answered as it happens: one JSON object per line (`TurnEvent`: words, a tool's
-  start and end, a card, an action, an error), the last one the chat as it stands. One turn at a time per chat
+  `AGENT_EFFORT` (`low`). The model is asked for a stream (`stream: true`: Anthropic's
+  server-sent events, read by `readStream`) so its words reach the chat as it writes them; a stream that can't be
+  read is taken back and the answer asked for whole, and then answers are asked for whole for ten minutes so no round
+  is paid for twice (`AGENT_STREAM=off` asks for them whole always). A turn is answered as it happens, as server-sent
+  events (`TurnEvent`: the words as they are written and then whole, a tool's start and end, a card, an action, an
+  error), the last one the chat as it stands, with a comment line every ten
+  seconds so a long step is never a silent connection. The screen shows them as they come; a chat opened while a turn
+  runs elsewhere (`busy`) is read again until it has ended. One turn at a time per chat
   (`busy_until`); 40 turns an hour and 200 a day per person.
 - **Tools**: those of the API and MCP server under the same names (`callTool` in `server/api.ts`: video types,
   videos, series, long videos, clips, the account), and the assistant's own: `list_voices`, `search_library`,
-  `list_my_files`, `show_media`, `write_draft`, `get_draft`, `edit_draft`, `make_video`, `load_skill`. A draft is the
+  `list_my_files`, `show_media`, `suggest_replies` (answers to tap under a question; it ends the turn), `write_draft`,
+  `get_draft`, `edit_draft`, `make_video`, `load_skill`. Its instructions have it ask for a video's length before the
+  first draft (a second costs credits), once, with answers to tap. A draft is the
   writer's (`draftVideo`, with Create's limits), kept in `agent_drafts`; it opens in the editor
   (`/app/create?template=…&agentDraft=…`) and is made once, however often that is asked (`video_id`).
 - **What it shows**: a tool's result can carry cards (`Card`): media to look at or play (a picture, a clip, music, a

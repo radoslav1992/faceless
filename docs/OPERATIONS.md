@@ -99,7 +99,9 @@ under `/api/admin` answers 404 to anyone else.
   fits: yours for everyone ("For everyone on the site"), and each person's own. To open it to everyone: set
   `AGENT_OPEN` to `true` in `shared/agent.ts`. Every message is a paid call to Claude Sonnet 5.5 through Workers AI
   (`AGENT_MODEL` switches the model, `AGENT_EFFORT` is `low`, `medium` or `high`); each person has 40 messages an hour
-  and 200 a day. The logs say `Agent model failed` (an error, or with `timeout: true` no answer in two minutes),
+  and 200 a day. Its replies are streamed as they are written; `AGENT_STREAM` set to `off`
+  sends them whole, and `Agent stream unreadable` in the logs means the stream could not be read and replies are sent
+  whole for a while. The logs say `Agent model failed` (an error, or with `timeout: true` no answer in two minutes),
   `Agent model gave no answer`, `Agent tool failed` with the tool's name, and `Agent turn failed`, never with the
   conversation. "The assistant isn't set up on this site yet" means `migrations/0017_agent.sql` is not applied.
 - **Photos of people** (a test): in the **Holiday greeting** style, administrators can add up to four photos of the

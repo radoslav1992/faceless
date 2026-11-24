@@ -35,7 +35,9 @@ export type DraftCard = {
 export type Card =
   | { type: "media"; items: MediaItem[] }
   | DraftCard
-  | { type: "video"; id: string; title: string };
+  | { type: "video"; id: string; title: string }
+  /** Answers the owner can tap instead of typing (a length, a voice, a style). */
+  | { type: "replies"; options: string[] };
 
 /** Something that spends credits, waiting for the owner's word. */
 export type PendingAction = {
@@ -54,8 +56,11 @@ export type Step = { tool: string; ok: boolean };
 export type ChatItem =
   | { kind: "user"; id: string; text: string }
   | { kind: "assistant"; id: string; text: string; steps: Step[]; cards: Card[]; actions: PendingAction[] };
-/** What a turn sends while it works (one JSON object per line). */
+/** What a turn sends while it works (server-sent events: one JSON object per `data:` line). */
 export type TurnEvent =
+  /** The model's words as it writes them; `text` then gives the whole message, and `undo` takes back what was streamed. */
+  | { event: "delta"; text: string }
+  | { event: "undo" }
   | { event: "text"; text: string }
   | { event: "step"; tool: string; state: "start" | "done" | "failed" }
   | { event: "card"; card: Card }

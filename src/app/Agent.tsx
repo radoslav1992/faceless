@@ -17,7 +17,11 @@ import "./agent.css";
 type ChatInfo = { id: string; title: string; updatedAt: number };
 type ChatView = { id: string; title: string; items: ChatItem[]; waiting: boolean; busy: boolean };
 /** What a turn has sent so far, shown until its last word replaces it with the chat as it stands. */
-type Live = { texts: string[]; steps: { tool: string; state: "start" | "done" | "failed" }[]; cards: Card[]; actions: PendingAction[] };
+type Live = {
+  texts: string[]; steps: { tool: string; state: "start" | "done" | "failed" }[]; cards: Card[]; actions: PendingAction[];
+  /** The message the model is writing right now, as far as it has come. */
+  writing: string;
+};
 
 /** What each tool is doing, in words. */
 const STEPS: Record<string, string> = {
@@ -28,10 +32,12 @@ const STEPS: Record<string, string> = {
   import_video: "Importing the video", find_clips: "Finding clips", get_long_video: "Reading the long video", make_clip: "Cutting the clip",
 };
 const stepLabel = (tool: string) => STEPS[tool] ?? "Working";
+/** The steps that take a while, said while they run. */
+const SLOW: Record<string, string> = { write_draft: "this takes a minute or two", find_clips: "this can take a few minutes", import_video: "this can take a few minutes" };
 /** What a confirmation is for, in words. */
 const ACTIONS: Record<string, string> = { make_video: "Make the video", make_clip: "Cut the clip", find_clips: "Transcribe the video to find clips in it" };
 
-/** A turn's events as they arrive (one JSON object per line). */
+/** A turn's events as they arrive (server-sent events: one JSON object per `data:` line). */
 async function stream(path: string, body: unknown, on: (e: TurnEvent) => void) {
   const r = await fetch("/api" + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!r.ok || !r.body) {
@@ -40,7 +46,7 @@ async function stream(path: string, body: unknown, on: (e: TurnEvent) => void) {
   }
   const reader = r.body.getReader(), decoder = new TextDecoder();
   let rest = "";
-  const read = (line: string) => { if (line.trim()) { try { on(JSON.parse(line)); } catch { /* half a line */ } } };
+  const read = (line: string) => { if (line.startsWith("data:")) { try { on(JSON.parse(line.slice(5))); } catch { /* half a line */ } } };
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -53,7 +59,7 @@ async function stream(path: string, body: unknown, on: (e: TurnEvent) => void) {
 }
 
 /** The model's words: paragraphs, short lists and **bold**; never translated (they are already the owner's language). */
-function Words({ text }: { text: string }) {
+function Words({ text, writing = false }: { text: string; writing?: boolean }) {
   const bold = (s: string): ReactNode[] => s.split(/(\*\*[^*]+\*\*)/g).map((part, i) => (/^\*\*[^*]+\*\*$/.test(part) ? <strong key={i} translate="no">{part.slice(2, -2)}</strong> : part));
   const blocks: ReactNode[] = [];
   let list: string[] = [];
@@ -65,7 +71,7 @@ function Words({ text }: { text: string }) {
     if (line.trim()) blocks.push(<p key={blocks.length} translate="no">{bold(line.replace(/^#+\s*/, ""))}</p>);
   }
   flush();
-  return <div className="agent-words" translate="no">{blocks}</div>;
+  return <div className={`agent-words${writing ? " writing" : ""}`} translate="no">{blocks}</div>;
 }
 
 function Media({ items }: { items: MediaItem[] }) {
@@ -169,17 +175,32 @@ function Steps({ steps }: { steps: (Step | { tool: string; state: string })[] })
     <ul className="agent-steps">
       {steps.map((s, i) => {
         const state = "state" in s ? s.state : s.ok ? "done" : "failed";
-        return <li key={i} className={state}>{state === "start" ? <span className="spinner" aria-hidden="true" /> : state === "failed" ? <X size={13} aria-hidden="true" /> : <Check size={13} aria-hidden="true" />} {stepLabel(s.tool)}{state === "failed" && <span className="muted"> · didn't work</span>}</li>;
+        return <li key={i} className={state}>{state === "start" ? <span className="spinner" aria-hidden="true" /> : state === "failed" ? <X size={13} aria-hidden="true" /> : <Check size={13} aria-hidden="true" />} {stepLabel(s.tool)}{state === "failed" && <span className="muted"> · didn't work</span>}{state === "start" && SLOW[s.tool] && <span className="muted"> · {SLOW[s.tool]}</span>}</li>;
       })}
     </ul>
   );
 }
 
-function Cards({ cards, send, busy }: { cards: Card[]; send: (text: string) => void; busy: boolean }) {
+/** The sign that the assistant is at work: three moving dots, and what it is doing. */
+function Working({ label, hint }: { label: string; hint?: string }) {
+  return (
+    <div className="agent-working" role="status">
+      <span className="agent-dots" aria-hidden="true"><i /><i /><i /></span>
+      <span>{label}{hint && <span className="muted"> · {hint}</span>}</span>
+    </div>
+  );
+}
+
+function Cards({ cards, send, busy, last = false }: { cards: Card[]; send: (text: string) => void; busy: boolean; last?: boolean }) {
   return (
     <>
       {cards.map((c, i) => (c.type === "media" ? <Media key={i} items={c.items} />
         : c.type === "draft" ? <Draft key={i} card={c} disabled={busy} onMake={() => send(t("Make this video"))} />
+        : c.type === "replies" ? (last && (
+          <div key={i} className="agent-replies">
+            {c.options.map((o) => <button key={o} type="button" className="chip button" translate="no" disabled={busy} onClick={() => send(o)}>{o}</button>)}
+          </div>
+        ))
         : <VideoCard key={i} id={c.id} title={c.title} />))}
     </>
   );
@@ -203,9 +224,13 @@ export function Agent() {
   const [text, setText] = useState("");
   const [skills, setSkills] = useState(false);
   const end = useRef<HTMLDivElement>(null);
-  const busy = !!live;
+  /** The chat this screen has just started itself: its address changes, and the turn that is running stays in view. */
+  const started = useRef<string | null>(null);
+  // Working: a turn of this screen's, or one the server says is still running (the page was opened in the middle of it).
+  const busy = !!live || !!chat?.busy;
 
   useEffect(() => {
+    if (id && started.current === id) { started.current = null; return; }
     setLive(null);
     if (!id) { setChat(null); setLoading(false); return; }
     let stale = false;
@@ -215,10 +240,12 @@ export function Agent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only when another chat is opened
   }, [id]);
   useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [chat, live]);
+  // A turn running elsewhere (another tab, or before a reload): the chat is read again until it has ended.
+  usePoll(() => { if (chat) void api<ChatView>(`/agent/chats/${chat.id}`).then((c) => setChat((now) => (now?.id === c.id ? c : now))).catch(() => {}); }, 4000, !live && !!chat?.busy);
 
-  /** A turn: its events are shown as they come, then the chat as it stands. */
-  const turn = useCallback(async (chatId: string, path: string, body: unknown, shown: ChatItem[]) => {
-    setLive({ texts: [], steps: [], cards: [], actions: [] });
+  /** A turn: its events are shown as they come, then the chat as it stands. False when it was not taken. */
+  const turn = useCallback(async (chatId: string, path: string, body: unknown, shown: ChatItem[]): Promise<boolean> => {
+    setLive({ texts: [], steps: [], cards: [], actions: [], writing: "" });
     setChat((c) => ({ id: chatId, title: c?.id === chatId ? c.title : "", items: shown, waiting: false, busy: true }));
     try {
       await stream(`/agent/chats/${chatId}/${path}`, body, (e) => {
@@ -226,7 +253,10 @@ export function Agent() {
         else if (e.event === "error") toast(e.message, "bad");
         else setLive((l) => {
           if (!l) return l;
-          if (e.event === "text") return { ...l, texts: [...l.texts, e.text] };
+          // Words as they are written; the whole message then takes their place.
+          if (e.event === "delta") return { ...l, writing: l.writing + e.text };
+          if (e.event === "undo") return { ...l, writing: "" };
+          if (e.event === "text") return { ...l, texts: [...l.texts, e.text], writing: "" };
           if (e.event === "card") return { ...l, cards: [...l.cards, e.card] };
           if (e.event === "action") return { ...l, actions: [...l.actions, e.action] };
           // A step that ends replaces its start.
@@ -236,10 +266,12 @@ export function Agent() {
           return { ...l, steps: l.steps.map((s, i) => (i === at ? { tool: e.tool, state: e.state } : s)) };
         });
       });
+      return true;
     } catch (e) {
       toast(errorText(e), "bad");
       // What was stored is the truth: read the chat again.
       await api<ChatView>(`/agent/chats/${chatId}`).then(setChat).catch(() => {});
+      return false;
     } finally {
       setLive(null);
       chats.reload();
@@ -254,9 +286,12 @@ export function Agent() {
       let chatId = chat?.id ?? id;
       if (!chatId) {
         chatId = (await post<{ id: string }>("/agent/chats")).id;
+        started.current = chatId;
         navigate(`/app/assistant/${chatId}`, { replace: true });
       }
-      await turn(chatId, "messages", { text: said }, [...(chat?.id === chatId ? chat.items : []), { kind: "user", id: `new-${Date.now()}`, text: said }]);
+      const taken = await turn(chatId, "messages", { text: said }, [...(chat?.id === chatId ? chat.items : []), { kind: "user", id: `new-${Date.now()}`, text: said }]);
+      // Not taken (the assistant was still working): the words go back in the box.
+      if (!taken) setText((now) => now || said);
     } catch (e) {
       toast(errorText(e), "bad");
       setText(said);
@@ -316,24 +351,32 @@ export function Agent() {
               <Steps steps={item.steps} />
               {/* What was confirmed, then what it made; what still waits comes last, by the box to write in. */}
               {item.actions.filter((a) => a.status !== "pending").map((a) => <Action key={a.id} action={a} disabled onDecide={() => {}} />)}
-              <Cards cards={item.cards} send={send} busy={busy} />
+              <Cards cards={item.cards} send={send} busy={busy} last={item === items.at(-1)} />
               {item.actions.filter((a) => a.status === "pending").map((a) => <Action key={a.id} action={a} disabled={busy} onDecide={(d) => decide(a, d)} />)}
             </div>
           )))}
-        {live && (
-          <div className="agent-msg assistant">
-            {live.texts.map((x, i) => <Words key={i} text={x} />)}
-            <Steps steps={live.steps} />
-            <Cards cards={live.cards} send={send} busy />
-            {live.actions.map((a) => <Action key={a.id} action={a} disabled onDecide={() => {}} />)}
-            {!live.actions.length && !live.steps.some((s) => s.state === "start") && <div className="agent-thinking"><span className="spinner" aria-hidden="true" /> Thinking</div>}
-          </div>
-        )}
+        {live && (() => {
+          // The step that is running is named by the sign below; the list holds what is done.
+          const running = live.steps.filter((x) => x.state === "start").at(-1);
+          return (
+            <div className="agent-msg assistant">
+              {live.texts.map((x, i) => <Words key={i} text={x} />)}
+              <Steps steps={live.steps.filter((x) => x.state !== "start")} />
+              <Cards cards={live.cards} send={send} busy />
+              {live.writing && <Words text={live.writing} writing />}
+              {live.actions.map((a) => <Action key={a.id} action={a} disabled onDecide={() => {}} />)}
+              {!live.actions.length && (running
+                ? <Working label={stepLabel(running.tool)} hint={SLOW[running.tool]} />
+                : <Working label={live.writing ? "Writing" : "Thinking"} />)}
+            </div>
+          );
+        })()}
+        {!live && chat?.busy && <div className="agent-msg assistant"><Working label="Still working on your last message" /></div>}
       </div>
 
       <form className="agent-composer" onSubmit={(e) => { e.preventDefault(); void send(text); }}>
         <textarea
-          className="input" rows={2} maxLength={AGENT_MESSAGE_MAX} value={text} placeholder={t(chat?.waiting ? "Confirm above, or say what to change" : "Describe the video you want, or ask for media")}
+          className="input" rows={2} maxLength={AGENT_MESSAGE_MAX} value={text} placeholder={t(busy ? "The assistant is working. You can write your next message meanwhile" : chat?.waiting ? "Confirm above, or say what to change" : "Describe the video you want, or ask for media")}
           onChange={(e) => setText(e.target.value)} aria-label="Message"
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(text); } }}
         />

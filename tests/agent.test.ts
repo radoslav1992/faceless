@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import worker from "../server/index";
-import { agentTools, DEFAULT_AGENT_MODEL } from "../server/agent";
+import { agentTools, DEFAULT_AGENT_MODEL, resetAgentStream } from "../server/agent";
 import { AGENT_OPEN } from "../shared/agent";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 
@@ -18,25 +18,59 @@ const use = (n: number, name: string, input: unknown, text = "") => ({
   content: [thinking(n), ...(text ? [{ type: "text", text }] : []), { type: "tool_use", id: `call-${n}`, name, input }], stop_reason: "tool_use",
 });
 
-async function setup() {
-  const { env, sqlite } = testEnv({ MEDIA_ENABLED: "true", FAL_KEY: "fal", ELEVENLABS_API_KEY: "el" });
+/** An answer as Anthropic streams it: blocks that start, grow by deltas and stop, cut into pieces that end mid-line. */
+function streamed(answer: { content: any[]; stop_reason: string }) {
+  const events: object[] = [{ type: "message_start", message: { role: "assistant", content: [] } }];
+  answer.content.forEach((b, index) => {
+    const half = (s: string) => [s.slice(0, Math.ceil(s.length / 2)), s.slice(Math.ceil(s.length / 2))].filter(Boolean);
+    if (b.type === "text") {
+      events.push({ type: "content_block_start", index, content_block: { type: "text", text: "" } });
+      for (const text of half(b.text)) events.push({ type: "content_block_delta", index, delta: { type: "text_delta", text } });
+    } else if (b.type === "tool_use") {
+      events.push({ type: "content_block_start", index, content_block: { type: "tool_use", id: b.id, name: b.name, input: {} } });
+      for (const partial_json of half(JSON.stringify(b.input))) events.push({ type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json } });
+    } else {
+      events.push({ type: "content_block_start", index, content_block: { type: "thinking", thinking: "" } });
+      events.push({ type: "content_block_delta", index, delta: { type: "signature_delta", signature: b.signature } });
+    }
+    events.push({ type: "content_block_stop", index });
+  });
+  events.push({ type: "message_delta", delta: { stop_reason: answer.stop_reason } }, { type: "message_stop" });
+  const text = events.map((e: any) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join("");
+  const bytes = new TextEncoder().encode(text);
+  return new ReadableStream<Uint8Array>({
+    start(c) {
+      for (let at = 0; at < bytes.length; at += 97) c.enqueue(bytes.slice(at, at + 97));
+      c.close();
+    },
+  });
+}
+
+async function setup(overrides: Record<string, unknown> = {}) {
+  resetAgentStream();
+  const { env, sqlite } = testEnv({ MEDIA_ENABLED: "true", FAL_KEY: "fal", ELEVENLABS_API_KEY: "el", ...overrides });
   const user = signedIn(sqlite);
   subscribe(sqlite, user.id, "starter");
   await call(worker, env, "GET", "/api/auth/me", undefined, user.cookie);
   /** What the model answers, in order (a function reads the request it answers), and what it was asked. */
   const script: (object | null | ((request: any) => object))[] = [];
   const asked: any[] = [];
+  /** A model that is down is down for the same request asked whole, too. */
+  let down = "";
   env.AI.run = async (model: string, request: any) => {
     if (model !== DEFAULT_AGENT_MODEL) return { status: "completed", output_text: written };
+    if (!request.stream && down === JSON.stringify(request.messages)) throw new Error("Model down");
     asked.push(structuredClone(request));
     const next = script.shift();
     if (next === undefined) throw new Error("The model was asked more often than the test expects");
-    if (next === null) throw new Error("Model down");
-    return typeof next === "function" ? next(request) : next;
+    if (next === null) { down = JSON.stringify(request.messages); throw new Error("Model down"); }
+    const answer: any = typeof next === "function" ? next(request) : next;
+    // Asked for a stream, the model streams (an answer that is a stream already is given as it is).
+    return request.stream && Array.isArray(answer?.content) ? streamed(answer) : answer;
   };
   const admin = () => sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
-  /** A turn's events (one JSON object per line). */
-  const events = (r: { data: any }) => (typeof r.data === "string" ? r.data.trim().split("\n").map((l: string) => JSON.parse(l)) : [r.data]);
+  /** A turn's events (server-sent: one JSON object per `data:` line). */
+  const events = (r: { data: any }) => String(r.data).split("\n").filter((l) => l.startsWith("data:")).map((l) => JSON.parse(l.slice(5)));
   const send = async (chat: string, text: string, cookie = user.cookie) => events(await call(worker, env, "POST", `/api/agent/chats/${chat}/messages`, { text }, cookie));
   const decide = async (chat: string, id: string, decision: "confirm" | "decline") => events(await call(worker, env, "POST", `/api/agent/chats/${chat}/actions`, { id, decision }, user.cookie));
   const newChat = async () => (await call(worker, env, "POST", "/api/agent/chats", {}, user.cookie)).data.id as string;
@@ -227,6 +261,69 @@ describe("the assistant", () => {
     expect((await call(worker, env, "PUT", `/api/agent/skills/${mine.id}`, { name: "My tone", description: "The channel's voice.", body: "Warm and plain." }, user.cookie)).status).toBe(200);
     expect((await call(worker, env, "DELETE", `/api/agent/skills/${mine.id}`, undefined, user.cookie)).status).toBe(200);
     expect((await call(worker, env, "DELETE", `/api/agent/skills/${mine.id}`, undefined, user.cookie)).status).toBe(404);
+  });
+
+  it("asks before it drafts, with answers to tap, and waits for the owner", async () => {
+    const { env, user, script, asked, admin, send, newChat } = await setup();
+    admin();
+    const chat = await newChat();
+    script.push({ content: [{ type: "text", text: "How long should it be?" }, { type: "tool_use", id: "call-1", name: "suggest_replies", input: { options: ["15 seconds", "30 seconds", "You choose"] } }], stop_reason: "tool_use" });
+    const first = await send(chat, "A Christmas tale");
+    // The instructions say what to ask and what a second costs; the question ends the turn, the model is not asked again.
+    expect(asked).toHaveLength(1);
+    expect(asked[0].system).toContain("1 credit for every started 20 seconds");
+    expect(asked[0].system).toContain("ask before drafting");
+    expect(first.filter((e) => e.event === "text").map((e) => e.text)).toEqual(["How long should it be?"]);
+    expect(first.find((e) => e.event === "card").card).toEqual({ type: "replies", options: ["15 seconds", "30 seconds", "You choose"] });
+    expect(done(first).items.at(-1)).toMatchObject({ kind: "assistant", text: "How long should it be?", cards: [{ type: "replies" }] });
+    expect(done(first).waiting).toBe(false);
+    // The answer follows the buttons' result, and the model goes on from both.
+    script.push(say("Thirty seconds it is."));
+    await send(chat, "30 seconds");
+    expect(asked[1].messages.slice(-2).map((m: any) => [m.role, m.content.map((b: any) => b.type)])).toEqual([["user", ["tool_result"]], ["user", ["text"]]]);
+    // The answer is sent as a stream of events that nothing in between holds back.
+    const raw = await call(worker, env, "POST", `/api/agent/chats/${chat}/messages`, { text: "Thanks" }, user.cookie);
+    expect(raw.headers.get("Content-Type")).toBe("text/event-stream; charset=utf-8");
+    expect(raw.headers.get("Cache-Control")).toBe("no-store, no-transform");
+  });
+
+  it("sends the model's words as it writes them, and asks for them whole when the stream can't be read", async () => {
+    const { script, asked, admin, send, newChat } = await setup();
+    admin();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const chat = await newChat();
+      script.push(use(1, "get_account", {}, "Let me check your credits."), say("You have plenty left."));
+      const first = await send(chat, "How many credits do I have?");
+      // Asked as a stream; the words arrive in pieces, then whole; the call's arguments are put together from theirs.
+      expect(asked.map((r) => r.stream)).toEqual([true, true]);
+      expect(first.filter((e) => ["delta", "text", "step"].includes(e.event)).map((e) => (e.event === "step" ? `${e.tool}:${e.state}` : `${e.event}:${e.text}`))).toEqual([
+        "delta:Let me check ", "delta:your credits.", "text:Let me check your credits.", "get_account:start", "get_account:done",
+        "delta:You have pl", "delta:enty left.", "text:You have plenty left.",
+      ]);
+      // The answer put together from the stream goes back whole in the same turn, its thinking with it.
+      expect(asked[1].messages[1].content).toEqual([thinking(1), { type: "text", text: "Let me check your credits." }, { type: "tool_use", id: "call-1", name: "get_account", input: {} }]);
+      // A stream that holds no answer: what was shown is taken back and the answer asked for whole. From then on
+      // answers are asked for whole at once, so no round is paid for twice.
+      const garbage = () => new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new TextEncoder().encode("data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\ndata: [DONE]\n\n")); c.close(); } });
+      script.push(garbage(), say("Hello there."), say("Still here."));
+      const second = await send(chat, "Hello");
+      expect(second.filter((e) => ["delta", "undo", "text"].includes(e.event)).map((e) => e.event + (e.text ? `:${e.text}` : ""))).toEqual(["undo", "text:Hello there."]);
+      expect(asked.slice(2).map((r) => !!r.stream)).toEqual([true, false]);
+      expect(error.mock.calls.map((c) => c[0])).toContain("Agent stream unreadable");
+      await send(chat, "Are you there?");
+      expect(asked.slice(4).map((r) => !!r.stream)).toEqual([false]);
+    } finally {
+      error.mockRestore();
+    }
+    // Switched off by hand: answers are asked for whole.
+    const off = await setup({ AGENT_STREAM: "off" });
+    off.admin();
+    off.script.push(say("Whole."));
+    const events = await off.send(await off.newChat(), "Hi");
+    expect(off.asked[0].stream).toBeUndefined();
+    expect(events.filter((e) => e.event === "delta")).toEqual([]);
+    expect(events.find((e) => e.event === "text").text).toBe("Whole.");
   });
 
   it("says so when the model has no answer, and goes on from the next message", async () => {
