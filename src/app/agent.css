@@ -44,3 +44,7 @@
   .agent-medium.audio { grid-column: span 1; }
   .agent-media { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 }
+.agent-replies { display: flex; flex-wrap: wrap; gap: 8px; }
+.agent-replies .chip { padding: 8px 14px; font-size: 14px; color: var(--text); border-color: var(--brand-line); white-space: normal; text-align: left; }
+.agent-replies .chip:hover:not(:disabled) { background: var(--brand-soft); }
+.agent-replies .chip:disabled { opacity: 0.5; cursor: default; }

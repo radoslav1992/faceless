@@ -35,8 +35,8 @@ async function setup() {
     return typeof next === "function" ? next(request) : next;
   };
   const admin = () => sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
-  /** A turn's events (one JSON object per line). */
-  const events = (r: { data: any }) => (typeof r.data === "string" ? r.data.trim().split("\n").map((l: string) => JSON.parse(l)) : [r.data]);
+  /** A turn's events (server-sent: one JSON object per `data:` line). */
+  const events = (r: { data: any }) => String(r.data).split("\n").filter((l) => l.startsWith("data:")).map((l) => JSON.parse(l.slice(5)));
   const send = async (chat: string, text: string, cookie = user.cookie) => events(await call(worker, env, "POST", `/api/agent/chats/${chat}/messages`, { text }, cookie));
   const decide = async (chat: string, id: string, decision: "confirm" | "decline") => events(await call(worker, env, "POST", `/api/agent/chats/${chat}/actions`, { id, decision }, user.cookie));
   const newChat = async () => (await call(worker, env, "POST", "/api/agent/chats", {}, user.cookie)).data.id as string;
@@ -227,6 +227,30 @@ describe("the assistant", () => {
     expect((await call(worker, env, "PUT", `/api/agent/skills/${mine.id}`, { name: "My tone", description: "The channel's voice.", body: "Warm and plain." }, user.cookie)).status).toBe(200);
     expect((await call(worker, env, "DELETE", `/api/agent/skills/${mine.id}`, undefined, user.cookie)).status).toBe(200);
     expect((await call(worker, env, "DELETE", `/api/agent/skills/${mine.id}`, undefined, user.cookie)).status).toBe(404);
+  });
+
+  it("asks before it drafts, with answers to tap, and waits for the owner", async () => {
+    const { env, user, script, asked, admin, send, newChat } = await setup();
+    admin();
+    const chat = await newChat();
+    script.push({ content: [{ type: "text", text: "How long should it be?" }, { type: "tool_use", id: "call-1", name: "suggest_replies", input: { options: ["15 seconds", "30 seconds", "You choose"] } }], stop_reason: "tool_use" });
+    const first = await send(chat, "A Christmas tale");
+    // The instructions say what to ask and what a second costs; the question ends the turn, the model is not asked again.
+    expect(asked).toHaveLength(1);
+    expect(asked[0].system).toContain("1 credit for every started 20 seconds");
+    expect(asked[0].system).toContain("ask before drafting");
+    expect(first.filter((e) => e.event === "text").map((e) => e.text)).toEqual(["How long should it be?"]);
+    expect(first.find((e) => e.event === "card").card).toEqual({ type: "replies", options: ["15 seconds", "30 seconds", "You choose"] });
+    expect(done(first).items.at(-1)).toMatchObject({ kind: "assistant", text: "How long should it be?", cards: [{ type: "replies" }] });
+    expect(done(first).waiting).toBe(false);
+    // The answer follows the buttons' result, and the model goes on from both.
+    script.push(say("Thirty seconds it is."));
+    await send(chat, "30 seconds");
+    expect(asked[1].messages.slice(-2).map((m: any) => [m.role, m.content.map((b: any) => b.type)])).toEqual([["user", ["tool_result"]], ["user", ["text"]]]);
+    // The answer is sent as a stream of events that nothing in between holds back.
+    const raw = await call(worker, env, "POST", `/api/agent/chats/${chat}/messages`, { text: "Thanks" }, user.cookie);
+    expect(raw.headers.get("Content-Type")).toBe("text/event-stream; charset=utf-8");
+    expect(raw.headers.get("Cache-Control")).toBe("no-store, no-transform");
   });
 
   it("says so when the model has no answer, and goes on from the next message", async () => {

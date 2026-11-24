@@ -18,6 +18,7 @@ import { storyStyleIds, storyStyles } from "../shared/styles";
 import { templateOf } from "../shared/templates";
 import { languageCodes, languages } from "../shared/series";
 import { PRODUCT } from "../shared/brand";
+import { SECONDS_PER_CREDIT } from "../shared/credits";
 import { SITE } from "../shared/site";
 import { t } from "../shared/i18n";
 import {
@@ -215,6 +216,11 @@ const ownTools: ToolDef[] = [
     input_schema: obj({ draft: { type: "string" } }, ["draft"]),
   },
   {
+    name: "suggest_replies",
+    description: "Shows buttons under your message with answers the owner can tap instead of typing. Use it in the same message as a question that has a few likely answers (a length, a voice, a style, yes or no). It ends your turn: the owner answers next.",
+    input_schema: obj({ options: { type: "array", minItems: 2, maxItems: 5, items: { type: "string" }, description: "2 to 5 short answers in the owner's language, each at most 40 characters, written as the owner would say them." } }, ["options"]),
+  },
+  {
     name: "load_skill",
     description: "The full instructions of a skill, by its name from the list of skills. Load a skill before a task it covers.",
     input_schema: obj({ name: { type: "string" } }, ["name"]),
@@ -366,6 +372,10 @@ async function freeTool(run: Run, name: string, input: any): Promise<ToolOutput>
       return { value: { files: rows.map((r) => ({ id: r.id, name: r.name, type: r.mime.split("/")[0], seconds: Math.round(r.duration || 0) || undefined, megabytes: Math.round(r.bytes / 1e5) / 10 })) } };
     }
     case "show_media": return showMedia(run, input);
+    case "suggest_replies": {
+      const options = z.object({ options: z.array(z.string().trim().min(1).max(60)).min(2).max(5) }).parse(input).options;
+      return { value: { shown: true, note: "The owner sees these as buttons and answers next." }, cards: [{ type: "replies", options }] };
+    }
     case "write_draft": return writeDraft(run, input);
     case "get_draft": {
       const out = await draftOut(env, user.id, await draftRow(env, user.id, String(input?.draft || "")));
@@ -458,8 +468,9 @@ function systemPrompt(skills: SkillRow[]) {
     `You are the assistant of ${PRODUCT.name}, an app that makes short vertical videos for TikTok, Instagram Reels and YouTube Shorts: faceless narrated videos written from an idea, and clips cut from the owner's long videos. You work for the person you chat with, the owner of the account, and you make their videos with your tools.`,
     "",
     "How you work:",
-    "- Find out what they want in as few questions as it takes. A draft is free and quick to change, so when the request is clear enough to draft, draft it rather than ask another question.",
-    "- A narrated video: list_video_types when you need to choose a type, then write_draft. The draft shows in the chat as a card the owner reads; change it with edit_draft when they ask; call make_video when they want it made.",
+    `- Before the first draft of a video, know what it is about and how long it should be. A narrated video costs 1 credit for every started ${SECONDS_PER_CREDIT} seconds, so the length is the owner's choice: when they have not said it, ask before drafting. Ask once, in one short message: the length (offer a few, such as 15, 30, 45 or 60 seconds, with what each costs), and say that they can also name a voice and an art style or leave those to you. Call suggest_replies in that same message with the answers they are most likely to give. Never ask about what they already told you, and when they say you choose, choose and go on.`,
+    "- Then draft: list_video_types when you need to choose a type, then write_draft, always with the length in `seconds`. A draft takes a minute or two to write, so say in a few words what you are about to write before you call it. The draft shows in the chat as a card the owner reads; change it with edit_draft when they ask; call make_video when they want it made.",
+    "- After a draft, say in a sentence what it is and offer the next steps: changing it, hearing other voices, choosing music, or making it.",
     "- Tools that spend credits (make_video, make_clip, find_clips with credits) do not run at once: the app shows the owner what will be made and what it costs, and runs the tool when they confirm. So call the tool as soon as the owner wants the thing made, without asking for a yes in words first, and never say something is being made before the tool's result says so. If the owner declines, ask what to change.",
     "- Suggest media by showing it. Find it with search_library (music, sound effects, background clips, pictures), list_my_files (the owner's uploads) or list_voices, then call show_media with the best few and a short note on each: the owner sees the pictures and plays the clips, music and voices in the chat.",
     "- A video takes a few minutes to make. It shows in the chat and updates by itself, so do not call get_video again and again: check a video only when asked.",
@@ -565,6 +576,8 @@ async function work(run: Run, rows: Row[], emit: Emit) {
       return;
     }
     await addRow(env, chat, rows, "user", toolResults(calls, results));
+    // A question with answers to tap is the end of the turn: the owner speaks next.
+    if (calls.every((c) => c.name === "suggest_replies") && results.every((r) => !r.is_error)) return;
   }
   const row = await addRow(env, chat, rows, "assistant", { blocks: [{ type: "text", text: t("I stopped here: that was a lot of steps for one request. Tell me how to go on.") }] });
   emit({ event: "text", text: (row.content.blocks[0] as { text: string }).text });
@@ -618,7 +631,11 @@ agent.delete("/chats/:id", async (c) => {
   return c.json({ ok: true });
 });
 
-/** A turn, answered as it happens: one JSON object per line (shared/agent.ts TurnEvent), the last one the chat as it stands. */
+/**
+ * A turn, answered as it happens: server-sent events, one JSON object per `data:` line (shared/agent.ts TurnEvent),
+ * the last one the chat as it stands. A comment line every ten seconds keeps a long step (a draft takes a minute or
+ * two) from looking like a dead connection to anything in between.
+ */
 async function turn(c: Context<App>, chat: Chat, prepare: (run: Run, rows: Row[]) => Promise<boolean>) {
   const env = c.env, user = c.get("user");
   if ((await hit(env, "agent-turn", 3600, user.id)) > 40) throw new HTTPException(429, { message: "That's a lot of messages for one hour. Try again later." });
@@ -632,7 +649,9 @@ async function turn(c: Context<App>, chat: Chat, prepare: (run: Run, rows: Row[]
   let controller!: ReadableStreamDefaultController<Uint8Array>;
   const stream = new ReadableStream<Uint8Array>({ start(x) { controller = x; } });
   // A reader that left (a closed tab) loses nothing: the turn goes on and the chat is read again when it is opened.
-  const emit: Emit = (e) => { try { controller.enqueue(encoder.encode(JSON.stringify(e) + "\n")); } catch { /* nobody is reading */ } };
+  const write = (text: string) => { try { controller.enqueue(encoder.encode(text)); } catch { /* nobody is reading */ } };
+  const emit: Emit = (e) => write(`data: ${JSON.stringify(e)}\n\n`);
+  const beat = setInterval(() => write(": working\n\n"), 10000);
   const done = (async () => {
     let rows: Row[] = [];
     try {
@@ -643,6 +662,7 @@ async function turn(c: Context<App>, chat: Chat, prepare: (run: Run, rows: Row[]
       if (!(e instanceof HTTPException)) console.error("Agent turn failed", { error: (e as Error)?.name });
       emit({ event: "error", message: e instanceof HTTPException ? e.message : "Something went wrong. Please try again." });
     } finally {
+      clearInterval(beat);
       await env.DB.prepare("UPDATE agent_chats SET busy_until=0 WHERE id=?").bind(chat.id).run().catch(() => {});
       const title = (await env.DB.prepare("SELECT title FROM agent_chats WHERE id=?").bind(chat.id).first<{ title: string }>().catch(() => null))?.title ?? chat.title;
       emit({ event: "done", items: chatItems(rows), title, waiting: waiting(rows) });
@@ -650,7 +670,7 @@ async function turn(c: Context<App>, chat: Chat, prepare: (run: Run, rows: Row[]
     }
   })();
   c.executionCtx.waitUntil(done);
-  return new Response(stream, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no" } });
+  return new Response(stream, { headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no" } });
 }
 agent.post("/chats/:id/messages", async (c) => {
   const chat = await ownChat(c.env, c.get("user").id, c.req.param("id"));
