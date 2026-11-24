@@ -25,6 +25,7 @@ const AuthPage = named(() => import("./public/Auth"), "AuthPage");
 const AppLayout = named(() => import("./app/Layout"), "AppLayout");
 const Home = named(() => import("./app/Home"), "Home");
 const Create = named(() => import("./app/Create"), "Create");
+const Agent = named(() => import("./app/Agent"), "Agent");
 const Videos = named(() => import("./app/Videos"), "VideosPage");
 const VideoPage = named(() => import("./app/VideoPage"), "VideoPage");
 const SeriesList = named(() => import("./app/Series"), "SeriesList");
@@ -147,6 +148,8 @@ export function App() {
           <Route path="app" element={<RequireUser user={user} loading={busy} failed={failed} retry={refresh}><AppLayout /></RequireUser>}>
             <Route index element={<Home />} />
             <Route path="create" element={<Create />} />
+            <Route path="assistant" element={<Agent />} />
+            <Route path="assistant/:id" element={<Agent />} />
             <Route path="videos" element={<Videos />} />
             <Route path="videos/:id" element={<VideoPage />} />
             <Route path="series" element={<SeriesList />} />

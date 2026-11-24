@@ -42,6 +42,9 @@ export interface Env {
   STRIPE_PRICE_STUDIO_YEARLY?: string;
   /** "true": Stripe Checkout calculates tax (needs Stripe Tax set up). */
   STRIPE_AUTOMATIC_TAX?: string;
+  /** The assistant's model (server/agent.ts; default Claude Sonnet 5.5) and how hard it thinks: low (default), medium or high. */
+  AGENT_MODEL?: string;
+  AGENT_EFFORT?: string;
   /** The model that writes scripts and plans their pictures (default: server/ai.ts DEFAULT_WRITER_MODEL). */
   WRITER_MODEL?: string;
   /** The text model for sound and clip choices, and for scripts when the writer's model fails. */

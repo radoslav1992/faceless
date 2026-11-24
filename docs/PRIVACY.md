@@ -105,3 +105,11 @@ short-lived capability links while the video's pictures are drawn, and never sho
 each time that they have those people's permission (kept with the video as `people.consent`); the terms of both sites
 say so since 2026-11-23. Photos of other people are personal data of people who are not users: the lawful basis rests
 on the owner's confirmation, which a lawyer should review before the feature is opened to everyone.
+
+## The assistant (a test)
+
+A person's chats with the assistant (`agent_chats`, `agent_messages`), the drafts it wrote (`agent_drafts`) and their
+own skills (`agent_skills`) are kept until they delete the chat or the skill, and go with the account. Every message,
+with the chat so far and the names of the tools, is sent to the assistant's model (Claude, by Anthropic) through
+Cloudflare Workers AI, as scripts are sent to the text models. The model's thinking is not stored. Logs never hold the
+conversation.

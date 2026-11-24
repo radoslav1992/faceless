@@ -94,6 +94,14 @@ under `/api/admin` answers 404 to anyone else.
   run), and Seedance 2.5, up to 30 seconds (37 credits for 15 seconds, about $7 to run). When a
   provider refuses a request, Workers Logs show `Provider refused` with the fields it named: a wrong parameter of a
   model shows there.
+- **The assistant** (a test): administrators have **Assistant** in the menu: a chat that drafts videos, shows media to
+  play and makes videos, asking before it spends credits. **Skills** there are instructions it follows when a request
+  fits: yours for everyone ("For everyone on the site"), and each person's own. To open it to everyone: set
+  `AGENT_OPEN` to `true` in `shared/agent.ts`. Every message is a paid call to Claude Sonnet 5.5 through Workers AI
+  (`AGENT_MODEL` switches the model, `AGENT_EFFORT` is `low`, `medium` or `high`); each person has 40 messages an hour
+  and 200 a day. The logs say `Agent model failed` (an error, or with `timeout: true` no answer in two minutes),
+  `Agent model gave no answer`, `Agent tool failed` with the tool's name, and `Agent turn failed`, never with the
+  conversation. "The assistant isn't set up on this site yet" means `migrations/0017_agent.sql` is not applied.
 - **Photos of people** (a test): in the **Holiday greeting** style, administrators can add up to four photos of the
   people they greet and tick that they have their permission; the video's pictures then show those people, drawn in
   its art style. To open it to everyone: set `PEOPLE_PHOTOS_OPEN` to `true` in `shared/people.ts`. Watch the first

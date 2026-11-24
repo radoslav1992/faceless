@@ -66,6 +66,9 @@ while voice cloning is off; apply it before setting `VOICE_CLONES`. Before turni
 privacy policy's "Cloned voices" passages checked for the places you sell in: a voice clone is personal data, and
 some laws treat a voiceprint as biometric data.
 
+`0017_agent.sql` adds the assistant's chats, messages, drafts and skills (four tables). The code works without it:
+until it is applied the assistant answers "The assistant isn't set up on this site yet" and nothing else changes.
+
 - **R2**: add a lifecycle rule to *abort incomplete multipart uploads after 1 day*. Do **not** add an object-expiry
   rule; the app deletes its files itself.
 - **Renderer image**: Python 3.12 on Debian bookworm with its FFmpeg (libass, x264) and Noto fonts, plus the bundled
@@ -115,6 +118,8 @@ the Worker reads (`Env` in `server/types.ts`); `.dev.vars.example` lists them fo
 | `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_DAILY`, `STRIPE_PRICE_DOUBLE`, `STRIPE_PRICE_STUDIO` | text | Monthly price IDs (section 3) |
 | `STRIPE_PRICE_STARTER_YEARLY`, `STRIPE_PRICE_DAILY_YEARLY`, `STRIPE_PRICE_DOUBLE_YEARLY`, `STRIPE_PRICE_STUDIO_YEARLY` | text | Yearly price IDs (section 3) |
 | `STRIPE_AUTOMATIC_TAX` | text | `true` when Stripe Tax is set up: tax, tax ID collection and a required billing address at checkout |
+| `AGENT_MODEL` | text | Optional model of the assistant (default `anthropic/claude-sonnet-5.5`), asked in Anthropic's Messages shape through Workers AI |
+| `AGENT_EFFORT` | text | Optional: how hard the assistant's model thinks: `low` (default), `medium` or `high` |
 | `WRITER_MODEL` | text | Optional model that writes scripts and plans their pictures (default `google/gemini-4-carbon`). A `google/` model is asked in Google's request shape, any other in the Responses API's |
 | `TEXT_MODEL` | text | Optional model for sound and clip choices, and for a script the writer's model could not write (default `openai/gpt-6-luna`) |
 | `DESCRIBE_MODEL` | text | Optional multimodal model (images and audio) that fills in library items' details in Admin → Library (default `google/gemini-4-argon`) |
