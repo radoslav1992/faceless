@@ -87,7 +87,9 @@ under `/api/admin` answers 404 to anyone else.
   photos (MiniMax H3 Max, about $0.08 a second), under a recorded voiceover, subtitles and music. A 15-second ad is
   7 credits and costs about $1.20 in clips plus three pictures and the voice. To take a style back to
   administrators only, mark its template `test: true` in `shared/templates.ts` (it then leaves the public pages).
-  The form's **Video model** offers four (HeyGen's only on a site with `HEYGEN_API_KEY`): MiniMax H3 Max shot by shot (above); HeyGen Video 1 shot by shot, from
+  Everyone's ads are filmed with one model, the site's: MiniMax H3 Max unless `AD_MODEL` names another (`heygen`,
+  `seedance`, `seedance-25`; no deploy needed). Only administrators see the form's **Video model**, to compare the
+  four (HeyGen's only on a site with `HEYGEN_API_KEY`): MiniMax H3 Max shot by shot (above); HeyGen Video 1 shot by shot, from
   each shot's picture without the photos (4 credits for 15 seconds; needs `HEYGEN_API_KEY`); and Seedance in one shot (one
   request films the whole ad, after the voice): Seedance 2.0 Fast, at most 15 seconds (19 credits, about $3.60 to
   run), and Seedance 2.5, up to 30 seconds (37 credits for 15 seconds, about $7 to run). When a

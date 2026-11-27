@@ -8,8 +8,7 @@ import { checkPassword, hashPassword, token, sha, rate, hit, limited, tooMany, c
 import { allowance, touchTrial } from "./billing";
 import { referrerFor } from "./affiliates";
 import { adminClipModels } from "./providers/fal";
-import { heygenEnabled } from "./providers/heygen";
-import { adModels } from "../shared/ad";
+import { adModelsFor } from "./ad";
 import { PRODUCT } from "../shared/brand";
 
 export const auth = new Hono<App>();
@@ -50,8 +49,8 @@ auth.get("/me", async (c) => {
       admin: isAdmin(c.env, user),
       // The clip models an administrator can choose per scene to compare them.
       ...(isAdmin(c.env, user) && { clipModels: adminClipModels(c.env) }),
-      // The video models a product ad can be filmed with on this site (HeyGen's only with its key).
-      adModels: adModels.filter((m) => m !== "heygen" || heygenEnabled(c.env)),
+      // The video models this person's product ads can be filmed with: the site's one, or all of them for an administrator.
+      adModels: adModelsFor(c.env, isAdmin(c.env, user)),
       ...limits,
       window: undefined,
     },

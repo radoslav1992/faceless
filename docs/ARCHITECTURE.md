@@ -260,8 +260,10 @@ hard cut, with no character of the writer's, no background clip, presenter or li
 It costs the video by its length plus every shot as a high-quality clip (two credits per five seconds): 7 credits
 for a 15-second ad of three shots. The photos stay the owner's uploads: they are checked to be their pictures when
 the video is saved (`server/videos.ts`), handed to fal as capability links while the run works, and never shown in
-the video themselves. The models a site offers reach the form with the account (`adModels` of `/api/auth/me`: HeyGen's
-only with its key). A series and the API do not make ads (they take no photos).
+the video themselves. Everyone's ads are filmed with the site's one model (`siteAdModel` in `server/ad.ts`: `AD_MODEL`, else
+MiniMax); an administrator chooses among all the site can run (HeyGen's only with its key). The draft is written with
+that model whatever was asked, a spec with another is refused (a video made earlier keeps its own), and the form shows
+the choice only where there is one (`adModels` of `/api/auth/me`). A series and the API do not make ads (they take no photos).
 
 Four video models are being compared, chosen in the ad's form (the product's `model`). The above is `minimax`. With
 `heygen`, HeyGen Video 1 films every shot instead (`server/providers/heygen.ts`, the clip model `heygen-video-1`

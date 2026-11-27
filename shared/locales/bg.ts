@@ -2046,6 +2046,7 @@ export const bg: Words = {
     "This video is too large (over 4096 pixels or 9 megapixels per frame).": "Това видео е твърде голямо (над 4096 пиксела или 9 мегапиксела на кадър).",
     "This video isn't ready to post.": "Това видео не е готово за публикуване.",
     "This video isn't ready yet.": "Това видео още не е готово.",
+    "This video model isn't available.": "Този видео модел не е достъпен.",
     "This video's file is no longer available.": "Файлът на това видео вече не е достъпен.",
     "This video's settings aren't valid any more. Open it and save it again.": "Настройките на това видео вече не са валидни. Отворете го и го запазете отново.",
     "This voice couldn't be saved. Check how many voices your plan has room for, then try again.": "Този глас не можа да бъде запазен. Проверете за колко гласа има място във вашия план и опитайте отново.",

@@ -118,6 +118,7 @@ the Worker reads (`Env` in `server/types.ts`); `.dev.vars.example` lists them fo
 | `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_DAILY`, `STRIPE_PRICE_DOUBLE`, `STRIPE_PRICE_STUDIO` | text | Monthly price IDs (section 3) |
 | `STRIPE_PRICE_STARTER_YEARLY`, `STRIPE_PRICE_DAILY_YEARLY`, `STRIPE_PRICE_DOUBLE_YEARLY`, `STRIPE_PRICE_STUDIO_YEARLY` | text | Yearly price IDs (section 3) |
 | `STRIPE_AUTOMATIC_TAX` | text | `true` when Stripe Tax is set up: tax, tax ID collection and a required billing address at checkout |
+| `AD_MODEL` | text | Optional: the video model everyone's product ads are filmed with: `minimax` (default), `heygen` (needs `HEYGEN_API_KEY`), `seedance` or `seedance-25`. Administrators choose among all of them in the form |
 | `AGENT_MODEL` | text | Optional model of the assistant (default `anthropic/claude-sonnet-5.5`), asked in Anthropic's Messages shape through Workers AI |
 | `AGENT_EFFORT` | text | Optional: how hard the assistant's model thinks: `low` (default), `medium` or `high` |
 | `AGENT_STREAM` | text | Optional: `off` sends the assistant's replies whole instead of as they are written |

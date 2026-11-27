@@ -1219,6 +1219,43 @@ describe("narrated videos in the content run", () => {
     expect(video.spec.scenes.every((s: any) => s.clipId)).toBe(true);
   });
 
+  it("films everyone's product ads with the site's one model; an administrator chooses among them", async () => {
+    const { env, sqlite, user, own } = await setup();
+    const lines = ["Hot day, warm water again?", "Aqua Steel keeps your drink cold for 24 hours.", "Try it today."];
+    env.AI.run = async () => ({ status: "completed", output_text: JSON.stringify({
+      title: "Aqua Steel", topic: "steel bottle", caption: "Cold for a whole day.", hashtags: ["bottle"], headline: "Aqua Steel", subject: "", look: "A bright kitchen.", places: [], music: "",
+      scenes: lines.map((text, n) => ({ text, picture: `A hand lifts the product from a table, shot ${n + 1}`, keys: [], tone: "", place: "" })),
+    }) });
+    const me = async () => (await call(worker, env, "GET", "/api/auth/me", undefined, user.cookie)).data.user;
+    const draft = async (model: string) => (await call(worker, env, "POST", "/api/story/draft", { template: "ad", prompt: "A steel water bottle", seconds: 15, product: { assets: [own], name: "Aqua Steel", model } }, user.cookie)).data.spec;
+    const make = (spec: unknown) => call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    // An ordinary account has no choice: whatever model is asked for, the ad is drafted with the site's (MiniMax).
+    expect((await me()).adModels).toEqual(["minimax"]);
+    const mine = await draft("seedance-25");
+    expect(mine.product.model).toBe("minimax");
+    // A spec written by hand with another model is refused; the site's is made.
+    const other = adSpec(specSchema.parse({ format: "story", narration: { kind: "voice", voiceId: "george" }, scenes: lines.map((text, n) => ({ text, description: `A hand lifts the product, shot ${n + 1}`, keys: [] })) }) as StorySpec, { assets: [own], name: "Aqua Steel", model: "seedance" });
+    expect(await make(other)).toMatchObject({ status: 403, data: { error: "This video model isn't available." } });
+    const made = await make(mine);
+    expect(made.status).toBe(201);
+    // The operator sets the site's model (AD_MODEL); one the site can't run (HeyGen without its key) is not taken.
+    env.AD_MODEL = "seedance";
+    expect((await me()).adModels).toEqual(["seedance"]);
+    expect((await draft("minimax")).product.model).toBe("seedance");
+    // A video made with the earlier model keeps it when it is edited.
+    const stored = (await call(worker, env, "GET", `/api/videos/${made.data.id}`, undefined, user.cookie)).data.video.spec;
+    expect((await call(worker, env, "PUT", `/api/videos/${made.data.id}`, { spec: { ...stored, title: "Aqua Steel, again" }, idempotencyKey: crypto.randomUUID() }, user.cookie)).status).not.toBe(403);
+    env.AD_MODEL = "heygen";
+    expect((await me()).adModels).toEqual(["minimax"]);
+    delete env.AD_MODEL;
+    // An administrator chooses among all the site can run, to compare them.
+    sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
+    expect((await me()).adModels).toEqual(["minimax", "seedance", "seedance-25"]);
+    expect((await draft("seedance-25")).product.model).toBe("seedance-25");
+    env.HEYGEN_API_KEY = "hg";
+    expect((await me()).adModels).toEqual(["minimax", "heygen", "seedance", "seedance-25"]);
+  });
+
   it("films a product ad in one shot with Seedance: one clip from the photos after the voice, played behind the whole ad with its sound", async () => {
     const { env, sqlite, user, own, run } = await setup();
     sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
