@@ -21,6 +21,8 @@ export type User = {
   granted?: boolean;
   /** Administrators: the clip models they can choose per scene to compare them. */
   clipModels?: ClipModel[];
+  /** The video models a product ad can be filmed with on this site (shared/ad.ts). */
+  adModels?: string[];
 };
 export type Publication = {
   id: string; platform: PlatformId; accountName: string; scheduledAt: number; status: "scheduled" | "publishing" | "published" | "failed" | "canceled";

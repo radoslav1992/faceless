@@ -203,9 +203,9 @@ export const templates = {
     examples: ["Merry Christmas to our customers from the team of a small bakery", "Happy New Year to grandma and grandpa from their grandchildren", "Season's greetings to our colleagues, with thanks for the year"],
     style: "festive", voice: "laura", seconds: 30, music: "calm",
   },
-  // A product ad (shared/ad.ts): filmed from the owner's photos of the product. A test, for administrators.
+  // A product ad (shared/ad.ts): filmed from the owner's photos of the product.
   ad: {
-    name: "Product ad", category: "ads", kind: "ad", short: "Your product's photos, filmed as a short ad", test: true,
+    name: "Product ad", category: "ads", kind: "ad", short: "Your product's photos, filmed as a short ad",
     brief: "A short ad for the owner's product: a hook that shows the need or the desire, the product in use with its main benefit, and a clear last shot of the product with a call to action. Warm, concrete and honest; only what the owner said about the product.",
     examples: ["A steel water bottle that keeps drinks cold for 24 hours", "Handmade lavender soap from a small family workshop", "Wireless earbuds with a 40-hour battery"],
     style: "cinematic", voice: "george", seconds: 15, music: "upbeat",

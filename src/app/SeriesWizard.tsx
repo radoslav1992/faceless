@@ -46,9 +46,8 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
   const toast = useToast();
   // Back on this page after the network's consent screen (the wizard keeps its answers meanwhile).
   const connect = (platform: PlatformId) => connectPlatform(platform, pathname).catch((e) => toast(errorText(e), "bad"));
-  const { user } = useAuth();
-  // Drama series are a test for administrators, on story styles (shared/drama.ts).
-  const canDrama = !!user?.admin && t.kind === "story";
+  // Drama series run on story styles (shared/drama.ts).
+  const canDrama = t.kind === "story";
   const drama = settings.drama;
   const setDrama = (patch: Partial<Drama>) => drama && set({ drama: { ...drama, ...patch } });
   const setCast = (i: number, patch: Partial<CastMember>) => drama && setDrama({ cast: drama.cast.map((c, k) => (k === i ? { ...c, ...patch } : c)) });
@@ -59,7 +58,7 @@ export function SeriesSettingsForm({ template, settings, onChange, part = "all" 
           <span className="row" style={{ gap: 10 }}>
             <Switch checked={!!drama} label="Drama series"
               onChange={(on) => set({ drama: on ? { premise: "", episodes: 10, cast: [{ name: "", role: "", look: "", voiceId: settings.voiceId }], lipSync: false, film: false, filmVoices: "exact" } : undefined })} />
-            <span>Drama series <span className="chip" style={{ marginLeft: 6 }}>Admin test</span></span>
+            <span>Drama series</span>
           </span>
           {drama && (
             <div className="stack" style={{ gap: 14, marginTop: 12 }}>

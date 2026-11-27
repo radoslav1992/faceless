@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import worker from "../server/index";
 import { agentTools, DEFAULT_AGENT_MODEL, resetAgentStream } from "../server/agent";
-import { AGENT_OPEN } from "../shared/agent";
+import { AGENT_DAILY_FREE, AGENT_OPEN } from "../shared/agent";
 import { call, signedIn, subscribe, testEnv } from "./helpers";
 
 // The assistant (server/agent.ts): a scripted model stands in for Claude. Each answer is what the model would send
@@ -80,14 +80,23 @@ const done = (events: any[]) => events.find((e) => e.event === "done");
 const results = (request: any) => request.messages.at(-1).content.filter((b: any) => b.type === "tool_result");
 
 describe("the assistant", () => {
-  it("is the administrators' while it is tested", async () => {
-    const { env, user, admin } = await setup();
-    expect(AGENT_OPEN).toBe(false);
-    const refused = await call(worker, env, "GET", "/api/agent", undefined, user.cookie);
-    expect([refused.status, refused.data.error]).toEqual([403, "The assistant is still being tested and isn't available yet."]);
-    expect((await call(worker, env, "POST", "/api/agent/chats", {}, user.cookie)).status).toBe(403);
-    admin();
+  it("is everyone's, with a few messages a day on the free plan and many on a paid one", async () => {
+    const { env, sqlite, user, script, send, newChat } = await setup();
+    expect(AGENT_OPEN).toBe(true);
+    // An ordinary account on a paid plan: no administrator needed, and more than the free plan's messages in a day.
     expect((await call(worker, env, "GET", "/api/agent", undefined, user.cookie)).data).toEqual({ chats: [] });
+    const paid = await newChat();
+    for (let n = 0; n < AGENT_DAILY_FREE + 1; n++) script.push(say("Yes."));
+    for (let n = 0; n < AGENT_DAILY_FREE + 1; n++) expect((await send(paid, `Question ${n}`)).find((e) => e.event === "text").text).toBe("Yes.");
+    // A free account has the assistant too, for a few messages a day: every one is a paid call to the model.
+    const free = signedIn(sqlite, "free@example.com");
+    const chat = (await call(worker, env, "POST", "/api/agent/chats", {}, free.cookie)).data.id as string;
+    for (let n = 0; n < AGENT_DAILY_FREE; n++) script.push(say("Sure."));
+    for (let n = 0; n < AGENT_DAILY_FREE; n++) expect((await send(chat, `Idea ${n}`, free.cookie)).find((e) => e.event === "text").text).toBe("Sure.");
+    const over = await call(worker, env, "POST", `/api/agent/chats/${chat}/messages`, { text: "One more" }, free.cookie);
+    expect([over.status, over.data.error]).toEqual([429, `The free plan has ${AGENT_DAILY_FREE} assistant messages a day. Upgrade for more, or come back tomorrow.`]);
+    // Nothing was asked of the model for the message that was not taken.
+    expect(script).toHaveLength(0);
   });
 
   it("drafts a video, shows media, and makes the video only when the owner confirms what it costs", async () => {
@@ -240,9 +249,13 @@ describe("the assistant", () => {
     expect((await skill({ name: "Product ads", description: "How to plan an ad for a product.", body: "Open on the product in use. Three scenes.", site: true })).status).toBe(201);
     expect((await skill({ name: "My tone", description: "The channel's voice.", body: "Dry humour, short sentences." })).status).toBe(201);
     expect((await skill({ name: "Off", description: "Not used.", body: "Never loaded.", enabled: false })).status).toBe(201);
-    // Another person has the site's skills, never this one's own (and, while the assistant is tested, no access at all).
+    // Another person has the site's skills, never this one's own; the site's are an administrator's to write and change.
     const other = signedIn(sqlite, "other@example.com");
-    expect((await call(worker, env, "GET", "/api/agent/skills", undefined, other.cookie)).status).toBe(403);
+    const theirs = (await call(worker, env, "GET", "/api/agent/skills", undefined, other.cookie)).data;
+    expect(theirs.skills.map((s: any) => [s.name, s.site])).toEqual([["Product ads", true]]);
+    expect(theirs.canEditSite).toBe(false);
+    expect((await call(worker, env, "POST", "/api/agent/skills", { name: "Mine for all", description: "For everyone.", body: "Do this.", site: true }, other.cookie)).data.error).toBe("Only administrators add skills for everyone.");
+    expect((await call(worker, env, "DELETE", `/api/agent/skills/${theirs.skills[0].id}`, undefined, other.cookie)).status).toBe(404);
     const listed = (await call(worker, env, "GET", "/api/agent/skills", undefined, user.cookie)).data;
     expect(listed.skills.map((s: any) => [s.name, s.site, s.enabled])).toEqual([["My tone", false, true], ["Off", false, false], ["Product ads", true, true]]);
     expect(listed.canEditSite).toBe(true);

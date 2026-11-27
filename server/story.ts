@@ -535,9 +535,8 @@ export async function draftVideo(env: Env, userId: string, input: DraftRequest, 
   // Anyone can make a cinematic video; only an administrator (`admin`) chooses its clips' model, to compare them.
   const film = d.film && (admin ? d.film : { quality: d.film.quality });
   const t = templateOf(d.template);
-  // A product ad is a test, for administrators; it is written about the product the owner describes and has photos of.
+  // A product ad is written about the product the owner describes and has photos of.
   if (t.kind === "ad") {
-    if (!admin) throw new HTTPException(403, { message: "Product ads are still being tested and aren't available yet." });
     if (!d.product) throw new HTTPException(400, { message: "Add a photo of the product first." });
     if (d.prompt.length < 2) throw new HTTPException(400, { message: "Say what the product is first." });
     if (d.product.model === "heygen" && !heygenEnabled(env)) throw new HTTPException(400, { message: "HeyGen isn't set up on this site, so this model can't be used." });
@@ -545,7 +544,7 @@ export async function draftVideo(env: Env, userId: string, input: DraftRequest, 
     const oneShot = oneShotOf(d.product.model);
     if (oneShot) d.seconds = Math.min(d.seconds, oneShot.max);
   }
-  // Photos of the people a greeting is for: a test, for administrators, and only where a style takes them.
+  // Photos of the people a greeting is for: only where a style takes them.
   if (d.people) {
     if (!PEOPLE_PHOTOS_OPEN && !admin) throw new HTTPException(403, { message: "Photos of people are still being tested and aren't available yet." });
     if (!takesPeople(d.template)) throw new HTTPException(400, { message: "This style doesn't take photos of people." });

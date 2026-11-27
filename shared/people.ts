@@ -6,10 +6,10 @@ import { z } from "zod";
 // (server/providers/fal.ts, the reference role "person"), and no reference sheet is drawn.
 //
 // They show real people, so the owner confirms each time that they have those people's permission (`consent`, kept
-// with the video), and the terms say so. A test, for administrators, until PEOPLE_PHOTOS_OPEN.
+// with the video), and the terms say so.
 
 /** Whether everyone can add photos of people (else administrators only: server/story.ts, server/videos.ts, Create). */
-export const PEOPLE_PHOTOS_OPEN = false;
+export const PEOPLE_PHOTOS_OPEN = true;
 /** How many photos a video takes. */
 export const PEOPLE_PHOTOS_MAX = 4;
 /** The templates that take photos of people. */

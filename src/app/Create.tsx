@@ -29,7 +29,7 @@ function Gallery({ onPick, admin }: { onPick: (id: TemplateId) => void; admin: b
   const examples = useExamples();
   const [category, setCategory] = useState<CategoryId | "all">("all");
   const [query, setQuery] = useState("");
-  // A style still being tested is an administrator's to see; a category shows when it has a style to show.
+  // A style still being tested (none now) is an administrator's to see; a category shows when it has a style to show.
   const offered = templateIds.filter((id) => admin || !isTest(id));
   const shown = offered.filter((id) => (category === "all" || templates[id].category === category) &&
     (!query.trim() || `${templates[id].name} ${templates[id].short}`.toLowerCase().includes(query.trim().toLowerCase())));
@@ -262,9 +262,9 @@ export function Create() {
               <label className="field"><span>Product name <span className="muted small">(optional)</span></span>
                 <input className="input" maxLength={80} value={form.productName} placeholder="Aqua Steel bottle" onChange={(e) => set({ productName: e.target.value })} />
               </label>
-              <label className="field"><span>Video model <span className="chip" style={{ marginLeft: 6 }}>Admin test</span></span>
+              <label className="field"><span>Video model</span>
                 <select className="select" value={form.adModel} onChange={(e) => { const adModel = e.target.value as AdModel; set({ adModel, seconds: Math.min(form.seconds, oneShotOf(adModel)?.max ?? form.seconds) }); }}>
-                  {adModels.map((m) => <option key={m} value={m}>{adModelNames[m]}</option>)}
+                  {adModels.filter((m) => !user?.adModels || user.adModels.includes(m)).map((m) => <option key={m} value={m}>{adModelNames[m]}</option>)}
                 </select>
                 <span className="hint">{oneShot
                   ? `One request films the whole ad, up to ${oneShot.max} seconds, and cuts between its shots itself. About ${oneShot.times} times the price of MiniMax.`

@@ -318,7 +318,7 @@ export function Agent() {
     <div className="page agent">
       <div className="page-head">
         <div>
-          <h1>Assistant <span className="chip violet" style={{ verticalAlign: 6 }}>Test</span></h1>
+          <h1>Assistant</h1>
           <p>Say what you want to make. It drafts, suggests media you can play here, and asks before it spends credits.</p>
         </div>
         <div className="toolbar">

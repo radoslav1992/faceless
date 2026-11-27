@@ -8,12 +8,14 @@ import { checkPassword, hashPassword, token, sha, rate, hit, limited, tooMany, c
 import { allowance, touchTrial } from "./billing";
 import { referrerFor } from "./affiliates";
 import { adminClipModels } from "./providers/fal";
+import { heygenEnabled } from "./providers/heygen";
+import { adModels } from "../shared/ad";
 import { PRODUCT } from "../shared/brand";
 
 export const auth = new Hono<App>();
 export const SESSION_COOKIE = "hss_session";
 /** The terms' "last updated" date: change it with the terms, so each acceptance records its version. */
-export const TERMS_VERSION = "2026-11-23";
+export const TERMS_VERSION = "2026-11-27";
 const credentials = z.object({
   email: z.email().max(254).transform((s) => s.toLowerCase().trim()),
   password: z.string().min(10, "Use at least 10 characters for your password.").max(128),
@@ -48,6 +50,8 @@ auth.get("/me", async (c) => {
       admin: isAdmin(c.env, user),
       // The clip models an administrator can choose per scene to compare them.
       ...(isAdmin(c.env, user) && { clipModels: adminClipModels(c.env) }),
+      // The video models a product ad can be filmed with on this site (HeyGen's only with its key).
+      adModels: adModels.filter((m) => m !== "heygen" || heygenEnabled(c.env)),
       ...limits,
       window: undefined,
     },
