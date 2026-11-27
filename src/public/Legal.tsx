@@ -509,6 +509,10 @@ function privacy(op: Operator): Section[] {
             you gave it and which wording you agreed to). The voice is used only to narrate your videos, never to identify anyone.
           </li>
           <li>
+            <strong>Assistant:</strong> your messages to the assistant and its replies, the drafts it writes for you, and any skills
+            (instructions) you add to it.
+          </li>
+          <li>
             <strong>Uploads:</strong> pictures, videos and audio you upload, such as your own narration recording or a long video you make clips from
             (or import from a link: we keep the link only until the video is downloaded);
             for uploads with speech, the words and their timings, when each speaker talks (speakers are numbered, never identified) and sounds such as
@@ -603,8 +607,10 @@ function privacy(op: Operator): Section[] {
               <tbody>
                 <tr>
                   <th scope="row">Cloudflare</th>
-                  <td>Hosting, database, file storage, email sending, the AI text model that writes scripts, titles and captions and finds moments for clips, and Turnstile security checks</td>
-                  <td>All service data; your topics, prompts and scripts for writing; the transcripts of videos you find clips in; technical data for security checks</td>
+                  <td>Hosting, database, file storage, email sending, the AI text models that write scripts, titles and captions, find moments for clips and
+                    run the assistant (models made by OpenAI, Google and Anthropic, reached through Cloudflare), and Turnstile security checks</td>
+                  <td>All service data; your topics, prompts and scripts for writing; your messages to the assistant, with the chat so far; the transcripts of
+                    videos you find clips in; technical data for security checks</td>
                 </tr>
                 <tr>
                   <th scope="row">Stripe</th>
@@ -614,7 +620,8 @@ function privacy(op: Operator): Section[] {
                 <tr>
                   <th scope="row">fal.ai</th>
                   <td>AI pictures and AI video clips</td>
-                  <td>The scene descriptions (prompts) and any picture a clip starts from</td>
+                  <td>The scene descriptions (prompts) and any picture a clip starts from; for a product ad or a greeting with photos, the photos you add
+                    of the product or of the people, which the pictures are drawn from</td>
                 </tr>
                 <tr>
                   <th scope="row">ElevenLabs</th>
@@ -733,6 +740,7 @@ function privacy(op: Operator): Section[] {
               ElevenLabs can't be reached, within the following hours. Your statement that the voice is yours to use: 5 years after the voice is
               deleted, as evidence; it holds nothing of the voice.
             </li>
+            <li>Assistant chats, the drafts in them and your skills: until you delete the chat or the skill, or your account.</li>
             <li>Billing records: as long as tax and accounting law requires. Stripe keeps its own records under its policies.</li>
             <li>
               Referrals, commissions and call notes: while you have an account. Payouts to affiliates (amount, date, the PayPal address paid to): as long as

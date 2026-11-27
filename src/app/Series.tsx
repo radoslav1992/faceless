@@ -123,7 +123,7 @@ export function SeriesPage() {
         // A drama: where the season stands, and what has happened so far (what the next episode's writer reads).
         <section className="card stack" style={{ marginBottom: 20 }} aria-labelledby="story-title">
           <div className="row between wrap" style={{ gap: 8 }}>
-            <h2 id="story-title" style={{ fontSize: 18 }}>Story so far <span className="chip" style={{ marginLeft: 8, verticalAlign: 2 }}>Drama · admin test</span></h2>
+            <h2 id="story-title" style={{ fontSize: 18 }}>Story so far <span className="chip" style={{ marginLeft: 8, verticalAlign: 2 }}>Drama</span></h2>
             <span className="small muted">{story.length ? `Episode ${Math.min(story.at(-1)!.n, drama.episodes)} of ${drama.episodes}` : `${drama.episodes} episodes`} · {drama.cast.map((c) => c.name).join(", ")}</span>
           </div>
           <p className="small muted" style={{ margin: 0 }}>{drama.premise}</p>

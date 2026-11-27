@@ -12,6 +12,7 @@ import { voiceUsable } from "./voices";
 import { isAdmin } from "./auth";
 import { avatarFor } from "./avatars";
 import { heygenEnabled } from "./providers/heygen";
+import { adModelsFor } from "./ad";
 import { PEOPLE_PHOTOS_OPEN } from "../shared/people";
 import {
   isFilm, isHighlight, paidMoment, playedSounds, presenterNeeded, referencedAssets, referencedLibrary, specCredits, specHook, specSchema, visualPart, type HighlightSpec, type Spec, type StorySpec,
@@ -147,21 +148,19 @@ export async function newVideoCredits(env: Env, userId: string, spec: Spec) {
   return specCredits(spec, true, recording?.duration || undefined);
 }
 /**
- * Lip-synced scenes and a film's shots (acted ones and cutaways, shared/drama.ts) are tests: only administrators
- * make a video with them, or make one again. Cinematic videos (shared/film.ts) are everyone's. A film's sound is its
- * shots': it has no background clip, no presenter and no recording of the owner's.
+ * What a video of filmed shots needs. A film's sound is its shots': it has no background clip, no presenter and no
+ * recording of the owner's. Photos of people are a style's (shared/people.ts) while PEOPLE_PHOTOS_OPEN is off.
  */
-function checkFilm(env: Env, user: DbUser, spec: Spec) {
+function checkFilm(env: Env, user: DbUser, spec: Spec, before?: Spec) {
   if (isHighlight(spec)) return;
   const shots = spec.scenes.some((s) => s.acted);
-  if (!isAdmin(env, user)) {
-    if (spec.product) throw new HTTPException(403, { message: "Product ads are still being tested and aren't available yet." });
-    if (spec.people && !PEOPLE_PHOTOS_OPEN) throw new HTTPException(403, { message: "Photos of people are still being tested and aren't available yet." });
-    if (shots || spec.scenes.some((s) => s.cutaway)) throw new HTTPException(403, { message: "Films of acted shots are still being tested and aren't available yet." });
-    if (spec.scenes.some((s) => s.lipSync)) throw new HTTPException(403, { message: "Lip-synced scenes are still being tested and aren't available yet." });
-  }
+  if (spec.people && !PEOPLE_PHOTOS_OPEN && !isAdmin(env, user)) throw new HTTPException(403, { message: "Photos of people are still being tested and aren't available yet." });
   // An ad filmed by HeyGen Video 1 (shared/ad.ts) needs HeyGen's key.
   if (spec.product?.model === "heygen" && !heygenEnabled(env)) throw new HTTPException(400, { message: "HeyGen isn't set up on this site, so this model can't be used." });
+  // An ad is filmed with the site's model (an administrator chooses one); a video made with another keeps it.
+  const kept = before && !isHighlight(before) ? before.product?.model : undefined;
+  if (spec.product && !adModelsFor(env, isAdmin(env, user)).includes(spec.product.model) && spec.product.model !== kept)
+    throw new HTTPException(403, { message: "This video model isn't available." });
   if (shots && !isFilm(spec)) throw new HTTPException(400, { message: "A film's shots speak for themselves: remove the background clip, the presenter or your recording." });
 }
 export async function createVideo(
@@ -197,7 +196,7 @@ export async function createVideo(
  */
 async function rerun(env: Env, user: DbUser, video: any, spec: Spec, key: string, before: Spec) {
   requireMedia(env);
-  checkFilm(env, user, spec);
+  checkFilm(env, user, spec, before);
   const previous = await env.DB.prepare("SELECT video_id FROM runs WHERE user_id=? AND idempotency_key=?").bind(user.id, key).first<{ video_id: string }>();
   if (previous) return { credits: 0 };
   const a = await allowance(env, user);

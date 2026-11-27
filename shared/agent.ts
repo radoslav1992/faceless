@@ -2,10 +2,12 @@
 // suggests music, sounds, clips, pictures and voices the owner can see and play in the chat, and makes videos; before
 // anything that spends credits it shows what will be made and what it costs, and waits for the owner to confirm.
 // Skills are named instructions the agent loads when a request fits them: the administrators' for everyone, and each
-// owner's own. A test, for administrators, until AGENT_OPEN.
+// owner's own. Everyone has it; a free account has fewer messages a day (every message is a paid call to the model).
 
 /** Whether everyone has the assistant (else administrators only: server/agent.ts, the menu). */
-export const AGENT_OPEN = false;
+export const AGENT_OPEN = true;
+/** How many messages a person sends the assistant in an hour, and in a day on a paid plan and on the free one. */
+export const AGENT_HOURLY = 40, AGENT_DAILY = 200, AGENT_DAILY_FREE = 15;
 /** The longest message a person sends. */
 export const AGENT_MESSAGE_MAX = 4000;
 /** A skill's limits, and how many a person keeps. */

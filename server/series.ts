@@ -14,7 +14,6 @@ import { voiceUsable } from "./voices";
 import { backdropFor, conceptToSpec, musicCatalog, writeVideo } from "./story";
 import { chooseSounds } from "./sounds";
 import { episodeCredits, LATE_GRACE, MAKE_AHEAD, seriesSettingsSchema, seriesSubject, type SeriesSettings } from "../shared/series";
-import { isAdmin } from "./auth";
 import { seriesTemplates, templateOf, type TemplateId } from "../shared/templates";
 import { slots, validZone } from "../shared/schedule";
 import { planById } from "../shared/plans";
@@ -110,9 +109,8 @@ async function checkSettings(env: Env, user: DbUser, template: TemplateId, setti
   if (!validZone(settings.schedule.timezone)) throw new HTTPException(400, { message: "Choose a valid time zone." });
   if (!(await voiceUsable(env, settings.voiceId, keptVoice, user.id))) throw new HTTPException(400, { message: "Choose one of the voices offered." });
   if (template === "custom" && !settings.drama && settings.prompt.length < 3) throw new HTTPException(400, { message: "Describe what the videos of this series are about." });
-  // Drama series (shared/drama.ts) are a test for administrators: a story in episodes, told by a cast with voices.
+  // Drama series (shared/drama.ts): a story in episodes, told by a cast with voices.
   if (settings.drama) {
-    if (!isAdmin(env, user)) throw new HTTPException(403, { message: "Drama series are still being tested and aren't available yet." });
     if (templateOf(template).kind !== "story") throw new HTTPException(400, { message: "A drama is a story series: choose a story style for it." });
     for (const c of settings.drama.cast)
       if (!(await voiceUsable(env, c.voiceId, null, user.id))) throw new HTTPException(400, { message: `Choose one of the voices offered for ${c.name}.` });

@@ -29,7 +29,7 @@ function Gallery({ onPick, admin }: { onPick: (id: TemplateId) => void; admin: b
   const examples = useExamples();
   const [category, setCategory] = useState<CategoryId | "all">("all");
   const [query, setQuery] = useState("");
-  // A style still being tested is an administrator's to see; a category shows when it has a style to show.
+  // A style still being tested (none now) is an administrator's to see; a category shows when it has a style to show.
   const offered = templateIds.filter((id) => admin || !isTest(id));
   const shown = offered.filter((id) => (category === "all" || templates[id].category === category) &&
     (!query.trim() || `${templates[id].name} ${templates[id].short}`.toLowerCase().includes(query.trim().toLowerCase())));
@@ -164,7 +164,10 @@ export function Create() {
   // Any video can be cinematic, except a story over one background clip (it has no scenes to film).
   const ad = t?.kind === "ad";
   // A model that films the whole ad in one shot (shared/ad.ts), and what that allows.
-  const oneShot = ad ? oneShotOf(form.adModel) : undefined;
+  // The model an ad is filmed with: the one chosen where there is a choice (administrators), else the site's.
+  const offeredModels = adModels.filter((m) => !user?.adModels || user.adModels.includes(m));
+  const adModel: AdModel = offeredModels.includes(form.adModel) ? form.adModel : offeredModels[0] ?? "minimax";
+  const oneShot = ad ? oneShotOf(adModel) : undefined;
   const canFilm = !!t && t.kind !== "backdrop" && !ad;
   // Photos of the people a greeting is for (shared/people.ts): a test, for administrators.
   const withPeople = !!template && takesPeople(template) && (PEOPLE_PHOTOS_OPEN || !!user?.admin);
@@ -180,7 +183,7 @@ export function Create() {
         seconds: form.seconds, language: form.language, voiceId: form.voiceId, style: form.style, music: form.music, subject: form.subject, sounds: form.sounds,
         ...(form.musicTrackId && { musicTrackId: form.musicTrackId }),
         ...(cinematic && { film: { quality: form.filmQuality, ...(form.filmModel && { model: form.filmModel }) } }),
-        ...(ad && { product: { assets: form.photos, name: form.productName, model: form.adModel } }),
+        ...(ad && { product: { assets: form.photos, name: form.productName, model: adModel } }),
         ...(peopled && { people: { assets: form.people, consent: true } }),
       });
       setSpec(draft);
@@ -191,7 +194,7 @@ export function Create() {
       setWriting(false);
     }
   };
-  const cost = useMemo(() => (spec ? specCredits(spec, true) : ad ? adCredits(form.seconds, form.adModel) : videoCredits(form.seconds)), [spec, form.seconds, form.adModel, ad]);
+  const cost = useMemo(() => (spec ? specCredits(spec, true) : ad ? adCredits(form.seconds, adModel) : videoCredits(form.seconds)), [spec, form.seconds, adModel, ad]);
   const block = user ? creditBlock(user, cost) : null;
   const make = async () => {
     if (!spec) return;
@@ -262,15 +265,17 @@ export function Create() {
               <label className="field"><span>Product name <span className="muted small">(optional)</span></span>
                 <input className="input" maxLength={80} value={form.productName} placeholder="Aqua Steel bottle" onChange={(e) => set({ productName: e.target.value })} />
               </label>
-              <label className="field"><span>Video model <span className="chip" style={{ marginLeft: 6 }}>Admin test</span></span>
-                <select className="select" value={form.adModel} onChange={(e) => { const adModel = e.target.value as AdModel; set({ adModel, seconds: Math.min(form.seconds, oneShotOf(adModel)?.max ?? form.seconds) }); }}>
-                  {adModels.map((m) => <option key={m} value={m}>{adModelNames[m]}</option>)}
-                </select>
-                <span className="hint">{oneShot
-                  ? `One request films the whole ad, up to ${oneShot.max} seconds, and cuts between its shots itself. About ${oneShot.times} times the price of MiniMax.`
-                  : form.adModel === "heygen" ? "Every shot is drawn with your photos and filmed on its own from that picture, without the photos. The cheapest of the four."
-                  : "Every shot is drawn with your photos and filmed on its own, about 5 seconds each. A single shot can be made again later."}</span>
-              </label>
+              {offeredModels.length > 1 && (
+                <label className="field"><span>Video model <span className="muted small">(administrators only)</span></span>
+                  <select className="select" value={adModel} onChange={(e) => { const adModel = e.target.value as AdModel; set({ adModel, seconds: Math.min(form.seconds, oneShotOf(adModel)?.max ?? form.seconds) }); }}>
+                    {offeredModels.map((m) => <option key={m} value={m}>{adModelNames[m]}</option>)}
+                  </select>
+                  <span className="hint">{oneShot
+                    ? `One request films the whole ad, up to ${oneShot.max} seconds, and cuts between its shots itself. About ${oneShot.times} times the price of MiniMax.`
+                    : adModel === "heygen" ? "Every shot is drawn with your photos and filmed on its own from that picture, without the photos. The cheapest of the four."
+                    : "Every shot is drawn with your photos and filmed on its own, about 5 seconds each. A single shot can be made again later."}</span>
+                </label>
+              )}
               <label className="field"><span>What is it, and what should the ad say?</span>
                 <textarea className="textarea" rows={4} maxLength={STORY_MAX_CHARS} value={form.prompt} placeholder={t.examples[0]} onChange={(e) => set({ prompt: e.target.value })} />
                 <span className="hint">What it is, who it is for and what makes it good. The ad says only what you write here: no invented prices or claims.</span>
@@ -328,8 +333,8 @@ export function Create() {
               <div className="seg" role="group" aria-label="Length">
                 {(ad ? adLengths.filter((n) => !oneShot || n <= oneShot.max) : lengths).map((n) => <button key={n} type="button" aria-pressed={form.seconds === n} onClick={() => set({ seconds: n })}>{n < 60 ? `${n} s` : n === 60 ? "1 min" : "1½ min"}</button>)}
               </div>
-              {ad && oneShot ? <span className="hint">{`About ${creditsLabel(adCredits(form.seconds, form.adModel))}: the video, and its one shot. The draft shows the exact price before anything is charged.`}</span>
-                : ad ? <span className="hint">{`About ${creditsLabel(adCredits(form.seconds, form.adModel))}: the video, and a filmed shot for every ${CLIP_SECONDS} seconds of it. The draft shows the exact price before anything is charged.`}</span>
+              {ad && oneShot ? <span className="hint">{`About ${creditsLabel(adCredits(form.seconds, adModel))}: the video, and its one shot. The draft shows the exact price before anything is charged.`}</span>
+                : ad ? <span className="hint">{`About ${creditsLabel(adCredits(form.seconds, adModel))}: the video, and a filmed shot for every ${CLIP_SECONDS} seconds of it. The draft shows the exact price before anything is charged.`}</span>
                 : <span className="hint">{creditsLabel(videoCredits(form.seconds))} to make (1 per {SECONDS_PER_CREDIT} seconds).</span>}
             </label>
           )}

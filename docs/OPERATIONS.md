@@ -59,7 +59,7 @@ under `/api/admin` answers 404 to anyone else.
   The **ElevenLabs account** cards at the top of this tab show the plan, the share of the period's credits used (red
   from 80%: narration fails with `VOICE_UNAVAILABLE` once they run out, so top up or upgrade before then), the voice
   slots, and how many more voices customers can clone. They need the API key's **User: read** permission.
-- **Drama series (a test)**: creating a series on a story style, administrators see a **Drama** switch: a premise, a
+- **Drama series**: creating a series on a story style, everyone has a **Drama** switch: a premise, a
   number of episodes and a cast of up to three, each with a look and a voice. Every episode continues the story from
   the ones before (the series page lists them under **Story so far**) and ends on a cliffhanger; cast members speak in
   their own voices over the pictures. With **Lip-sync** on, every scene a character says becomes a clip of its
@@ -82,32 +82,34 @@ under `/api/admin` answers 404 to anyone else.
   says so; raise the number of episodes and resume to go on. Rejecting or deleting an episode takes it out of the
   story the next one is written from. Episodes cost what any episode of that length does; a dialogue is a few short
   ElevenLabs calls, one per speaker's stretch, where a narrated episode is one.
-- **Product ads** (a test): only administrators see the **Product ad** style in Create (chip "Admin test"). Add one
+- **Product ads**: everyone has the **Product ad** style in Create (and it shows on the public pages). Add one
   to four photos of a product, say what it is, choose 15, 20 or 30 seconds: every shot is drawn and filmed with the
   photos (MiniMax H3 Max, about $0.08 a second), under a recorded voiceover, subtitles and music. A 15-second ad is
-  7 credits and costs about $1.20 in clips plus three pictures and the voice. To open it to everyone: remove
-  `test: true` from the `ad` template in `shared/templates.ts` and the two administrator checks (`draftVideo` in
-  `server/story.ts`, `checkFilm` in `server/videos.ts`), and give it a tool page if it should have one.
-  The form's **Video model** compares four: MiniMax H3 Max shot by shot (above); HeyGen Video 1 shot by shot, from
+  7 credits and costs about $1.20 in clips plus three pictures and the voice. To take a style back to
+  administrators only, mark its template `test: true` in `shared/templates.ts` (it then leaves the public pages).
+  Everyone's ads are filmed with one model, the site's: MiniMax H3 Max unless `AD_MODEL` names another (`heygen`,
+  `seedance`, `seedance-25`; no deploy needed). Only administrators see the form's **Video model**, to compare the
+  four (HeyGen's only on a site with `HEYGEN_API_KEY`): MiniMax H3 Max shot by shot (above); HeyGen Video 1 shot by shot, from
   each shot's picture without the photos (4 credits for 15 seconds; needs `HEYGEN_API_KEY`); and Seedance in one shot (one
   request films the whole ad, after the voice): Seedance 2.0 Fast, at most 15 seconds (19 credits, about $3.60 to
   run), and Seedance 2.5, up to 30 seconds (37 credits for 15 seconds, about $7 to run). When a
   provider refuses a request, Workers Logs show `Provider refused` with the fields it named: a wrong parameter of a
   model shows there.
-- **The assistant** (a test): administrators have **Assistant** in the menu: a chat that drafts videos, shows media to
+- **The assistant**: everyone has **Assistant** in the menu: a chat that drafts videos, shows media to
   play and makes videos, asking before it spends credits. **Skills** there are instructions it follows when a request
-  fits: yours for everyone ("For everyone on the site"), and each person's own. To open it to everyone: set
-  `AGENT_OPEN` to `true` in `shared/agent.ts`. Every message is a paid call to Claude Sonnet 5.5 through Workers AI
-  (`AGENT_MODEL` switches the model, `AGENT_EFFORT` is `low`, `medium` or `high`); each person has 40 messages an hour
-  and 200 a day. Its replies are streamed as they are written; `AGENT_STREAM` set to `off`
+  fits: yours for everyone ("For everyone on the site"), and each person's own. Every message is a paid call to
+  Claude Sonnet 5.5 through Workers AI, paid by the site, not in credits (`AGENT_MODEL` switches the model,
+  `AGENT_EFFORT` is `low`, `medium` or `high`): each person has 40 messages an hour, and in a day 200 on a paid plan
+  and 15 on the free one (`AGENT_HOURLY`, `AGENT_DAILY`, `AGENT_DAILY_FREE` in `shared/agent.ts`). To take it back
+  to administrators only, set `AGENT_OPEN` to `false` there. Its replies are streamed as they are written; `AGENT_STREAM` set to `off`
   sends them whole, and `Agent stream unreadable` in the logs means the stream could not be read and replies are sent
   whole for a while. The logs say `Agent model failed` (an error, or with `timeout: true` no answer in two minutes),
   `Agent model gave no answer`, `Agent tool failed` with the tool's name, and `Agent turn failed`, never with the
   conversation. "The assistant isn't set up on this site yet" means `migrations/0017_agent.sql` is not applied.
-- **Photos of people** (a test): in the **Holiday greeting** style, administrators can add up to four photos of the
+- **Photos of people**: in the **Holiday greeting** style, everyone can add up to four photos of the
   people they greet and tick that they have their permission; the video's pictures then show those people, drawn in
-  its art style. To open it to everyone: set `PEOPLE_PHOTOS_OPEN` to `true` in `shared/people.ts`. Watch the first
-  ones for likeness and for pictures the model refuses (real faces, children).
+  its art style. To take it back to administrators only: set `PEOPLE_PHOTOS_OPEN` to `false` in `shared/people.ts`.
+  Watch for likeness and for pictures the model refuses (real faces, children).
 - **Cinematic videos**: in Create, everyone has a **Cinematic** switch (not on Storytime): every scene becomes an AI
   clip with a camera move, scenes cut hard and the video gets a film look. People choose the clips' quality; the
   clips are made with everyone's model (`FAL_CLIP_MODEL`, Kling unless set: its clips are silent, so the video has

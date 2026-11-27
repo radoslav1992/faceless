@@ -139,7 +139,7 @@ started 30 seconds), 1 credit per 5 new pictures, and new clips. A video never m
 refunded) costs what a new one does when it is made again, whatever its failed run made. Changes to the caption, hashtags or title need no new render; other free changes
 (subtitles, music, sound effects, transitions, timing) re-render for 0 credits.
 
-**Drama series** (`shared/drama.ts`; a test, for administrators only). A series that tells one continuing story in
+**Drama series** (`shared/drama.ts`). A series that tells one continuing story in
 episodes, as a setting of a story series (`drama` in its settings), not a page or a template of its own: schedule,
 channels, review and notices are the series'. Its settings add a **premise**, a number of **episodes** and a **cast**
 of up to three, each with a name, who they are, a look and a voice (`dramaSchema`; checked in `checkSettings`, which
@@ -166,8 +166,7 @@ refuses a drama to anyone but administrators and on other than story styles).
   scene's picture to fal's MiniMax H3 Max Lip Sync (`minimax/h3-max/lip-sync/image-to-video`: `image_url`,
   `audio_url`, `resolution` 768P; about $0.08 a second). The clip plays silent over the one recording. It is charged
   as a high-quality clip of the scene's length (2 credits per 5 s), counted in the episode's price (`lipSyncCredits`),
-  and made again whenever the voice is recorded again (`pendingMedia`). Only administrators can make a video with
-  lip-synced scenes (`checkFilm`).
+  and made again whenever the voice is recorded again (`pendingMedia`).
 - **Film** (an option of a drama, `film`, in place of lip-sync). The episode is shot like a film: written in shots,
   every one a video clip, in scenes that hold together. Who speaks is `filmVoices`:
   - *The cast's exact voices* (`"exact"`, the default; `shotsSpec(spec, "exact")`). The episode keeps its narration:
@@ -217,8 +216,7 @@ refuses a drama to anyone but administrators and on other than story styles).
     any AI clip clears its `clipId` (and `take`), so the next save makes that clip alone again from the same picture,
     at the clip's price; **New picture and take** redraws the picture first. New words, another tone or another
     voice for a shot change its `takeKey`, which asks for a new take the same way (`pendingMedia`).
-  - Only administrators can make a video with acted shots, and a film has no background clip, presenter or own
-    recording (`checkFilm`).
+  - A film has no background clip, presenter or own recording (`checkFilm`).
 The series page shows the story so far (`story` in `GET /api/series/:id`). Edits that move a lip-synced scene's edges
 after it is made (free edits) are not followed by a new lip-sync; in a film, moving an edge changes two shots' words,
 so both are taken again.
@@ -233,7 +231,7 @@ the centre of at most half of its pictures. Before it, a video came out as seven
 facts) and Holiday greeting (a wish to the people the owner names), drawn in the art style Festive
 (`shared/styles.ts`, its sample in `src/art.tsx`).
 
-**Photos of people** (`shared/people.ts`; a test, for administrators until `PEOPLE_PHOTOS_OPEN`). A Holiday greeting
+**Photos of people** (`shared/people.ts`; everyone's, `PEOPLE_PHOTOS_OPEN`). A Holiday greeting
 takes one to four photos of the people it greets (the `people` of its spec, with `consent: true`: the owner ticks
 that they have those people's permission, each time; the terms say so). The writer is told the people are in most
 pictures and never to describe them (`PEOPLE_RULE`); every picture is drawn with the photos as its references (role
@@ -242,7 +240,7 @@ and no reference sheet is drawn. The photos are the owner's uploads, checked to 
 saved, handed to fal as capability links while the run works, and never shown in the video themselves. A picture the
 model refuses is drawn once more with the fallback model, as any picture is.
 
-**Product ads** (`shared/ad.ts`; a test, for administrators). A short ad filmed from the owner's photos of a
+**Product ads** (`shared/ad.ts`). A short ad filmed from the owner's photos of a
 product: the video kind `ad`, with the `product` of its spec (one to four of the owner's uploaded pictures, and the
 product's name). In Create an administrator picks the Product ad style (the template `ad`, marked `test`: hidden from
 everyone else, from the public pages, series and the API), adds the photos, says what the product is and chooses 15,
@@ -262,7 +260,10 @@ hard cut, with no character of the writer's, no background clip, presenter or li
 It costs the video by its length plus every shot as a high-quality clip (two credits per five seconds): 7 credits
 for a 15-second ad of three shots. The photos stay the owner's uploads: they are checked to be their pictures when
 the video is saved (`server/videos.ts`), handed to fal as capability links while the run works, and never shown in
-the video themselves. Only administrators draft, make or remake one (`draftVideo`, `checkFilm`).
+the video themselves. Everyone's ads are filmed with the site's one model (`siteAdModel` in `server/ad.ts`: `AD_MODEL`, else
+MiniMax); an administrator chooses among all the site can run (HeyGen's only with its key). The draft is written with
+that model whatever was asked, a spec with another is refused (a video made earlier keeps its own), and the form shows
+the choice only where there is one (`adModels` of `/api/auth/me`). A series and the API do not make ads (they take no photos).
 
 Four video models are being compared, chosen in the ad's form (the product's `model`). The above is `minimax`. With
 `heygen`, HeyGen Video 1 films every shot instead (`server/providers/heygen.ts`, the clip model `heygen-video-1`
@@ -839,8 +840,8 @@ checks as the app; making a video through the API is limited to 30 an hour.
 ## The assistant
 
 A chat in which an agent makes videos with the app's own tools (`shared/agent.ts`, `server/agent.ts`,
-`src/app/Agent.tsx`, `/app/assistant`). A test: administrators only, in the menu and on the server, until
-`AGENT_OPEN` in `shared/agent.ts`.
+`src/app/Agent.tsx`, `/app/assistant`). Everyone's (`AGENT_OPEN` in `shared/agent.ts`); every message is a paid call
+to the model, so a free account has 15 a day and a paid one 200.
 
 - **The loop** runs in the Worker. A turn asks the model, runs the tools it calls and gives their results back, up to
   ten rounds, until it answers in words. The model is Claude Sonnet 5.5 (`AGENT_MODEL`, default
@@ -853,7 +854,7 @@ A chat in which an agent makes videos with the app's own tools (`shared/agent.ts
   error), the last one the chat as it stands, with a comment line every ten
   seconds so a long step is never a silent connection. The screen shows them as they come; a chat opened while a turn
   runs elsewhere (`busy`) is read again until it has ended. One turn at a time per chat
-  (`busy_until`); 40 turns an hour and 200 a day per person.
+  (`busy_until`); 40 turns an hour per person, and 200 a day on a paid plan, 15 on the free one.
 - **Tools**: those of the API and MCP server under the same names (`callTool` in `server/api.ts`: video types,
   videos, series, long videos, clips, the account), and the assistant's own: `list_voices`, `search_library`,
   `list_my_files`, `show_media`, `suggest_replies` (answers to tap under a question; it ends the turn), `write_draft`,

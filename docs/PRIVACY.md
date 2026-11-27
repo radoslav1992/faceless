@@ -97,19 +97,22 @@ Workers Logs carry user, run and publication IDs and short error codes, never em
 messages (`server/error-report.ts` scrubs messages). Keep the Cloudflare log retention at 30 days or less
 (docs/OPERATIONS.md).
 
-## Photos of people (a test)
+## Photos of people
 
 In a Holiday greeting an owner can add photos of the people they greet (`shared/people.ts`). They are ordinary
 uploads of the owner's: kept in their storage until they delete them, sent to fal (the picture provider) as
 short-lived capability links while the video's pictures are drawn, and never shown in the video. The owner confirms
 each time that they have those people's permission (kept with the video as `people.consent`); the terms of both sites
-say so since 2026-11-23. Photos of other people are personal data of people who are not users: the lawful basis rests
-on the owner's confirmation, which a lawyer should review before the feature is opened to everyone.
+say so since 2026-11-23, and the privacy pages name fal as receiving them since 2026-11-27. Photos of other people are
+personal data of people who are not users: the lawful basis rests on the owner's confirmation. The feature was opened
+to everyone on 2026-11-27 without a lawyer's review of that clause; have it reviewed.
 
-## The assistant (a test)
+## The assistant
 
 A person's chats with the assistant (`agent_chats`, `agent_messages`), the drafts it wrote (`agent_drafts`) and their
 own skills (`agent_skills`) are kept until they delete the chat or the skill, and go with the account. Every message,
 with the chat so far and the names of the tools, is sent to the assistant's model (Claude, by Anthropic) through
 Cloudflare Workers AI, as scripts are sent to the text models. The model's thinking is not stored. Logs never hold the
 conversation.
+The privacy pages of both sites say so since 2026-11-27 (the data list, the Cloudflare row of the processors, which
+names the models' makers, and how long chats are kept).

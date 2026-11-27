@@ -54,9 +54,10 @@ function setup() {
 }
 
 describe("drama series", () => {
-  it("are for administrators, on story styles, with a cast whose voices are offered", async () => {
+  it("run on story styles, with a cast whose voices are offered", async () => {
     const s = setup();
-    expect(await s.create(s.user)).toMatchObject({ status: 403, data: { error: expect.stringContaining("still being tested") } });
+    // Anyone's: an ordinary account starts one.
+    expect((await s.create(s.user)).status).toBe(201);
     expect((await s.create(s.admin, { template: "pov" })).status).toBe(400);
     expect((await s.create(s.admin, { settings: s.settings({ drama: { ...drama, cast: [{ ...cast[0], voiceId: "nobody" }] } }) })).status).toBe(400);
     // A premise, and a name and a look for everyone; no two characters of one name, none called Narrator, at most three.

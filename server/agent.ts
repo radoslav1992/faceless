@@ -22,7 +22,7 @@ import { SECONDS_PER_CREDIT } from "../shared/credits";
 import { SITE } from "../shared/site";
 import { t } from "../shared/i18n";
 import {
-  AGENT_MESSAGE_MAX, AGENT_OPEN, SKILL_BODY_MAX, SKILL_DESCRIPTION_MAX, SKILL_NAME_MAX, SKILLS_MAX,
+  AGENT_DAILY, AGENT_DAILY_FREE, AGENT_HOURLY, AGENT_MESSAGE_MAX, AGENT_OPEN, SKILL_BODY_MAX, SKILL_DESCRIPTION_MAX, SKILL_NAME_MAX, SKILLS_MAX,
   type Card, type ChatItem, type DraftCard, type MediaItem, type PendingAction, type SkillView, type Step, type TurnEvent,
 } from "../shared/agent";
 
@@ -732,8 +732,11 @@ agent.delete("/chats/:id", async (c) => {
  */
 async function turn(c: Context<App>, chat: Chat, prepare: (run: Run, rows: Row[]) => Promise<boolean>) {
   const env = c.env, user = c.get("user");
-  if ((await hit(env, "agent-turn", 3600, user.id)) > 40) throw new HTTPException(429, { message: "That's a lot of messages for one hour. Try again later." });
-  if ((await hit(env, "agent-turn-day", 86400, user.id)) > 200) throw new HTTPException(429, { message: "That's a lot of messages for one day. Try again tomorrow." });
+  // Every message is a paid call to the model: a free account has a few a day to try it, a paid one many.
+  const free = (await allowance(env, user)).plan === "free" && !isAdmin(env, user);
+  if ((await hit(env, "agent-turn", 3600, user.id)) > AGENT_HOURLY) throw new HTTPException(429, { message: "That's a lot of messages for one hour. Try again later." });
+  if ((await hit(env, "agent-turn-day", 86400, user.id)) > (free ? AGENT_DAILY_FREE : AGENT_DAILY))
+    throw new HTTPException(429, { message: free ? `The free plan has ${AGENT_DAILY_FREE} assistant messages a day. Upgrade for more, or come back tomorrow.` : "That's a lot of messages for one day. Try again tomorrow." });
   // One turn at a time in a chat (a turn that died frees it after ten minutes).
   const t = now();
   const locked = await env.DB.prepare("UPDATE agent_chats SET busy_until=? WHERE id=? AND busy_until<?").bind(t + 600, chat.id, t).run();

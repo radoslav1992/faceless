@@ -995,8 +995,8 @@ describe("narrated videos in the content run", () => {
     expect(plain.segments.every((s) => !s.audio)).toBe(true);
   });
 
-  it("makes a product ad for an administrator: shots drawn and filmed with the product's photos, their sound under the voice, no film look", async () => {
-    const { env, sqlite, user, own, run } = await setup();
+  it("makes a product ad: shots drawn and filmed with the product's photos, their sound under the voice, no film look", async () => {
+    const { env, user, own, run } = await setup();
     const product = { assets: [own], name: "Aqua Steel", model: "minimax" as const };
     const brief = { template: "ad", prompt: "A steel water bottle that keeps drinks cold for 24 hours", seconds: 15, product };
     const lines = ["Hot day, warm water again?", "Aqua Steel keeps your drink cold for 24 hours.", "Try it today."];
@@ -1004,14 +1004,9 @@ describe("narrated videos in the content run", () => {
       title: "Aqua Steel", topic: "steel bottle", caption: "Cold for a whole day.", hashtags: ["bottle"], headline: "Aqua Steel", subject: "", look: "A bright kitchen in the morning.", places: [], music: "",
       scenes: lines.map((text, n) => ({ text, picture: `A hand lifts the product from a table, shot ${n + 1}`, keys: [], tone: "", place: "" })),
     }) });
-    // A test: nobody but an administrator drafts one, or makes one drafted elsewhere.
-    expect((await call(worker, env, "POST", "/api/story/draft", brief, user.cookie)).status).toBe(403);
+    // Anyone's: drafted and made by an ordinary account.
     const plain = specSchema.parse({ format: "story", narration: { kind: "voice", voiceId: "george" }, scenes: lines.map((text, n) => ({ text, description: `A hand lifts the product, shot ${n + 1}`, keys: [] })) }) as StorySpec;
     const ad = adSpec(plain, product);
-    const refused = await call(worker, env, "POST", "/api/videos", { spec: ad, idempotencyKey: crypto.randomUUID() }, user.cookie);
-    expect(refused.status).toBe(403);
-    expect(refused.data.error).toBe("Product ads are still being tested and aren't available yet.");
-    sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
     // It needs a photo of the product and what the product is.
     expect((await call(worker, env, "POST", "/api/story/draft", { ...brief, product: undefined }, user.cookie)).data.error).toBe("Add a photo of the product first.");
     expect((await call(worker, env, "POST", "/api/story/draft", { ...brief, prompt: "" }, user.cookie)).data.error).toBe("Say what the product is first.");
@@ -1111,7 +1106,7 @@ describe("narrated videos in the content run", () => {
     expect(new Set(asked.filter((a) => a !== writer).map((a) => a.model))).toEqual(new Set(["openai/gpt-6-luna"]));
   });
   it("draws the people of a greeting into its pictures from their photos, with the owner's word that they may use them", async () => {
-    const { env, sqlite, user, own, run } = await setup();
+    const { env, user, own, run } = await setup();
     const people = { assets: [own], consent: true as const };
     const brief = { template: "greeting", prompt: "Happy New Year to grandma and grandpa from their grandchildren", seconds: 30, people };
     const lines = ["Dear grandma and grandpa, thank you for this year.", "We wish you health and a warm home.", "Happy New Year from all of us."];
@@ -1123,16 +1118,13 @@ describe("narrated videos in the content run", () => {
         scenes: lines.map((text, n) => ({ text, picture: `Medium shot, the people from the photos by the tree, moment ${n + 1}`, keys: [], tone: "", place: "" })),
       }) };
     };
-    // A test: an administrator's, until it is opened.
-    expect(PEOPLE_PHOTOS_OPEN).toBe(false);
-    const refusedDraft = await call(worker, env, "POST", "/api/story/draft", brief, user.cookie);
-    expect([refusedDraft.status, refusedDraft.data.error]).toEqual([403, "Photos of people are still being tested and aren't available yet."]);
-    // Without photos the greeting is anyone's, as any style.
+    // Anyone's (an ordinary account drafts and makes it).
+    expect(PEOPLE_PHOTOS_OPEN).toBe(true);
+    // Without photos the greeting is written as any style is.
     expect((await call(worker, env, "POST", "/api/story/draft", { ...brief, people: undefined }, user.cookie)).status).toBe(200);
     // (The writer's instructions: the sound effects are chosen by a call after it.)
     const written = () => seen.filter((i) => i.startsWith("You write the script")).at(-1)!;
     expect(written()).not.toContain(PEOPLE_RULE);
-    sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
     // The owner's word is required, and only a style that takes people takes them.
     expect((await call(worker, env, "POST", "/api/story/draft", { ...brief, people: { assets: [own] } }, user.cookie)).status).toBe(400);
     expect((await call(worker, env, "POST", "/api/story/draft", { ...brief, template: "facts" }, user.cookie)).data.error).toBe("This style doesn't take photos of people.");
@@ -1225,6 +1217,43 @@ describe("narrated videos in the content run", () => {
     }
     expect(asked[0].body.prompt).toMatch(/^A hand lifts the product, shot 1\. A slow push-in on the product\./);
     expect(video.spec.scenes.every((s: any) => s.clipId)).toBe(true);
+  });
+
+  it("films everyone's product ads with the site's one model; an administrator chooses among them", async () => {
+    const { env, sqlite, user, own } = await setup();
+    const lines = ["Hot day, warm water again?", "Aqua Steel keeps your drink cold for 24 hours.", "Try it today."];
+    env.AI.run = async () => ({ status: "completed", output_text: JSON.stringify({
+      title: "Aqua Steel", topic: "steel bottle", caption: "Cold for a whole day.", hashtags: ["bottle"], headline: "Aqua Steel", subject: "", look: "A bright kitchen.", places: [], music: "",
+      scenes: lines.map((text, n) => ({ text, picture: `A hand lifts the product from a table, shot ${n + 1}`, keys: [], tone: "", place: "" })),
+    }) });
+    const me = async () => (await call(worker, env, "GET", "/api/auth/me", undefined, user.cookie)).data.user;
+    const draft = async (model: string) => (await call(worker, env, "POST", "/api/story/draft", { template: "ad", prompt: "A steel water bottle", seconds: 15, product: { assets: [own], name: "Aqua Steel", model } }, user.cookie)).data.spec;
+    const make = (spec: unknown) => call(worker, env, "POST", "/api/videos", { spec, idempotencyKey: crypto.randomUUID() }, user.cookie);
+    // An ordinary account has no choice: whatever model is asked for, the ad is drafted with the site's (MiniMax).
+    expect((await me()).adModels).toEqual(["minimax"]);
+    const mine = await draft("seedance-25");
+    expect(mine.product.model).toBe("minimax");
+    // A spec written by hand with another model is refused; the site's is made.
+    const other = adSpec(specSchema.parse({ format: "story", narration: { kind: "voice", voiceId: "george" }, scenes: lines.map((text, n) => ({ text, description: `A hand lifts the product, shot ${n + 1}`, keys: [] })) }) as StorySpec, { assets: [own], name: "Aqua Steel", model: "seedance" });
+    expect(await make(other)).toMatchObject({ status: 403, data: { error: "This video model isn't available." } });
+    const made = await make(mine);
+    expect(made.status).toBe(201);
+    // The operator sets the site's model (AD_MODEL); one the site can't run (HeyGen without its key) is not taken.
+    env.AD_MODEL = "seedance";
+    expect((await me()).adModels).toEqual(["seedance"]);
+    expect((await draft("minimax")).product.model).toBe("seedance");
+    // A video made with the earlier model keeps it when it is edited.
+    const stored = (await call(worker, env, "GET", `/api/videos/${made.data.id}`, undefined, user.cookie)).data.video.spec;
+    expect((await call(worker, env, "PUT", `/api/videos/${made.data.id}`, { spec: { ...stored, title: "Aqua Steel, again" }, idempotencyKey: crypto.randomUUID() }, user.cookie)).status).not.toBe(403);
+    env.AD_MODEL = "heygen";
+    expect((await me()).adModels).toEqual(["minimax"]);
+    delete env.AD_MODEL;
+    // An administrator chooses among all the site can run, to compare them.
+    sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
+    expect((await me()).adModels).toEqual(["minimax", "seedance", "seedance-25"]);
+    expect((await draft("seedance-25")).product.model).toBe("seedance-25");
+    env.HEYGEN_API_KEY = "hg";
+    expect((await me()).adModels).toEqual(["minimax", "heygen", "seedance", "seedance-25"]);
   });
 
   it("films a product ad in one shot with Seedance: one clip from the photos after the voice, played behind the whole ad with its sound", async () => {
@@ -1379,9 +1408,7 @@ describe("narrated videos in the content run", () => {
     const talk = lipSyncSpec({ ...spec, scenes: spec.scenes.map((s, i) => ({ ...s, source: "image" as const, assetId: undefined, ...(i === 1 && { voiceId: "sarah", speaker: "Mara" }) })) });
     expect(talk.scenes.map((s) => [s.source, s.lipSync ?? null, s.transition])).toEqual([["image", null, "auto"], ["clip", true, "cut"], ["image", null, "auto"], ["image", null, "auto"], ["image", null, "circleopen"]]);
     expect(specCredits(talk, true)).toBe(videoCredits(estimatedSeconds(talk)) + CLIP_CREDITS.high * (talk.scenes[1].clipSeconds / 5));
-    // A test for administrators.
-    expect(await call(worker, env, "POST", "/api/videos", { spec: talk, idempotencyKey: crypto.randomUUID() }, user.cookie)).toMatchObject({ status: 403, data: { error: expect.stringContaining("Lip-synced scenes") } });
-    sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
+    // Anyone's: an ordinary account makes it.
     const created = await call(worker, env, "POST", "/api/videos", { spec: talk, idempotencyKey: crypto.randomUUID() }, user.cookie);
     expect(created.status).toBe(201);
     await run();
@@ -1438,9 +1465,7 @@ describe("narrated videos in the content run", () => {
     // Its price: the video by its length and every shot as a high-quality clip (a long line is a ten-second one); no narration.
     expect(film.scenes.map((s) => s.clipSeconds)).toEqual([5, 10, 5, 5, 5]);
     expect(specCredits(film, true)).toBe(videoCredits(estimatedSeconds(film)) + CLIP_CREDITS.high * 6);
-    // A test for administrators.
-    expect(await call(worker, env, "POST", "/api/videos", { spec: film, idempotencyKey: crypto.randomUUID() }, user.cookie)).toMatchObject({ status: 403, data: { error: expect.stringContaining("Films of acted shots") } });
-    sqlite.prepare("UPDATE users SET email='admin@example.com' WHERE id=?").run(user.id);
+    // Anyone's: an ordinary account makes it.
     const before = used();
     const created = await call(worker, env, "POST", "/api/videos", { spec: film, idempotencyKey: crypto.randomUUID() }, user.cookie);
     expect(created.status).toBe(201);
